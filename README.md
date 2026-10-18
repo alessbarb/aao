@@ -22,6 +22,7 @@ Requires Python 3.12+.
 python -m pip install -e '.[dev]'
 export AAO_CEO_TOKEN='local-dev-only-change-me'
 export AAO_WORK_TOKEN='local-worker-only-change-me'
+export AAO_REVIEW_TOKEN='local-review-only-change-me'
 uvicorn aao.main:app --reload
 pytest -q
 ```
@@ -41,3 +42,9 @@ Do not expose this dev server publicly; the development token headers are not su
 - Autonomous rollout is gradual and begins in an isolated environment.
 
 See [Constitution](docs/CONSTITUTION.md).
+
+## M1 candidate (development only)
+
+This branch adds declared work author identity, separate reviewer token, review decision records, and gated transitions into VERIFIED/DONE. Pause/resume is available to the development worker credential; cancellation requires CEO credentials. None of these tokens establish real actor identity or independent auditor authority. Read APIs are still unscoped and must remain on a trusted development network.
+
+The SQLite schema uses additive prototype initialization; PostgreSQL migrations, verified authN/authZ, actual evidence checking, independent audit, distributed execution and a UI remain necessary. See [M1 scope](docs/M1_SCOPE.md).
