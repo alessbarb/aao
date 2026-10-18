@@ -34,7 +34,7 @@ def test_mandate_and_kanban_gates():
             assert r.status_code == 201
             project = r.json()["id"]
             assert client.post(f"/v1/projects/{project}/work", json={"title":"First task","acceptance_criteria":["Output checked"],"author_id":"engineer-1"}).status_code == 403
-            work = client.post(f"/v1/projects/{project}/work", json={"title":"First task","acceptance_criteria":["Output checked"]}, headers=worker_headers).json()["id"]
+            work = client.post(f"/v1/projects/{project}/work", json={"title":"First task","acceptance_criteria":["Output checked"],"author_id":"engineer-1"}, headers=worker_headers).json()["id"]
             assert client.post(f"/v1/work/{work}/transition", json={"status": "DONE"}, headers=worker_headers).status_code == 409
             for status in ("READY", "IN_PROGRESS", "IN_REVIEW"):
                 assert client.post(f"/v1/work/{work}/transition", json={"status": status}, headers=worker_headers).status_code == 200
