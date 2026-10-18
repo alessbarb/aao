@@ -48,3 +48,18 @@ See [Constitution](docs/CONSTITUTION.md).
 This branch adds declared work author identity, separate reviewer token, review decision records, and gated transitions into VERIFIED/DONE. Pause/resume is available to the development worker credential; cancellation requires CEO credentials. None of these tokens establish real actor identity or independent auditor authority. Read APIs are still unscoped and must remain on a trusted development network.
 
 The SQLite schema uses additive prototype initialization; PostgreSQL migrations, verified authN/authZ, actual evidence checking, independent audit, distributed execution and a UI remain necessary. See [M1 scope](docs/M1_SCOPE.md).
+
+## Latest increment: M1/M2 engineering candidates
+
+The branch also contains:
+- a PostgreSQL foundation schema (NOT wired to the API yet);
+- pure project-scoped grant checks with expiry;
+- a deterministic admission policy with resource/risk gates;
+- a development-only reviewer workflow and project pause/resume/cancel;
+- an **inert SQLite-backed durable execution queue** with lease quarantine and explicit reconciliation.
+
+The execution queue is intentionally not callable by AI models, does not perform external effects, and is not a production distributed workflow engine.
+
+Critical remaining gates: database cutover, trusted identities, DB-scoped permissions and read isolation, independent reviewer attestation, effect ledger, external tool authorization, real worker runtime, evaluation suite and deployment controls.
+
+See [M1 scope](docs/M1_SCOPE.md), [PostgreSQL/authorization](docs/POSTGRES_AUTH_MIGRATION.md) and [M2 execution boundary](docs/M2_EXECUTION_BOUNDARY.md).
