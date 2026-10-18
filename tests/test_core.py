@@ -21,6 +21,7 @@ def test_mandate_and_kanban_gates():
         main.DB_PATH = os.path.join(tmp, "test.db")
         main.CEO_TOKEN = "test-ceo-secret"
         main.WORK_TOKEN = "test-worker-secret"
+        main.REVIEW_TOKEN = "test-review-secret"
         with TestClient(main.app) as client:
             headers = {"X-CEO-Token": "test-ceo-secret"}
             worker_headers = {"X-Work-Token": "test-worker-secret"}
@@ -32,11 +33,15 @@ def test_mandate_and_kanban_gates():
             r = client.post("/v1/projects", json={"name": "Pilot", "mandate_id": mandate}, headers=headers)
             assert r.status_code == 201
             project = r.json()["id"]
-            assert client.post(f"/v1/projects/{project}/work", json={"title":"First task","acceptance_criteria":["Output checked"]}).status_code == 403
+            assert client.post(f"/v1/projects/{project}/work", json={"title":"First task","acceptance_criteria":["Output checked"],"author_id":"engineer-1"}).status_code == 403
             work = client.post(f"/v1/projects/{project}/work", json={"title":"First task","acceptance_criteria":["Output checked"]}, headers=worker_headers).json()["id"]
             assert client.post(f"/v1/work/{work}/transition", json={"status": "DONE"}, headers=worker_headers).status_code == 409
             for status in ("READY", "IN_PROGRESS", "IN_REVIEW"):
                 assert client.post(f"/v1/work/{work}/transition", json={"status": status}, headers=worker_headers).status_code == 200
             assert client.post(f"/v1/work/{work}/transition", json={"status": "VERIFIED", "evidence":["example"]}, headers=worker_headers).status_code == 409
-            assert client.get(f"/v1/projects/{project}/board").json()[0]["status"] == "IN_REVIEW"
+            reviewer = {"X-Review-Token": "test-review-secret"}
+            assert client.post(f"/v1/work/{work}/reviews", json={"reviewer_id":"engineer-1","decision":"APPROVE","evidence":["proof"]},headers=reviewer).status_code == 409
+            assert client.post(f"/v1/work/{work}/reviews", json={"reviewer_id":"auditor-1","decision":"APPROVE","evidence":["proof"]},headers=reviewer).status_code == 201
+            assert client.post(f"/v1/work/{work}/transition", json={"status":"DONE"}, headers=worker_headers).status_code == 200
+            assert client.get(f"/v1/projects/{project}/board").json()[0]["status"] == "DONE"
             assert len(client.get("/v1/events").json()) >= 6
