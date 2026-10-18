@@ -9,17 +9,21 @@ from pydantic import BaseModel, Field
 
 from aao.policy import Verdict, authorize
 from aao.review import evaluate_review
+from aao.execution import initialize as initialize_queue
+from aao.planner import Admission, decide_admission
 from aao.storage import connect, event, initialize, transaction
 
 DB_PATH = os.getenv("AAO_DB_PATH", "./data/aao.sqlite3")
 CEO_TOKEN = os.getenv("AAO_CEO_TOKEN")
 WORK_TOKEN = os.getenv("AAO_WORK_TOKEN")
 REVIEW_TOKEN = os.getenv("AAO_REVIEW_TOKEN")
+SANDBOX_QUEUE_ENABLED = os.getenv("AAO_SANDBOX_QUEUE_ENABLED", "false").lower() == "true"
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     initialize(DB_PATH)
+    initialize_queue(DB_PATH)
     yield
 
 
@@ -257,3 +261,47 @@ def resume_project(project_id: str, _: bool = Depends(require_worker)):
 @app.post("/v1/projects/{project_id}/cancel")
 def cancel_project(project_id: str, _: bool = Depends(require_ceo)):
     return change_project_state(project_id, None, "CANCELLED")
+
+@app.post("/v1/work/{work_id}/sandbox-queue", status_code=202)
+def sandbox_queue_work(work_id: str, _: bool = Depends(require_worker)):
+    """Atomically enqueue inert development work, never commands or LLM calls.
+
+    This route cannot run arbitrary work: it accepts no tool or model arguments.
+    Real project grants, risk assessment and budget gates remain future work.
+    """
+    if not SANDBOX_QUEUE_ENABLED:
+        raise HTTPException(503, "Inert sandbox queue is disabled")
+    with transaction(DB_PATH) as db:
+        work = db.execute("SELECT * FROM work_items WHERE id=?", (work_id,)).fetchone()
+        if not work:
+            raise HTTPException(404, "Work not found")
+        project = db.execute(
+            "SELECT p.state,m.status AS mandate_status FROM projects p "
+            "JOIN mandates m ON m.id=p.mandate_id WHERE p.id=?",
+            (work["project_id"],),
+        ).fetchone()
+        # Sandbox admission permits only harmless inert payloads. No external
+        # operations can be requested by this endpoint.
+        verdict = decide_admission(
+            project_active=project["state"] == "ACTIVE",
+            mandate_confirmed=project["mandate_status"] == "CONFIRMED",
+            authorized=True, dependencies_satisfied=True,
+            capacity_available=True, within_budget=True,
+            residual_risk="low", emergency_stop=False,
+        )
+        if verdict.status != Admission.READY or work["status"] != "READY":
+            raise HTTPException(409, "Work not ready for inert sandbox admission")
+        prior = db.execute(
+            "SELECT id FROM execution_queue WHERE work_id=?", (work_id,),
+        ).fetchone()
+        if prior:
+            return {"execution_id": prior["id"], "status": "QUEUED_OR_EXISTING"}
+        execution_id = str(uuid4())
+        db.execute(
+            "INSERT INTO execution_queue(id,project_id,work_id,input_json,status) "
+            "VALUES (?,?,?,?,'QUEUED')",
+            (execution_id, work["project_id"], work_id,
+             json.dumps({"kind": "aao.inert-sandbox.v1", "title": work["title"]})),
+        )
+        event(db, execution_id, "sandbox.queued", {"work_id": work_id})
+        return {"execution_id": execution_id, "status": "QUEUED"}
