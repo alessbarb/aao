@@ -63,3 +63,22 @@ The execution queue is intentionally not callable by AI models, does not perform
 Critical remaining gates: database cutover, trusted identities, DB-scoped permissions and read isolation, independent reviewer attestation, effect ledger, external tool authorization, real worker runtime, evaluation suite and deployment controls.
 
 See [M1 scope](docs/M1_SCOPE.md), [PostgreSQL/authorization](docs/POSTGRES_AUTH_MIGRATION.md) and [M2 execution boundary](docs/M2_EXECUTION_BOUNDARY.md).
+
+## Read-only workboard and inert queue prototype
+
+The FastAPI root route `/` now serves a **read-only HTML Kanban** based on the actual
+`/v1/projects` and `/v1/projects/{id}/board` API endpoints. No demo data or
+background animations are presented as actual work.
+
+The optional `/v1/work/{id}/sandbox-queue` endpoint bridges the existing work
+board and execution queue. It is disabled by default. For **local isolated
+development only**, set `AAO_SANDBOX_QUEUE_ENABLED=true` before starting the API.
+Its admission check only accepts a task already marked READY in an active
+project with a confirmed mandate and enqueues a constant inert payload.
+It does **not** execute tools, models or arbitrary user-specified commands.
+It is not a substitute for trusted identity, resources, risks and project
+permissions. Never enable it on a public or shared network.
+
+The initial project workboard and the queue have automated test cases committed
+but **their execution remains unverified in this session**. Do not promote or
+deploy until runtime verification and independent security review.
