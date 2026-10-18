@@ -1,0 +1,63 @@
+<!doctype html>
+<html lang="es">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>AAO — Internal Workboard</title>
+  <style>
+    :root{font-family:system-ui,-apple-system,sans-serif;color-scheme:dark;background:#10151c;color:#e9eef6}
+    body{margin:0;padding:26px;max-width:1200px;margin-inline:auto}
+    header{display:flex;align-items:center;justify-content:space-between;gap:20px}
+    h1{font-size:1.45rem}h2{font-size:1.1rem}p,small{color:#aeb9c9}
+    button,select{background:#263242;color:#fff;border:1px solid #455365;border-radius:8px;padding:10px}
+    button{cursor:pointer}button:focus-visible,select:focus-visible{outline:3px solid #8ec5ff}
+    .board{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:14px;margin-top:22px}
+    .column{background:#19222d;padding:12px;border-radius:10px;min-height:150px}
+    .card{background:#263242;border:1px solid #3a4b60;padding:12px;margin-top:10px;border-radius:8px}
+    .meta{font-size:.8rem;color:#aeb9c9}.error{color:#ffb4b4}
+    @media(max-width:720px){.board{grid-template-columns:1fr}header{display:block}}
+  </style>
+</head>
+<body>
+  <header><div><h1>AAO · Workboard</h1><p>Vista de solo lectura · datos reales del núcleo local</p></div>
+  <div><select id="project" aria-label="Proyecto"></select> <button id="reload">Actualizar</button></div></header>
+  <div id="message" role="status"></div>
+  <section id="board" class="board" aria-label="Kanban"></section>
+  <script>
+    const states=["INBOX","READY","IN_PROGRESS","IN_REVIEW","VERIFIED","DONE"];
+    const labels={INBOX:"Entrada",READY:"Preparado",IN_PROGRESS:"En curso",IN_REVIEW:"Revisión",VERIFIED:"Verificado",DONE:"Completado"};
+    const project=document.querySelector("#project"),board=document.querySelector("#board"),message=document.querySelector("#message");
+    function node(tag,text,cls){const e=document.createElement(tag);e.textContent=text;if(cls)e.className=cls;return e}
+    async function json(url){const r=await fetch(url,{credentials:"same-origin"});if(!r.ok)throw new Error("HTTP "+r.status);return r.json()}
+    async function loadProjects(){
+      const projects=await json("/v1/projects"); const previous=project.value;
+      project.replaceChildren();
+      for(const p of projects){const opt=node("option",p.name+" · "+p.state);opt.value=p.id;project.append(opt)}
+      if(projects.some(p=>p.id===previous))project.value=previous;
+      if(projects.length)await loadBoard();else {board.replaceChildren();message.textContent="Sin proyectos autorizados"}
+    }
+    async function loadBoard(){
+      if(!project.value)return;
+      message.textContent="Cargando...";
+      try{
+        const work=await json("/v1/projects/"+encodeURIComponent(project.value)+"/board");
+        board.replaceChildren();
+        for(const state of states){
+          const col=node("section","","column");col.append(node("h2",labels[state]));
+          const tasks=work.filter(w=>w.status===state);
+          col.append(node("small",tasks.length+" tareas"));
+          for(const task of tasks){const card=node("article","","card");
+            card.append(node("strong",task.title),node("div",task.id.slice(0,8),"meta"));
+            const criteria=Array.isArray(task.acceptance_criteria)?task.acceptance_criteria.length:0;
+            card.append(node("div",criteria+" criterios de aceptación","meta"));col.append(card)}
+          board.append(col)
+        }
+        message.textContent="Mostrando "+work.length+" tareas · sin ejecución autónoma";
+      }catch(e){message.replaceChildren(node("p","No se pudo cargar el Kanban: "+e.message,"error"))}
+    }
+    document.querySelector("#reload").addEventListener("click",()=>loadProjects().catch(e=>message.textContent=e.message));
+    project.addEventListener("change",loadBoard);
+    loadProjects().catch(e=>message.textContent="No se pudo cargar: "+e.message);
+  </script>
+</body>
+</html>
