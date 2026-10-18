@@ -8,6 +8,7 @@ from datetime import datetime, timedelta, timezone
 from uuid import uuid4
 
 from aao.postgres import connect_postgres
+from aao.worker_auth import verify_registered_worker
 
 
 class ExecutionConflict(ValueError):
@@ -21,14 +22,17 @@ def journal(db, execution_id: str, kind: str, details: dict):
     )
 
 
-def claim(worker_id: str, *, seconds: int = 60, now: datetime | None = None):
+def claim(worker_id: str, *, credential: str | None = None, seconds: int = 60, now: datetime | None = None):
     if not worker_id or seconds < 1:
         raise ExecutionConflict("Worker and positive lease duration required")
     instant = now or datetime.now(timezone.utc)
     with connect_postgres() as db:
+        registration = db.execute("SELECT token_digest,enabled FROM worker_registrations WHERE worker_id=%s FOR SHARE", (worker_id,)).fetchone()
+        if not registration or not verify_registered_worker(worker_id, credential, digest=registration[0], enabled=registration[1]):
+            raise ExecutionConflict("Worker authentication failed")
         row = db.execute(
-            "SELECT id FROM execution_queue WHERE status='QUEUED' "
-            "ORDER BY created_at,id FOR UPDATE SKIP LOCKED LIMIT 1"
+            "SELECT q.id FROM execution_queue q JOIN projects p ON p.id=q.project_id WHERE q.status='QUEUED' AND p.state='ACTIVE' "
+            "ORDER BY q.created_at,q.id FOR UPDATE OF q SKIP LOCKED LIMIT 1"
         ).fetchone()
         if not row:
             return None
@@ -52,7 +56,7 @@ def complete(execution_id: str, token: str, worker_id: str, result: dict,
         updated = db.execute(
             "UPDATE execution_queue SET status='SUCCEEDED',result_json=%s::jsonb "
             "WHERE id=%s AND status='RUNNING' AND lease_token=%s "
-            "AND worker_id=%s AND lease_expires_at>%s RETURNING id",
+            "AND worker_id=%s AND lease_expires_at>%s AND EXISTS (SELECT 1 FROM projects p WHERE p.id=execution_queue.project_id AND p.state='ACTIVE') RETURNING id",
             (json.dumps(result), execution_id, token, worker_id, instant),
         ).fetchone()
         if not updated:
