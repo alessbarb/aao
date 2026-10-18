@@ -43,7 +43,7 @@ def test_mandate_and_kanban_gates():
             assert client.post(f"/v1/work/{work}/transition", json={"status": "VERIFIED", "evidence":["example"]}, headers=worker_headers).status_code == 409
             reviewer = {"X-Review-Token": "test-review-secret"}
             assert client.post(f"/v1/work/{work}/reviews", json={"reviewer_id":"engineer-1","decision":"APPROVE","evidence":["proof"]},headers=reviewer).status_code == 409
-            assert client.post(f"/v1/work/{work}/reviews", json={"reviewer_id":"auditor-1","decision":"APPROVE","evidence":["proof"]},headers=reviewer).status_code == 201
+            assert client.post(f"/v1/work/{work}/reviews", json={"reviewer_id":"development-auditor","decision":"APPROVE","evidence":["proof"]},headers=reviewer).status_code == 201
             assert client.post(f"/v1/work/{work}/transition", json={"status":"DONE"}, headers=worker_headers).status_code == 200
             assert client.get(f"/v1/projects/{project}/board").json()[0]["status"] == "DONE"
             assert client.post(f"/v1/projects/{project}/cancel", headers=worker_headers).status_code == 403
