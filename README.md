@@ -21,13 +21,14 @@ Requires Python 3.12+.
 ```bash
 python -m pip install -e '.[dev]'
 export AAO_CEO_TOKEN='local-dev-only-change-me'
+export AAO_WORK_TOKEN='local-worker-only-change-me'
 uvicorn aao.main:app --reload
 pytest -q
 ```
 
 Open `http://127.0.0.1:8000/docs` to examine the draft API.
 
-Do not expose this dev server publicly; the token header is not sufficient for production authentication.
+Do not expose this dev server publicly; the development token headers are not sufficient for production authentication. All mutating endpoints require a token in the development API; read endpoints remain unauthenticated and must not be exposed to untrusted networks.
 
 ## Design principles
 
