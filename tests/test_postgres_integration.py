@@ -270,3 +270,43 @@ def test_reconciliation_requires_distinct_granted_reviewer(monkeypatch):
     from aao.pg_execution import ExecutionConflict
     with pytest.raises(ExecutionConflict):
         claim(worker_id, credential=secret)
+
+
+@pytest.mark.skipif(
+    not os.getenv("AAO_TEST_POSTGRES_URL") or os.getenv("AAO_TEST_DB_DISPOSABLE") != "yes",
+    reason="Explicit disposable PostgreSQL database required",
+)
+def test_inert_worker_concurrent_claims_never_duplicate(monkeypatch):
+    from concurrent.futures import ThreadPoolExecutor
+    from aao.postgres import connect_postgres
+    from aao.pg_execution import claim, state
+    from aao.worker_auth import credential_digest
+    from aao.pg_work import app
+
+    monkeypatch.setenv("AAO_POSTGRES_URL", os.environ["AAO_TEST_POSTGRES_URL"])
+    monkeypatch.setenv("AAO_CEO_TOKEN", "concurrent-ceo")
+    monkeypatch.setenv("AAO_WORK_TOKEN", "concurrent-worker")
+    monkeypatch.setenv("AAO_SANDBOX_QUEUE_ENABLED", "true")
+    ceo = {"X-CEO-Token": "concurrent-ceo"}
+    worker = {"X-Work-Token": "concurrent-worker"}
+    identity = "concurrent-" + str(uuid4())
+    secret = "concurrent-secret-" + str(uuid4())
+    with connect_postgres() as db:
+        db.execute("INSERT INTO worker_registrations(worker_id,token_digest,enabled) VALUES (%s,%s,true)", (identity, credential_digest(secret)))
+    with TestClient(app) as client:
+        mid = client.post("/v1/mandates", headers=ceo, json={"title": str(uuid4()), "objective": "Concurrency"}).json()["id"]
+        client.post(f"/v1/mandates/{mid}/confirm", headers=ceo)
+        pid = client.post("/v1/projects", headers=ceo, json={"name": "Concurrency", "mandate_id": mid}).json()["id"]
+        for cap in ("work.create", "work.admit"):
+            client.post(f"/v1/projects/{pid}/grants", headers=ceo, json={"principal_id": "development-worker", "capability": cap})
+        ids = []
+        for i in range(4):
+            wid = client.post(f"/v1/projects/{pid}/work", headers=worker, json={"title": f"Batch {i}", "author_id": "development-worker", "acceptance_criteria": ["inert"]}).json()["id"]
+            client.post(f"/v1/work/{wid}/admit", headers=worker)
+            ids.append(client.post(f"/v1/work/{wid}/stage-inert", headers=worker).json()["execution_id"])
+    with ThreadPoolExecutor(max_workers=4) as pool:
+        leases = list(pool.map(lambda _: claim(identity, credential=secret), range(4)))
+    claimed = [lease["execution_id"] for lease in leases if lease is not None]
+    assert set(claimed) == set(ids)
+    assert len(claimed) == len(set(claimed)) == 4
+    assert all(state(eid)["status"] == "RUNNING" for eid in ids)
