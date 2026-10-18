@@ -231,6 +231,8 @@ def submit_review(work_id: str, payload: ReviewIn, _: bool = Depends(require_rev
         if work["status"] != "IN_REVIEW":
             raise HTTPException(409, "Work not pending review")
         check_grant(db, "development-auditor", work["project_id"], "work.review")
+        if payload.reviewer_id != "development-auditor":
+            raise HTTPException(403, "Reviewer identity must match authenticated development credential")
         decision = evaluate_review(author_id=work["author_id"],
                                    reviewer_id=payload.reviewer_id,
                                    evidence=payload.evidence, decision=payload.decision,
