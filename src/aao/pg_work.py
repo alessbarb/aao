@@ -24,6 +24,15 @@ def require_ceo(x_ceo_token: str | None = Header(None)):
     return "ceo"
 
 
+def require_reviewer(x_review_token: str | None = Header(None)):
+    expected = os.getenv("AAO_REVIEW_TOKEN")
+    if not expected:
+        raise HTTPException(503, "Reviewer credential not configured")
+    if not x_review_token or not secrets.compare_digest(expected, x_review_token):
+        raise HTTPException(403, "Reviewer authentication required")
+    return "development-auditor"
+
+
 def require_worker(x_work_token: str | None = Header(None)):
     expected = os.getenv("AAO_WORK_TOKEN")
     if not expected:
@@ -63,9 +72,14 @@ class WorkRequest(BaseModel):
     acceptance_criteria: list[str] = Field(min_length=1)
 
 
+class ReviewRequest(BaseModel):
+    decision: str = Field(pattern="^(APPROVE|REJECT)$")
+    evidence: list[str] = Field(min_length=1)
+
+
 class GrantRequest(BaseModel):
     principal_id: str = Field(min_length=1)
-    capability: str = Field(pattern="^(work.create|work.admit)$")
+    capability: str = Field(pattern="^(work.create|work.admit|work.review|work.progress)$")
 
 
 app = FastAPI(title="AAO PostgreSQL development core", version="0.2.0")
@@ -143,7 +157,7 @@ def grant(project_id: str, payload: GrantRequest, _: str = Depends(require_ceo))
 def require_grant(db, principal: str, project_id: str, capability: str):
     if not db.execute(
         "SELECT 1 FROM project_grants WHERE principal_id=%s AND project_id=%s "
-        "AND capability=%s", (principal, project_id, capability),
+        "AND capability=%s AND (expires_at IS NULL OR expires_at > now())", (principal, project_id, capability),
     ).fetchone():
         raise HTTPException(403, "Project grant required")
 
@@ -163,7 +177,7 @@ def create_work(project_id: str, payload: WorkRequest,
         db.execute(
             "INSERT INTO work_items(id,project_id,title,author_id,status,acceptance_criteria) "
             "VALUES (%s,%s,%s,%s,'INBOX',%s::jsonb)",
-            (wid, project_id, payload.title, payload.author_id,
+            (wid, project_id, payload.title, principal,
              json.dumps(payload.acceptance_criteria)),
         )
         audit(db, wid, "work.created", {"project_id": project_id})
@@ -210,3 +224,50 @@ def admit(work_id: str, principal: str = Depends(require_worker)):
         db.execute("UPDATE work_items SET status='READY' WHERE id=%s", (work_id,))
         audit(db, work_id, "work.admitted", {"principal_id": principal})
     return {"id": work_id, "status": "READY"}
+
+
+@app.post("/v1/work/{work_id}/progress")
+def progress(work_id: str, principal: str = Depends(require_worker)):
+    with tx() as db:
+        row = db.execute("SELECT project_id,status FROM work_items WHERE id=%s FOR UPDATE", (work_id,)).fetchone()
+        if not row:
+            raise HTTPException(404, "Work not found")
+        project_id, status = row
+        require_grant(db, principal, project_id, "work.progress")
+        active = db.execute("SELECT state FROM projects WHERE id=%s", (project_id,)).fetchone()
+        if not active or active[0] != "ACTIVE":
+            raise HTTPException(409, "Project not active")
+        transition = {"READY": "IN_PROGRESS", "IN_PROGRESS": "IN_REVIEW", "VERIFIED": "DONE"}
+        if status not in transition:
+            raise HTTPException(409, "Invalid progression; independent review required")
+        if status == "VERIFIED":
+            approved = db.execute("SELECT 1 FROM reviews WHERE work_id=%s AND decision='APPROVE' ORDER BY created_at DESC LIMIT 1", (work_id,)).fetchone()
+            if not approved:
+                raise HTTPException(409, "Independent approval missing")
+        next_state = transition[status]
+        db.execute("UPDATE work_items SET status=%s WHERE id=%s", (next_state, work_id))
+        audit(db, work_id, "work.progressed", {"from": status, "to": next_state})
+    return {"id": work_id, "status": next_state}
+
+
+@app.post("/v1/work/{work_id}/reviews", status_code=201)
+def review(work_id: str, payload: ReviewRequest, principal: str = Depends(require_reviewer)):
+    if not all(item.strip() for item in payload.evidence):
+        raise HTTPException(422, "Blank evidence reference")
+    with tx() as db:
+        work = db.execute("SELECT project_id,status,author_id FROM work_items WHERE id=%s FOR UPDATE", (work_id,)).fetchone()
+        if not work:
+            raise HTTPException(404, "Work not found")
+        project_id, status, author = work
+        require_grant(db, principal, project_id, "work.review")
+        active = db.execute("SELECT state FROM projects WHERE id=%s", (project_id,)).fetchone()
+        if not active or active[0] != "ACTIVE" or status != "IN_REVIEW":
+            raise HTTPException(409, "Work not reviewable")
+        if principal == author:
+            raise HTTPException(403, "Author cannot review own work")
+        rid = str(uuid4())
+        db.execute("INSERT INTO reviews(id,work_id,reviewer_id,decision,evidence) VALUES (%s,%s,%s,%s,%s::jsonb)", (rid, work_id, principal, payload.decision, json.dumps(payload.evidence)))
+        next_state = "VERIFIED" if payload.decision == "APPROVE" else "IN_PROGRESS"
+        db.execute("UPDATE work_items SET status=%s,evidence=%s::jsonb WHERE id=%s", (next_state, json.dumps(payload.evidence), work_id))
+        audit(db, work_id, "work.reviewed", {"review_id": rid, "decision": payload.decision, "reviewer": principal})
+    return {"review_id": rid, "status": next_state}
