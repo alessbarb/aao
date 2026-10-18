@@ -12,6 +12,7 @@ from aao.storage import connect, event, initialize, transaction
 
 DB_PATH = os.getenv("AAO_DB_PATH", "./data/aao.sqlite3")
 CEO_TOKEN = os.getenv("AAO_CEO_TOKEN")
+WORK_TOKEN = os.getenv("AAO_WORK_TOKEN")
 
 
 @asynccontextmanager
@@ -29,6 +30,16 @@ def require_ceo(x_ceo_token: str | None = Header(default=None)):
     import secrets
     if not x_ceo_token or not secrets.compare_digest(x_ceo_token, CEO_TOKEN):
         raise HTTPException(403, "CEO authentication required")
+    return True
+
+
+def require_worker(x_work_token: str | None = Header(default=None)):
+    """Development-only write gate, distinct from CEO authentication."""
+    if not WORK_TOKEN:
+        raise HTTPException(503, "Worker token not configured: work writes disabled")
+    import secrets
+    if not x_work_token or not secrets.compare_digest(x_work_token, WORK_TOKEN):
+        raise HTTPException(403, "Worker authentication required")
     return True
 
 
@@ -58,7 +69,7 @@ def health():
 
 
 @app.post("/v1/mandates", status_code=201)
-def draft_mandate(payload: MandateIn):
+def draft_mandate(payload: MandateIn, _: bool = Depends(require_ceo)):
     mid = str(uuid4())
     with transaction(DB_PATH) as db:
         db.execute("INSERT INTO mandates(id,title,objective,status) VALUES (?,?,?,'DRAFT')",
@@ -109,7 +120,7 @@ def list_projects():
 
 
 @app.post("/v1/projects/{project_id}/work", status_code=201)
-def create_work(project_id: str, payload: WorkIn):
+def create_work(project_id: str, payload: WorkIn, _: bool = Depends(require_worker)):
     wid = str(uuid4())
     with transaction(DB_PATH) as db:
         project = db.execute("SELECT state FROM projects WHERE id=?",
@@ -145,7 +156,7 @@ ALLOWED_NEXT = {
 
 
 @app.post("/v1/work/{work_id}/transition")
-def transition(work_id: str, payload: TransitionIn):
+def transition(work_id: str, payload: TransitionIn, _: bool = Depends(require_worker)):
     if payload.status not in {s for opts in ALLOWED_NEXT.values() for s in opts}:
         raise HTTPException(422, "Unknown target state")
     with transaction(DB_PATH) as db:
