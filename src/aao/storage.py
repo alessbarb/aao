@@ -63,6 +63,8 @@ def initialize(db_path: str):
                 created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
             )
         """)
+        db.execute("CREATE TABLE IF NOT EXISTS project_grants (principal_id TEXT NOT NULL, project_id TEXT NOT NULL REFERENCES projects(id), capability TEXT NOT NULL, PRIMARY KEY(principal_id,project_id,capability))")
+
 
 
 @contextmanager
