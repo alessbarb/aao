@@ -20,6 +20,8 @@ def test_inert_queue_is_disabled_until_explicitly_enabled():
             assert client.post(f"/v1/mandates/{mandate}/confirm", headers=ceo).status_code == 200
             project = client.post("/v1/projects", headers=ceo,
                                   json={"name": "Sandbox", "mandate_id": mandate}).json()["id"]
+            for cap in ("work.create", "work.transition"):
+                assert client.post(f"/v1/projects/{project}/grants", headers=ceo, json={"principal_id": "development-worker", "capability": cap}).status_code == 201
             work = client.post(f"/v1/projects/{project}/work", headers=worker,
                                json={"title": "Dry run", "author_id": "dev-author",
                                      "acceptance_criteria": ["Entry recorded"]}).json()["id"]
