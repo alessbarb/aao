@@ -1,7 +1,6 @@
 """Minimal AAO API: CEO-confirmed mandates, projects and evidence-gated Kanban."""
 import json
 import os
-import sqlite3
 from contextlib import asynccontextmanager
 from uuid import uuid4
 
