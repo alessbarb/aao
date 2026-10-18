@@ -140,3 +140,62 @@ def test_postgres_inert_staging_is_default_off_and_idempotent(monkeypatch):
         again = client.post(f"/v1/work/{wid}/stage-inert", headers=worker)
         assert again.status_code == 202, again.text
         assert first.json()["execution_id"] == again.json()["execution_id"]
+
+
+@pytest.mark.skipif(
+    not os.getenv("AAO_TEST_POSTGRES_URL") or os.getenv("AAO_TEST_DB_DISPOSABLE") != "yes",
+    reason="Explicit disposable PostgreSQL database required",
+)
+def test_worker_claim_complete_respects_identity_and_project_state(monkeypatch):
+    from aao.pg_work import app
+    from aao.pg_execution import ExecutionConflict, claim, complete, state
+    from aao.worker_auth import credential_digest
+    from aao.postgres import connect_postgres
+
+    monkeypatch.setenv("AAO_POSTGRES_URL", os.environ["AAO_TEST_POSTGRES_URL"])
+    monkeypatch.setenv("AAO_CEO_TOKEN", "integration-ceo")
+    monkeypatch.setenv("AAO_WORK_TOKEN", "integration-worker")
+    monkeypatch.setenv("AAO_SANDBOX_QUEUE_ENABLED", "true")
+    ceo = {"X-CEO-Token": "integration-ceo"}
+    worker = {"X-Work-Token": "integration-worker"}
+    worker_id = "worker-" + str(uuid4())
+    token = "test-credential-" + str(uuid4())
+    with connect_postgres() as db:
+        db.execute(
+            "INSERT INTO worker_registrations(worker_id,token_digest,enabled) VALUES (%s,%s,true)",
+            (worker_id, credential_digest(token)),
+        )
+    with TestClient(app) as client:
+        mid = client.post("/v1/mandates", headers=ceo, json={
+            "title": "Lease " + str(uuid4()), "objective": "Isolated worker tests"
+        }).json()["id"]
+        client.post(f"/v1/mandates/{mid}/confirm", headers=ceo)
+        project_id = client.post("/v1/projects", headers=ceo, json={
+            "name": "Lease project", "mandate_id": mid
+        }).json()["id"]
+        for cap in ("work.create", "work.admit"):
+            client.post(f"/v1/projects/{project_id}/grants", headers=ceo, json={
+                "principal_id": "development-worker", "capability": cap
+            })
+        wid = client.post(f"/v1/projects/{project_id}/work", headers=worker, json={
+            "title": "Lease test", "author_id": "development-worker",
+            "acceptance_criteria": ["inert completion"]
+        }).json()["id"]
+        client.post(f"/v1/work/{wid}/admit", headers=worker)
+        eid = client.post(f"/v1/work/{wid}/stage-inert", headers=worker).json()["execution_id"]
+        with pytest.raises(ExecutionConflict):
+            claim(worker_id, credential="wrong")
+        lease = claim(worker_id, credential=token)
+        assert lease is not None and lease["execution_id"] == eid
+        with pytest.raises(ExecutionConflict):
+            complete(eid, lease["token"], worker_id, {"ok": True}, credential="wrong")
+        assert state(eid)["status"] == "RUNNING"
+        with connect_postgres() as db:
+            db.execute("UPDATE projects SET state='PAUSED' WHERE id=%s", (project_id,))
+        with pytest.raises(ExecutionConflict):
+            complete(eid, lease["token"], worker_id, {"ok": True}, credential=token)
+        assert state(eid)["status"] == "RUNNING"
+        with connect_postgres() as db:
+            db.execute("UPDATE projects SET state='ACTIVE' WHERE id=%s", (project_id,))
+        complete(eid, lease["token"], worker_id, {"ok": True}, credential=token)
+        assert state(eid)["status"] == "SUCCEEDED"
