@@ -21,3 +21,9 @@ PROPOSED effects; it contains no execution or approval operation.
 ## Next integration
 Verify worker credentials in completion and renewal as well, add transactional project-state locking, and test suspension races before attaching even inert autonomous workers.
 Only then attach inert workers, leaving real effect adapters disabled.
+
+## Increment: credential-bound completion and project lock
+
+Worker `claim()` now rechecks the project state under a row lock before marking a queued execution RUNNING. `complete()` requires the authenticated registered worker credential, a matching live lease, and an ACTIVE project locked in the same transaction. This prevents a completed state being committed concurrently with a project suspension transaction that acquires the same project row lock (subject to transaction ordering).
+
+An opt-in PostgreSQL integration test covers invalid credentials and suspended-project completion. No PostgreSQL server run was observed in this session. Lease expiry still leads to UNCERTAIN through explicit quarantine; project suspension **does not yet** automatically quarantine ongoing work or cancel external effects. A production stop controller and credential-rotation policy remain future gates.
