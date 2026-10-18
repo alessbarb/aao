@@ -44,4 +44,10 @@ def test_mandate_and_kanban_gates():
             assert client.post(f"/v1/work/{work}/reviews", json={"reviewer_id":"auditor-1","decision":"APPROVE","evidence":["proof"]},headers=reviewer).status_code == 201
             assert client.post(f"/v1/work/{work}/transition", json={"status":"DONE"}, headers=worker_headers).status_code == 200
             assert client.get(f"/v1/projects/{project}/board").json()[0]["status"] == "DONE"
-            assert len(client.get("/v1/events").json()) >= 6
+            assert client.post(f"/v1/projects/{project}/cancel", headers=worker_headers).status_code == 403
+            assert client.post(f"/v1/projects/{project}/pause", headers=worker_headers).json()["state"] == "PAUSED"
+            assert client.post(f"/v1/projects/{project}/work", json={"title":"Blocked","author_id":"e2","acceptance_criteria":["x"]}, headers=worker_headers).status_code == 409
+            assert client.post(f"/v1/projects/{project}/resume", headers=worker_headers).json()["state"] == "ACTIVE"
+            assert client.post(f"/v1/projects/{project}/cancel", headers=headers).json()["state"] == "CANCELLED"
+            assert client.post(f"/v1/projects/{project}/resume", headers=worker_headers).status_code == 409
+            assert len(client.get("/v1/events").json()) >= 9
