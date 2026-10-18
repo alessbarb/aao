@@ -51,7 +51,7 @@ def test_postgres_mandate_project_grant_work_admission(monkeypatch):
             f"/v1/projects/{project}/work", headers=worker,
             json=work_payload,
         ).status_code == 403
-        for cap in ("work.create", "work.admit"):
+        for cap in ("work.create", "work.admit", "work.progress"):
             assert client.post(
                 f"/v1/projects/{project}/grants", headers=ceo,
                 json={"principal_id": "development-worker", "capability": cap},
@@ -70,3 +70,34 @@ def test_postgres_mandate_project_grant_work_admission(monkeypatch):
         board = client.get(f"/v1/projects/{project}/board", headers=ceo)
         assert board.status_code == 200
         assert any(w["id"] == wid and w["status"] == "READY" for w in board.json())
+
+
+@pytest.mark.skipif(
+    not os.getenv("AAO_TEST_POSTGRES_URL") or os.getenv("AAO_TEST_DB_DISPOSABLE") != "yes",
+    reason="Explicit disposable PostgreSQL test database required",
+)
+def test_postgres_review_is_separate_from_author_and_required_for_done(monkeypatch):
+    from aao.pg_work import app
+    monkeypatch.setenv("AAO_POSTGRES_URL", os.environ["AAO_TEST_POSTGRES_URL"])
+    monkeypatch.setenv("AAO_CEO_TOKEN", "integration-ceo")
+    monkeypatch.setenv("AAO_WORK_TOKEN", "integration-worker")
+    monkeypatch.setenv("AAO_REVIEW_TOKEN", "integration-reviewer")
+    ceo = {"X-CEO-Token": "integration-ceo"}
+    worker = {"X-Work-Token": "integration-worker"}
+    auditor = {"X-Review-Token": "integration-reviewer"}
+    with TestClient(app) as client:
+        m = client.post("/v1/mandates", headers=ceo, json={"title": str(uuid4()), "objective": "Review gate test"}).json()["id"]
+        client.post(f"/v1/mandates/{m}/confirm", headers=ceo)
+        p = client.post("/v1/projects", headers=ceo, json={"name": "Audit smoke", "mandate_id": m}).json()["id"]
+        for who, cap in (("development-worker", "work.create"), ("development-worker", "work.admit"), ("development-worker", "work.progress"), ("development-auditor", "work.review")):
+            assert client.post(f"/v1/projects/{p}/grants", headers=ceo, json={"principal_id": who, "capability": cap}).status_code == 201
+        w = client.post(f"/v1/projects/{p}/work", headers=worker, json={"title": "Review", "author_id": "spoofed", "acceptance_criteria": ["Reviewed"]}).json()["id"]
+        assert client.post(f"/v1/work/{w}/progress", headers=worker).status_code == 409
+        assert client.post(f"/v1/work/{w}/admit", headers=worker).status_code == 200
+        assert client.post(f"/v1/work/{w}/progress", headers=worker).json()["status"] == "IN_PROGRESS"
+        assert client.post(f"/v1/work/{w}/progress", headers=worker).json()["status"] == "IN_REVIEW"
+        assert client.post(f"/v1/work/{w}/progress", headers=worker).status_code == 409
+        assert client.post(f"/v1/work/{w}/reviews", headers=worker, json={"decision": "APPROVE", "evidence": ["test"]}).status_code == 403
+        assert client.post(f"/v1/work/{w}/reviews", headers=auditor, json={"decision": "APPROVE", "evidence": [""]}).status_code == 422
+        assert client.post(f"/v1/work/{w}/reviews", headers=auditor, json={"decision": "APPROVE", "evidence": ["sha256:review-evidence"]}).json()["status"] == "VERIFIED"
+        assert client.post(f"/v1/work/{w}/progress", headers=worker).json()["status"] == "DONE"
