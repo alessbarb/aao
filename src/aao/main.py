@@ -8,11 +8,13 @@ from fastapi import Depends, FastAPI, Header, HTTPException
 from pydantic import BaseModel, Field
 
 from aao.policy import Verdict, authorize
+from aao.review import evaluate_review
 from aao.storage import connect, event, initialize, transaction
 
 DB_PATH = os.getenv("AAO_DB_PATH", "./data/aao.sqlite3")
 CEO_TOKEN = os.getenv("AAO_CEO_TOKEN")
 WORK_TOKEN = os.getenv("AAO_WORK_TOKEN")
+REVIEW_TOKEN = os.getenv("AAO_REVIEW_TOKEN")
 
 
 @asynccontextmanager
@@ -43,6 +45,19 @@ def require_worker(x_work_token: str | None = Header(default=None)):
     return True
 
 
+def require_reviewer(x_review_token: str | None = Header(default=None)):
+    if not REVIEW_TOKEN:
+        raise HTTPException(503, "Reviewer token not configured")
+    import secrets
+    if not x_review_token or not secrets.compare_digest(x_review_token, REVIEW_TOKEN):
+        raise HTTPException(403, "Reviewer authorization required")
+    return True
+
+class ReviewIn(BaseModel):
+    reviewer_id: str = Field(min_length=1)
+    decision: str
+    evidence: list[str] = Field(min_length=1)
+
 class MandateIn(BaseModel):
     title: str = Field(min_length=1, max_length=200)
     objective: str = Field(min_length=1, max_length=5000)
@@ -56,6 +71,7 @@ class ProjectIn(BaseModel):
 class WorkIn(BaseModel):
     title: str = Field(min_length=1, max_length=200)
     acceptance_criteria: list[str] = Field(min_length=1)
+    author_id: str = Field(min_length=1)
 
 
 class TransitionIn(BaseModel):
@@ -130,9 +146,9 @@ def create_work(project_id: str, payload: WorkIn, _: bool = Depends(require_work
         if project["state"] != "ACTIVE":
             raise HTTPException(409, "Project not active")
         db.execute("""INSERT INTO work_items
-            (id,project_id,title,status,acceptance_criteria)
-            VALUES (?,?,?,'INBOX',?)""",
-            (wid, project_id, payload.title, json.dumps(payload.acceptance_criteria)))
+            (id,project_id,title,status,acceptance_criteria,author_id)
+            VALUES (?,?,?,'INBOX',?,?)""",
+            (wid, project_id, payload.title, json.dumps(payload.acceptance_criteria), payload.author_id))
         event(db, wid, "work.created", {"project_id": project_id})
     return {"id": wid, "status": "INBOX"}
 
@@ -175,8 +191,10 @@ def transition(work_id: str, payload: TransitionIn, _: bool = Depends(require_wo
             raise HTTPException(409, "Evidence required")
         # Independent-review enforcement is not implemented. Review states are
         # workflow placeholders and MUST NOT be treated as an audit approval.
-        if payload.status in {"VERIFIED", "DONE"}:
-            raise HTTPException(409, "Independent verification gate not implemented")
+        if payload.status == "VERIFIED":
+            raise HTTPException(409, "Reviewer must verify")
+        if payload.status == "DONE" and not db.execute("SELECT id FROM reviews WHERE work_id=? AND decision='APPROVE'", (work_id,)).fetchone():
+            raise HTTPException(409, "Approved review required")
         db.execute("UPDATE work_items SET status=?, evidence=? WHERE id=?",
                    (payload.status, json.dumps(evidence), work_id))
         event(db, work_id, "work.transitioned", {"from": row["status"], "to": payload.status})
@@ -187,3 +205,55 @@ def transition(work_id: str, payload: TransitionIn, _: bool = Depends(require_wo
 def list_events():
     with connect(DB_PATH) as db:
         return [dict(r) for r in db.execute("SELECT * FROM events ORDER BY rowid")]
+
+@app.post("/v1/work/{work_id}/reviews", status_code=201)
+def submit_review(work_id: str, payload: ReviewIn, _: bool = Depends(require_reviewer)):
+    with transaction(DB_PATH) as db:
+        work = db.execute("SELECT * FROM work_items WHERE id=?", (work_id,)).fetchone()
+        if not work:
+            raise HTTPException(404, "Work not found")
+        project = db.execute("SELECT state FROM projects WHERE id=?", (work["project_id"],)).fetchone()
+        if work["status"] != "IN_REVIEW":
+            raise HTTPException(409, "Work not pending review")
+        decision = evaluate_review(author_id=work["author_id"],
+                                   reviewer_id=payload.reviewer_id,
+                                   evidence=payload.evidence, decision=payload.decision,
+                                   project_active=project["state"] == "ACTIVE")
+        if not decision.allowed:
+            raise HTTPException(409, decision.reason)
+        review_id = str(uuid4())
+        db.execute("INSERT INTO reviews(id,work_id,reviewer_id,decision,evidence) VALUES (?,?,?,?,?)",
+                   (review_id, work_id, payload.reviewer_id, payload.decision,
+                    json.dumps(payload.evidence)))
+        target = "VERIFIED" if payload.decision == "APPROVE" else "IN_PROGRESS"
+        db.execute("UPDATE work_items SET status=?, evidence=? WHERE id=?",
+                   (target, json.dumps(payload.evidence), work_id))
+        event(db, work_id, "work.reviewed", {"decision": payload.decision, "review_id": review_id})
+    return {"review_id": review_id, "status": target}
+
+
+def change_project_state(project_id: str, expected: str | None, target: str):
+    with transaction(DB_PATH) as db:
+        project = db.execute("SELECT state FROM projects WHERE id=?", (project_id,)).fetchone()
+        if not project:
+            raise HTTPException(404, "Project not found")
+        if project["state"] == "CANCELLED" or (expected and project["state"] != expected):
+            raise HTTPException(409, "Invalid project transition")
+        db.execute("UPDATE projects SET state=? WHERE id=?", (target, project_id))
+        event(db, project_id, "project.state.changed", {"from": project["state"], "to": target})
+    return {"id": project_id, "state": target}
+
+
+@app.post("/v1/projects/{project_id}/pause")
+def pause_project(project_id: str, _: bool = Depends(require_worker)):
+    return change_project_state(project_id, "ACTIVE", "PAUSED")
+
+
+@app.post("/v1/projects/{project_id}/resume")
+def resume_project(project_id: str, _: bool = Depends(require_worker)):
+    return change_project_state(project_id, "PAUSED", "ACTIVE")
+
+
+@app.post("/v1/projects/{project_id}/cancel")
+def cancel_project(project_id: str, _: bool = Depends(require_ceo)):
+    return change_project_state(project_id, None, "CANCELLED")
