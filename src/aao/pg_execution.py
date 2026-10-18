@@ -37,6 +37,14 @@ def claim(worker_id: str, *, credential: str | None = None, seconds: int = 60, n
         if not row:
             return None
         eid = str(row[0])
+        project_id = db.execute(
+            "SELECT project_id FROM execution_queue WHERE id=%s", (eid,)
+        ).fetchone()[0]
+        project = db.execute(
+            "SELECT state FROM projects WHERE id=%s FOR UPDATE", (project_id,)
+        ).fetchone()
+        if not project or project[0] != "ACTIVE":
+            return None
         token = str(uuid4())
         expiry = instant + timedelta(seconds=seconds)
         db.execute(
@@ -50,9 +58,28 @@ def claim(worker_id: str, *, credential: str | None = None, seconds: int = 60, n
 
 
 def complete(execution_id: str, token: str, worker_id: str, result: dict,
-             *, now: datetime | None = None):
+             *, credential: str | None = None, now: datetime | None = None):
     instant = now or datetime.now(timezone.utc)
     with connect_postgres() as db:
+        registration = db.execute(
+            "SELECT token_digest,enabled FROM worker_registrations "
+            "WHERE worker_id=%s FOR SHARE", (worker_id,)
+        ).fetchone()
+        if not registration or not verify_registered_worker(
+            worker_id, credential, digest=registration[0], enabled=registration[1]
+        ):
+            raise ExecutionConflict("Worker authentication failed")
+        execution = db.execute(
+            "SELECT project_id FROM execution_queue WHERE id=%s FOR UPDATE",
+            (execution_id,),
+        ).fetchone()
+        if not execution:
+            raise ExecutionConflict("Execution not found")
+        project = db.execute(
+            "SELECT state FROM projects WHERE id=%s FOR UPDATE", (execution[0],)
+        ).fetchone()
+        if not project or project[0] != "ACTIVE":
+            raise ExecutionConflict("Project is not active")
         updated = db.execute(
             "UPDATE execution_queue SET status='SUCCEEDED',result_json=%s::jsonb "
             "WHERE id=%s AND status='RUNNING' AND lease_token=%s "
