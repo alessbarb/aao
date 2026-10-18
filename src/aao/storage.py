@@ -50,6 +50,19 @@ def initialize(db_path: str):
             created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
         );
         """)
+        columns = {row["name"] for row in db.execute("PRAGMA table_info(work_items)")}
+        if "author_id" not in columns:
+            db.execute("ALTER TABLE work_items ADD COLUMN author_id TEXT NOT NULL DEFAULT ''")
+        db.execute("""
+            CREATE TABLE IF NOT EXISTS reviews (
+                id TEXT PRIMARY KEY,
+                work_id TEXT NOT NULL REFERENCES work_items(id),
+                reviewer_id TEXT NOT NULL,
+                decision TEXT NOT NULL CHECK(decision IN ('APPROVE','REJECT')),
+                evidence TEXT NOT NULL,
+                created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+            )
+        """)
 
 
 @contextmanager
