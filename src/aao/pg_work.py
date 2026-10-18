@@ -271,3 +271,36 @@ def review(work_id: str, payload: ReviewRequest, principal: str = Depends(requir
         db.execute("UPDATE work_items SET status=%s,evidence=%s::jsonb WHERE id=%s", (next_state, json.dumps(payload.evidence), work_id))
         audit(db, work_id, "work.reviewed", {"review_id": rid, "decision": payload.decision, "reviewer": principal})
     return {"review_id": rid, "status": next_state}
+
+@app.post("/v1/work/{work_id}/stage-inert", status_code=202)
+def stage_inert(work_id: str, principal: str = Depends(require_worker)):
+    """Enqueue a fixed inert payload; no model or external action is possible."""
+    if os.getenv("AAO_SANDBOX_QUEUE_ENABLED") != "true":
+        raise HTTPException(503, "Sandbox queue disabled")
+    with tx() as db:
+        work = db.execute(
+            "SELECT project_id,status FROM work_items WHERE id=%s FOR UPDATE",
+            (work_id,),
+        ).fetchone()
+        if not work:
+            raise HTTPException(404, "Work not found")
+        project_id, status = work
+        project = db.execute(
+            "SELECT state FROM projects WHERE id=%s", (project_id,)
+        ).fetchone()
+        if not project or project[0] != "ACTIVE" or status != "READY":
+            raise HTTPException(409, "Work not ready in active project")
+        require_grant(db, principal, project_id, "work.admit")
+        existing = db.execute(
+            "SELECT id,status FROM execution_queue WHERE work_id=%s", (work_id,)
+        ).fetchone()
+        if existing:
+            return {"execution_id": str(existing[0]), "status": existing[1]}
+        execution_id = str(uuid4())
+        db.execute(
+            "INSERT INTO execution_queue(id,work_id,project_id,status,input_json) "
+            "VALUES (%s,%s,%s,'QUEUED',%s::jsonb)",
+            (execution_id, work_id, project_id, json.dumps({"type": "aao.inert.v1"})),
+        )
+        audit(db, execution_id, "execution.staged", {"work_id": work_id})
+    return {"execution_id": execution_id, "status": "QUEUED"}
