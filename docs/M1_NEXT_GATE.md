@@ -20,3 +20,9 @@ production identity provider is configured.
 6. Demonstrate no cross-project data reads or writes under adversarial tests.
 
 The next slice must wire grant persistence into the API rather than merely defining grant types.
+
+## New incremental development integration
+
+The development SQLite API now persists explicit project capability grants. The CEO development credential alone creates these grants. Work creation, work transitions, inert queue admission, and review submission check the appropriate grant. This is a fail-closed *development boundary*, not an identity-attested production implementation. Existing databases will create the additional grant table on application startup.
+
+The principal identity remains derived from which shared development credential is presented. Reviewers can still assert an arbitrary reviewer_id in the body, so independent reviews are **not production-trustworthy**. Project reads are still unscoped, and the PostgreSQL schema is still not the runtime backend. Do not use this deployment outside an isolated development environment.
