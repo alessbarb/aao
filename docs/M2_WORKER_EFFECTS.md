@@ -8,7 +8,7 @@ explicit opt-in development bootstrap. `pg_effects.py` can **record only**
 PROPOSED effects; it contains no execution or approval operation.
 
 ## Safety boundaries
-- Worker registration does not yet authenticate the queue's claim/complete APIs.
+- Worker registration is now checked on queue claims, but completion still uses only the lease token and worker ID. The claim check does not establish mTLS/OIDC or secure worker attestation.
 - Token hashes are SHA-256 development placeholders, not suitable for low-entropy
   human passwords. Production must use stronger credentials (mTLS/OIDC) and
   protected secrets.
@@ -19,6 +19,5 @@ PROPOSED effects; it contains no execution or approval operation.
 - No worker services are started and no agent/model calls are enabled.
 
 ## Next integration
-Bind verified worker registrations to queue claims, ensure project ACTIVE
-status under transaction, and add a test for project suspension during claim.
+Verify worker credentials in completion and renewal as well, add transactional project-state locking, and test suspension races before attaching even inert autonomous workers.
 Only then attach inert workers, leaving real effect adapters disabled.
