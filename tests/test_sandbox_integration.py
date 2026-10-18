@@ -55,6 +55,9 @@ def test_cancelled_project_never_admitted_to_sandbox():
             client.post(f"/v1/mandates/{mandate}/confirm", headers=ceo)
             project = client.post("/v1/projects", headers=ceo,
                                   json={"name": "Pilot", "mandate_id": mandate}).json()["id"]
+            for cap in ("work.create", "work.transition"):
+                grant = client.post(f"/v1/projects/{project}/grants", headers=ceo, json={"principal_id": "development-worker", "capability": cap})
+                assert grant.status_code == 201
             work = client.post(f"/v1/projects/{project}/work", headers=worker,
                                json={"title": "Test", "author_id": "dev-author",
                                      "acceptance_criteria": ["x"]}).json()["id"]
