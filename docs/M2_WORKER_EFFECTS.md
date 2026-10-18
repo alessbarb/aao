@@ -27,3 +27,7 @@ Only then attach inert workers, leaving real effect adapters disabled.
 Worker `claim()` now rechecks the project state under a row lock before marking a queued execution RUNNING. `complete()` requires the authenticated registered worker credential, a matching live lease, and an ACTIVE project locked in the same transaction. This prevents a completed state being committed concurrently with a project suspension transaction that acquires the same project row lock (subject to transaction ordering).
 
 An opt-in PostgreSQL integration test covers invalid credentials and suspended-project completion. No PostgreSQL server run was observed in this session. Lease expiry still leads to UNCERTAIN through explicit quarantine; project suspension **does not yet** automatically quarantine ongoing work or cancel external effects. A production stop controller and credential-rotation policy remain future gates.
+
+## Reconciliation candidate
+
+See [M2 reconciliation](M2_RECONCILIATION.md). The candidate function is intentionally not exposed via API: it currently accepts a caller-supplied reviewer identity and cannot be treated as production authorization. The `execution.reconcile` capability requires an explicit persisted project grant, and no worker is restarted automatically.
