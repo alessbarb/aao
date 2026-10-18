@@ -2,9 +2,11 @@
 import json
 import os
 from contextlib import asynccontextmanager
+from pathlib import Path
 from uuid import uuid4
 
 from fastapi import Depends, FastAPI, Header, HTTPException
+from fastapi.responses import FileResponse
 from pydantic import BaseModel, Field
 
 from aao.policy import Verdict, authorize
@@ -81,6 +83,11 @@ class WorkIn(BaseModel):
 class TransitionIn(BaseModel):
     status: str
     evidence: list[str] = Field(default_factory=list)
+
+
+@app.get("/", include_in_schema=False)
+def workboard_ui():
+    return FileResponse(Path(__file__).resolve().parents[2] / "frontend" / "index.html")
 
 
 @app.get("/health")
