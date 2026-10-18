@@ -82,3 +82,27 @@ permissions. Never enable it on a public or shared network.
 The initial project workboard and the queue have automated test cases committed
 but **their execution remains unverified in this session**. Do not promote or
 deploy until runtime verification and independent security review.
+
+## PostgreSQL development service (M1 next slice)
+
+A separate API `aao.pg_work:app` now uses PostgreSQL transactions for actual
+mandate, project, project grant, work-item and READY-admission writes. This is
+**not** yet a cutover of the original SQLite application, and it has no
+agent execution, external integrations, secure production authentication,
+independent-review endpoint or full workflows.
+
+Read [PostgreSQL runtime setup](docs/POSTGRES_RUNTIME.md). It requires applying
+`001_foundation.sql` and `002_dev_identity.sql` to a **fresh isolated development**
+database, then running on localhost. The development identity migration relaxes
+principal FK enforcement and is **not a production schema**.
+
+An opt-in integration test exists in `tests/test_postgres_integration.py`.
+Use it only on an explicitly disposable database:
+```sh
+export AAO_TEST_POSTGRES_URL='postgresql://...disposable-test-database'
+export AAO_TEST_DB_DISPOSABLE=yes
+pytest -q tests/test_postgres_integration.py
+```
+The test creates records and does not delete the database afterwards.
+
+**Tests and actual PostgreSQL server execution have not been verified here.**
