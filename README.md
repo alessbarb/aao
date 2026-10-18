@@ -106,3 +106,12 @@ pytest -q tests/test_postgres_integration.py
 The test creates records and does not delete the database afterwards.
 
 **Tests and actual PostgreSQL server execution have not been verified here.**
+
+## M2 recovery increment
+
+Added a one-shot **inert** worker, a restricted effect-proposal rejection function,
+and an opt-in PostgreSQL concurrency test. See [M2 inert worker](docs/M2_INERT_WORKER.md).
+
+The worker is not scheduled automatically, no AI models are connected, and no
+external effect is performed. Database-backed tests still require a disposable
+PostgreSQL instance. No verified test run or operational acceptance is claimed.
