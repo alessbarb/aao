@@ -101,6 +101,10 @@ def test_sandbox_command_has_no_candidate_command_or_secret_mounts(tmp_path: Pat
 
 
 def test_fixed_check_runs_inside_bubblewrap_and_returns_candidate_sha(tmp_path: Path):
+    import shutil
+
+    if not shutil.which("bwrap"):
+        pytest.skip("bubblewrap is required to exercise the Linux sandbox")
     _candidate(tmp_path)
 
     result = run_repository_check(tmp_path, "core-unit")

@@ -276,7 +276,7 @@ def test_postgres_workboard_requires_ceo_read_credentials(monkeypatch):
             "Evidencias", "Decisiones reservadas",
         ):
             assert label in page.text
-        assert "No se presentan como disponibles" in page.text
+        assert "no se muestran datos de ejemplo" in page.text
         assert "localStorage" not in page.text
         assert client.get("/v1/projects").status_code == 403
         assert client.get("/v1/projects", headers={"X-CEO-Token": "wrong"}).status_code == 403
