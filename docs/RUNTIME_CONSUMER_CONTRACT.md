@@ -2,7 +2,7 @@
 
 **Status:** integration contract for the current development API; not an
 authorization grant, audit verdict, or production SLA. **API source revision:**
-`e0cb26f9d7f377b9d0df20b3ee0797da56343040` (2026-10-19). This is the source
+`25d54805c56c765b5fccc3a4ffa33df6525c362b` (2026-10-20). This is the source
 revision described by the contract, not a claim that this document is present
 in that commit.
 
@@ -63,6 +63,12 @@ should tolerate additive fields and must treat unknown states as non-approved.
   project/capability grants, expiry and a database-clock `active` value. It is
   read-only inventory, not a capability token or authorization decision;
   each protected operation must continue to check its grant transactionally.
+- `GET /v1/auditors/me/grants`: returns only that authenticated AUDITOR's
+  project/capability grants, expiry and a database-clock `active` value. It is
+  a read-only self-inventory for least-privilege planning, not evidence of
+  independence, a capability token, or an authorization decision. Protected
+  review/reconciliation operations must continue to check their grants
+  transactionally.
 
 ### Project and work read model
 
