@@ -487,6 +487,14 @@ def test_individual_agent_scoped_creation_and_revocation(monkeypatch):
             projects.append(pid)
         allowed, forbidden = projects
         assert client.post(f"/v1/projects/{allowed}/grants", headers=ceo, json={
+            "principal_id": identity, "capability": "project.read",
+        }).status_code == 201
+        scoped = client.get("/v1/projects", headers=agent)
+        assert scoped.status_code == 200, scoped.text
+        assert [row["id"] for row in scoped.json()] == [allowed]
+        assert client.get(f"/v1/projects/{forbidden}/board", headers=agent).status_code == 403
+        assert client.get(f"/v1/projects/{allowed}/board", headers=agent).status_code == 200
+        assert client.post(f"/v1/projects/{allowed}/grants", headers=ceo, json={
             "principal_id": identity, "capability": "work.create",
         }).status_code == 201
         payload = {"title": "Individual action", "author_id": "spoof-attempt",
