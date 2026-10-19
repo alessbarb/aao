@@ -3,10 +3,13 @@
 Not enabled in the active SQLite API. Schema creation is a manual development step.
 """
 import os
+
+from aao.settings import load_local_env
 from contextlib import contextmanager
 
 
 def database_url() -> str:
+    load_local_env()
     url = os.environ.get("AAO_POSTGRES_URL", "")
     if not url.startswith(("postgresql://", "postgres://")):
         raise RuntimeError("AAO_POSTGRES_URL must be an explicit PostgreSQL DSN")
