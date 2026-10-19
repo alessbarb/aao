@@ -22,17 +22,27 @@ def journal(db, execution_id: str, kind: str, details: dict):
     )
 
 
-def claim(worker_id: str, *, credential: str | None = None, seconds: int = 60, now: datetime | None = None):
-    if not worker_id or seconds < 1:
+def claim(worker_id: str, *, credential: str | None = None, project_id: str, seconds: int = 60, now: datetime | None = None):
+    if not worker_id or not project_id or seconds < 1:
         raise ExecutionConflict("Worker and positive lease duration required")
     instant = now or datetime.now(timezone.utc)
     with connect_postgres() as db:
         registration = db.execute("SELECT token_digest,enabled FROM worker_registrations WHERE worker_id=%s FOR SHARE", (worker_id,)).fetchone()
         if not registration or not verify_registered_worker(worker_id, credential, digest=registration[0], enabled=registration[1]):
             raise ExecutionConflict("Worker authentication failed")
+        grant = db.execute(
+            "SELECT 1 FROM project_grants WHERE principal_id=%s AND project_id=%s "
+            "AND capability='execution.claim' "
+            "AND (expires_at IS NULL OR expires_at > now())",
+            (worker_id, project_id),
+        ).fetchone()
+        if not grant:
+            raise ExecutionConflict("Project execution claim grant required")
         row = db.execute(
-            "SELECT q.id FROM execution_queue q JOIN projects p ON p.id=q.project_id WHERE q.status='QUEUED' AND p.state='ACTIVE' "
-            "ORDER BY q.created_at,q.id FOR UPDATE OF q SKIP LOCKED LIMIT 1"
+            "SELECT q.id FROM execution_queue q JOIN projects p ON p.id=q.project_id "
+            "WHERE q.status='QUEUED' AND p.state='ACTIVE' AND q.project_id=%s "
+            "ORDER BY q.created_at,q.id FOR UPDATE OF q SKIP LOCKED LIMIT 1",
+            (project_id,),
         ).fetchone()
         if not row:
             return None
@@ -80,6 +90,14 @@ def complete(execution_id: str, token: str, worker_id: str, result: dict,
         ).fetchone()
         if not project or project[0] != "ACTIVE":
             raise ExecutionConflict("Project is not active")
+        grant = db.execute(
+            "SELECT 1 FROM project_grants WHERE principal_id=%s AND project_id=%s "
+            "AND capability='execution.claim' "
+            "AND (expires_at IS NULL OR expires_at > now())",
+            (worker_id, str(execution[0])),
+        ).fetchone()
+        if not grant:
+            raise ExecutionConflict("Project execution claim grant revoked")
         updated = db.execute(
             "UPDATE execution_queue SET status='SUCCEEDED',result_json=%s::jsonb "
             "WHERE id=%s AND status='RUNNING' AND lease_token=%s "
