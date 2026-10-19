@@ -1,7 +1,7 @@
 # Principal authorization matrix
 
 **Scope:** current development API and internal execution/reconciliation
-operations, updated through `34ef8e97476f54b1b74ca57ed0c697203959a12a` (prior committed baseline).
+operations, updated through `9339a1da24e17599422fd62227107f46302bf88e`.
 This is an engineering inventory, not a production authorization policy or
 independent security review. The PostgreSQL API and its internal helpers are
 not a claim of M2 acceptance.
@@ -11,8 +11,8 @@ not a claim of M2 acceptance.
 | Operation | Authenticated identity / authority | Project capability and transaction check | Effect and known boundary |
 | --- | --- | --- | --- |
 | `GET /`, `GET /health` | None | None | Static workboard shell / service status only; health reports autonomous execution disabled. |
-| `POST /v1/principals/credentials`, `/v1/principals/{id}/rotate`, `/revoke` | Static `AAO_CEO_TOKEN` bearer, compared before DB transaction; rejected with 503 when `AAO_ENV=production` | No project grant; lifecycle writes and audit event share a DB transaction | Development-only credential administration; no constitutional signature, multi-party confirmation, or production identity. Production administration remains unavailable. |
-| `POST /v1/mandates`, `/v1/mandates/{id}/confirm`, `/v1/projects` | Static CEO bearer; rejected with 503 when `AAO_ENV=production` | No project grant; mandate/project row checked or locked within transaction | Development-only draft/confirm mandate and project creation. CEO identity is not a verified constitutional actor. |
+| `POST /v1/principals/credentials`, `/v1/principals/{id}/rotate`, `/revoke` | Static `AAO_CEO_TOKEN` bearer, compared before DB transaction; rejected with 503 outside explicit `development`/`test` modes | No project grant; lifecycle writes and audit event share a DB transaction | Development-only credential administration; no constitutional signature, multi-party confirmation, or production identity. Production administration remains unavailable. |
+| `POST /v1/mandates`, `/v1/mandates/{id}/confirm`, `/v1/projects` | Static CEO bearer; rejected with 503 outside explicit `development`/`test` modes | No project grant; mandate/project row checked or locked within transaction | Development-only draft/confirm mandate and project creation. CEO identity is not a verified constitutional actor. |
 | `POST /v1/projects/{id}/grants` | Static CEO bearer | No project grant; project, active principal identity and capability-compatible principal kind are checked in the transaction; credential row is locked under `FOR SHARE` | Rejects unknown/disabled principals and Agent/Auditor capability mismatches before persisting the grant. Conflict no-op still emits a grant-created event. |
 | `DELETE /v1/projects/{id}/grants/{principal}/{capability}` | Static CEO bearer | Deletes the exact matching grant inside a DB transaction | Returns 404 if project/grant is absent; writes `grant.revoked` event atomically with deletion. Protected operations hold `FOR SHARE` on the grant row, so deletion waits for their transaction. |
 | `GET /v1/projects` | Development CEO bearer or individual AGENT bearer; CEO bearer is not recognized in production | Development CEO receives all projects; other readers need unexpired `project.read`. Individual credential and project grant rows are rechecked/locked under `FOR SHARE` in the transaction. | Project list is scoped for non-CEO readers. Shared worker/reviewer tokens are not accepted by this API. Production CEO access is unavailable. |
@@ -26,9 +26,13 @@ not a claim of M2 acceptance.
 The PostgreSQL API no longer accepts shared worker/reviewer tokens. SQLite
 prototype tokens are a separate path. Individual bearer authentication first
 resolves identity and protected API operations recheck the credential row
-inside their transaction. The static CEO bearer is development-only and is
-rejected for CEO authorization in production; this does not establish a
-production CEO identity flow. See the latest evidence register for test status.
+inside their transaction. HTTP dependencies currently resolve the bearer
+before the protected operation transaction; a token rotated in that gap may
+still be accepted because the later check verifies principal status, not the
+presented token digest. The static CEO bearer is development-only and is
+rejected for CEO authorization outside explicit development/test modes; this
+does not establish a production CEO identity flow. See the latest evidence
+register for test status.
 
 ## Internal PostgreSQL operations (not HTTP authorization boundaries)
 

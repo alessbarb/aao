@@ -52,7 +52,10 @@ amendment or CEO-confirmed constitutional rule.
    execution grant. Actual queue claim and completion also serialize before
    concurrent AGENT credential revocation. Still required: repeated/adversarial
    schedules across remaining operations, alternate operation/revocation
-   orderings, and review of long-running transaction expiry semantics.
+   orderings, and review of long-running transaction expiry semantics. A further
+   HTTP token-rotation gap remains: dependencies authenticate before the
+   protected transaction, whose later check does not compare the presented
+   token digest.
 3. **Implemented in candidate code and locally validated:** execution/effect
    reconciliation derives the reviewer from a locked individual AUDITOR
    credential inside the transaction, then checks the project grant. Tests

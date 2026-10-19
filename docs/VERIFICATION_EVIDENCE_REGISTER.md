@@ -461,3 +461,30 @@ skips or warnings; `pip check` and `git diff --check` passed. The focused
 reconciliation integration file passed **3 tests**. This evidence is not yet
 associated with a commit SHA or CI run and does not close grant-revocation race
 coverage, independent review, or M2 acceptance.
+
+## CEO development-bearer production denial
+
+- Revision: `9339a1da24e17599422fd62227107f46302bf88e` on
+  `feat/aao-m0-foundation`.
+- `require_ceo()` now fails closed with HTTP 503 outside explicit
+  `development`/`test` modes. `read_principal()` no longer recognizes the
+  static CEO token in those environments. A typo or whitespace-surrounded
+  production mode therefore cannot enable the development bearer.
+- Unit/API tests cover `production`, ` PRODUCTION `, and an unrecognized
+  environment mode, direct administration and reader dependencies, one CEO
+  mutation route, and project-list access. These tests use a test literal only;
+  they do not read or print a configured secret.
+- Local validation on the committed tree: `python -m compileall -q src tests`
+  succeeded; `python -m ruff check src tests` passed; the full explicit
+  disposable-PostgreSQL suite passed **64 tests, 0 skips, 0 warnings** with
+  `-W error`; `python -m pip check` reported no broken requirements; and
+  `git diff --check` passed.
+- GitHub Actions run `39260684020` completed successfully for this exact SHA.
+  CI applied migrations to a fresh disposable PostgreSQL service and passed
+  compileall, Ruff, the warnings-as-errors integration/unit suite, and
+  `pip check`. This change disables the provisional CEO bearer outside explicit
+  development/test modes; it does not implement production CEO identity,
+  signed approval, or M2 acceptance.
+  Remaining high-priority work includes HTTP credential-rotation races,
+  project-grant revocation schedules, adversarial runtime recovery, and
+  independent security/architecture review.
