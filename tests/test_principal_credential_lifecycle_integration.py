@@ -473,3 +473,58 @@ def test_ceo_governed_principal_issue_rotate_revoke(monkeypatch):
                 "principal.credential.rotated",
                 "principal.credential.revoked",
             }
+
+
+@pytest.mark.skipif(
+    not os.getenv("AAO_TEST_POSTGRES_URL") or os.getenv("AAO_TEST_DB_DISPOSABLE") != "yes",
+    reason="Explicit disposable PostgreSQL database required",
+)
+def test_http_request_context_rejects_token_rotated_before_protected_transaction(monkeypatch):
+    from aao.work_management_api import (
+        AuthenticatedPrincipal,
+        app,
+        read_principal,
+    )
+
+    monkeypatch.setenv("AAO_POSTGRES_URL", os.environ["AAO_TEST_POSTGRES_URL"])
+    monkeypatch.setenv("AAO_CEO_TOKEN", "http-rotation-gap-ceo")
+    identity = "agent-rotation-gap-" + str(uuid4())
+    ceo = {"X-CEO-Token": "http-rotation-gap-ceo"}
+    with TestClient(app) as client:
+        issued = client.post("/v1/principals/credentials", headers=ceo, json={
+            "principal_id": identity, "kind": "AGENT",
+        })
+        assert issued.status_code == 201, issued.text
+        old_token = issued.json()["token"]
+        mandate = client.post("/v1/mandates", headers=ceo, json={
+            "title": "Rotation gap " + str(uuid4()),
+            "objective": "Reject a request context captured before token rotation",
+        }).json()["id"]
+        assert client.post(f"/v1/mandates/{mandate}/confirm", headers=ceo).status_code == 200
+        project = client.post("/v1/projects", headers=ceo, json={
+            "name": "Rotation gap", "mandate_id": mandate,
+        }).json()["id"]
+        assert client.post(f"/v1/projects/{project}/grants", headers=ceo, json={
+            "principal_id": identity, "capability": "project.read",
+        }).status_code == 201
+
+        # This is the dependency-resolution point, before the operation opens
+        # its protected DB transaction.
+        stale_context = read_principal(x_ceo_token=None, x_agent_token=old_token)
+        assert isinstance(stale_context, AuthenticatedPrincipal)
+        rotated = client.post(f"/v1/principals/{identity}/rotate", headers=ceo)
+        assert rotated.status_code == 200, rotated.text
+        new_token = rotated.json()["token"]
+
+        app.dependency_overrides[read_principal] = lambda: stale_context
+        try:
+            denied = client.get("/v1/projects")
+            assert denied.status_code == 403
+
+            fresh_context = read_principal(x_ceo_token=None, x_agent_token=new_token)
+            app.dependency_overrides[read_principal] = lambda: fresh_context
+            allowed = client.get("/v1/projects")
+            assert allowed.status_code == 200, allowed.text
+            assert any(row["id"] == project for row in allowed.json())
+        finally:
+            app.dependency_overrides.pop(read_principal, None)
