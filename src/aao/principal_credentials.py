@@ -14,7 +14,7 @@ class PrincipalDenied(ValueError):
 
 
 def _development_credentials_enabled() -> bool:
-    return os.getenv("AAO_ENV", "development").strip().lower() in {
+    return os.getenv("AAO_ENV", "").strip().lower() in {
         "development", "test",
     }
 

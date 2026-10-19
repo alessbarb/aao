@@ -83,7 +83,7 @@ def register_evidence(
 
 def verify_evidence_references(db, project_id: str, references: list[str]) -> list[dict]:
     """Resolve and re-hash project evidence inside the caller's transaction."""
-    _validate_references(references)
+    validate_evidence_references(references)
     verified = []
     for reference in references:
         match = _REFERENCE.fullmatch(reference) if isinstance(reference, str) else None
@@ -118,7 +118,7 @@ def read_evidence(
     """Read project evidence for an individually authenticated reconciler."""
     if capability not in {"execution.reconcile", "effect.reconcile"}:
         raise EvidenceDenied("Evidence review capability required")
-    _validate_references(references)
+    validate_evidence_references(references)
     with connect_postgres() as db:
         from aao.principal_credentials import PrincipalDenied, authenticate_in_transaction
 
@@ -156,12 +156,16 @@ def read_evidence(
     return artifacts
 
 
-def _validate_references(references):
+def validate_evidence_references(references):
+    """Reject malformed evidence references before opening a transaction."""
     if not isinstance(references, list) or not references:
         raise EvidenceDenied("Unique evidence references required")
     if len(references) > MAX_EVIDENCE_REFERENCES:
         raise EvidenceDenied("Too many evidence references")
-    if any(not isinstance(reference, str) for reference in references):
+    if any(
+        not isinstance(reference, str) or not _REFERENCE.fullmatch(reference)
+        for reference in references
+    ):
         raise EvidenceDenied("Evidence reference must be a sha256 digest")
     if len(set(references)) != len(references):
         raise EvidenceDenied("Unique evidence references required")

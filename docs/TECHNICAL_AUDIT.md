@@ -133,3 +133,33 @@ execute tests; they are internal reviews, not independent assurance.
 These source changes had a worktree full-suite/static run recorded in the
 verification register; commit and exact-SHA evidence are required before the
 candidate is treated as reviewable.
+
+### External adversarial findings dated 2026-10-19
+
+The separate report `AAO_M2A_AUDITORIA_TECNICA_EXTERNA_20261019.md` was a
+partial remote static inspection, not formal independent review. Its H-01
+observation is confirmed: at frozen `dc084417`, missing `AAO_ENV` enabled
+individual development credentials. This is corrected separately at
+`31e7397be082394a6da95eadebd0d8ad6bf99c39`, with rejection before database
+access for absent, empty, production, and unknown modes in both credential
+verification functions. The frozen PR #2 head is not changed and still
+contains H-01.
+
+H-02 is a known trust-boundary limit: schema-owner/superuser control can bypass
+append-only triggers; disposable tests ran as an owner, not a restricted
+runtime role. Keep this as an explicit M2-A residual risk for competent
+disposition, with production role isolation deferred to M2-C. H-03 is
+consistent with the existing fail-closed approval gate: hashes and principal
+IDs do not prove truth or human independence; positive approval remains
+disabled pending formal independent review and competent acceptance. H-04 is
+partly accurate: selected tests demonstrate explicit expiry quarantine and
+manual credential-guarded reconciliation, but not a restart controller,
+operator interface, or continuous recovery. Only the explicit inert paths are
+M2-A; automatic recovery is M2-B/C. H-05 was verified: PR #2 remains OPEN/DRAFT
+at `ef1a6e64`; the `dc084417..ef1a6e64` diff in `src`, `tests`, and `db` is
+empty. The corrected code has a new local 91-test run, but no PR or formal
+review pin has been moved to it.
+
+Full dispositions and evidence are in
+[`ADVERSARIAL_AUDIT_20261019.md`](ADVERSARIAL_AUDIT_20261019.md). These
+findings do not certify the candidate or close the formal-review gate.
