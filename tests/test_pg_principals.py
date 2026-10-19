@@ -63,6 +63,7 @@ def test_individual_reader_cannot_fall_back_to_shared_credential(monkeypatch):
     monkeypatch.setenv("AAO_ENV", "development")
     monkeypatch.setenv("AAO_ALLOW_SHARED_DEV_TOKENS", "true")
     monkeypatch.setenv("AAO_WORK_TOKEN", "dev-worker")
+    monkeypatch.setattr("aao.pg_principals.authenticate", lambda *_args, **_kwargs: (_ for _ in ()).throw(PrincipalDenied("invalid")))
     with pytest.raises(HTTPException) as denied:
         read_principal(
             x_ceo_token=None, x_work_token="dev-worker",
