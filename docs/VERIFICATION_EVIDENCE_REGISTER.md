@@ -528,7 +528,10 @@ coverage, independent review, or M2 acceptance.
   full suite **67 passed, 0 skipped, 0 warnings** under `-W error`; compileall,
   Ruff, `pip check`, and `git diff --check` passed. Migration 007 was applied
   to `aao_test`; the database name was checked without displaying its URL.
-- CI validation is pending. These checks cover bounded local PostgreSQL
-  schedules and migration application, not exhaustive race schedules,
-  production recovery, external effect cancellation, independent review, or
-  M2 acceptance.
+- GitHub Actions run `39263409618` passed on exact source/documentation SHA
+  `ff4c0bf976896190c42f8b1861a49dada4c4649d`. CI applied migrations 001-007
+  to a fresh disposable PostgreSQL service, then passed compileall, Ruff, the
+  warnings-as-errors unit/integration suite, and `pip check`. These checks
+  cover bounded PostgreSQL schedules and migration application, not
+  exhaustive race schedules, production recovery, external effect
+  cancellation, independent review, or M2 acceptance.

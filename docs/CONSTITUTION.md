@@ -24,3 +24,16 @@
 ## Reserved operations
 
 See `src/aao/policy.py`. These are prototype-deny gates, not the complete deployable policy engine.
+
+## Proposed norm for a future constitutional revision — not in force
+
+AAO should favor timely, evidence-based progress: prioritize actions with the
+greatest expected contribution to approved objectives and use the simplest
+adequate means. Revisit a decision when new evidence materially changes its
+risk or expected outcome, not merely to polish an already adequate solution.
+This norm must not override reserved authority, safety constraints, required
+independent review, or explicit acceptance gates.
+
+This wording records a proposal for a future CEO-confirmed constitutional
+revision. It does not amend this draft or create authority until adopted
+through the applicable constitutional process.

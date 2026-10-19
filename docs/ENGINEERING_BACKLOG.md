@@ -32,12 +32,14 @@ amendment or CEO-confirmed constitutional rule.
 
 ## Current M2 engineering priorities
 
-- **Implemented in candidate code; verification pending:** migration 007 fences
+- **Implemented and locally/CI verified:** migration 007 fences
   leases across project pause/resume by binding claim and validation to a
   database-owned project state generation. It deliberately leaves stale work
   for normal lease expiry and independent quarantine/reconciliation; it does
-  not cancel external actions. Require full PostgreSQL integration validation
-  and CI before treating this as verified.
+  not cancel external actions. The full disposable-PostgreSQL suite and a
+  controlled pause/completion lock schedule passed locally, and CI passed on
+  the exact source tree. Neither result proves production recovery or
+  external-effect safety.
 
 1. **Implemented in candidate code and CI-validated:** execution authenticates only through
    individual AGENT credentials. Migration `006_unified_execution_identity`
