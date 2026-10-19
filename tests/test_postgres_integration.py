@@ -252,8 +252,11 @@ def test_reconciliation_requires_distinct_granted_reviewer(monkeypatch):
         db.execute("INSERT INTO project_grants(principal_id,project_id,capability) VALUES (%s,%s,'execution.claim')", (worker_id, project))
     lease = claim(worker_id, credential=secret, project_id=project, now=base, seconds=1)
     assert lease["execution_id"] == eid
-    assert quarantine_expired(now=base + timedelta(seconds=2)) == 1
+    # Quarantine is global: previous tests may leave other expired leases.
+    assert quarantine_expired(now=base + timedelta(seconds=2)) >= 1
     assert state(eid)["status"] == "UNCERTAIN"
+    # Re-running quarantine must not alter this execution again.
+    assert state(eid)["attempts"] == 1
     with pytest.raises(ReconciliationDenied):
         reconcile(eid, reviewer_id=auditor_id, evidence=["operator checked"],
                   disposition="RETRY_CONFIRMED_SAFE")
