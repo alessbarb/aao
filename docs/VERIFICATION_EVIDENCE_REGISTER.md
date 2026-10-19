@@ -53,9 +53,11 @@ El estado descrito abajo es histórico. En el worktree posterior a `a47c853`,
 se retiró el fallback compartido del API PostgreSQL y se migraron los
 escenarios de integración a credenciales individuales. En el árbol de trabajo
 se ejecutaron compileall, Ruff, pip check, diff check y la suite completa
-contra la base explícitamente desechable indicada por `.env.test`: **52
-passed, 0 skipped, 0 warnings**. Esta evidencia es previa al commit y no
-incluye CI; debe registrarse de nuevo con el SHA exacto tras commit.
+contra la base explícitamente desechable indicada por `.env.test` sobre
+`ca1857e8fa387f6834540b70f21bf11202cfc8e3`: **52 passed, 0 skipped, 0
+warnings**. Ruff informó `All checks passed!`, pip check informó `No broken
+requirements found`, y `git diff --check` terminó sin errores. Esta evidencia
+es local y aún no incluye CI ni revisión independiente.
 
 Tras las 43 pruebas confirmadas, se incorporaron las rutas individuales de
 lectura de proyectos/tableros y el bloqueo de tokens compartidos de workers y
