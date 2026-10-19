@@ -341,3 +341,44 @@ def test_postgres_workboard_requires_ceo_read_credentials(monkeypatch):
         )
         assert allowed.status_code == 200
         assert isinstance(allowed.json(), list)
+
+
+@pytest.mark.skipif(
+    not os.getenv("AAO_TEST_POSTGRES_URL") or os.getenv("AAO_TEST_DB_DISPOSABLE") != "yes",
+    reason="Explicit disposable PostgreSQL database required",
+)
+def test_project_reads_are_scoped_to_granted_worker(monkeypatch):
+    from aao.pg_work import app
+    monkeypatch.setenv("AAO_POSTGRES_URL", os.environ["AAO_TEST_POSTGRES_URL"])
+    monkeypatch.setenv("AAO_CEO_TOKEN", "scoped-read-ceo")
+    monkeypatch.setenv("AAO_WORK_TOKEN", "scoped-read-worker")
+    ceo = {"X-CEO-Token": "scoped-read-ceo"}
+    worker = {"X-Work-Token": "scoped-read-worker"}
+    with TestClient(app) as client:
+        project_ids = []
+        for i in range(2):
+            mid = client.post("/v1/mandates", headers=ceo, json={
+                "title": f"Read scope {i} {uuid4()}", "objective": "Disposable read test"
+            }).json()["id"]
+            assert client.post(f"/v1/mandates/{mid}/confirm", headers=ceo).status_code == 200
+            pid = client.post("/v1/projects", headers=ceo, json={
+                "name": f"Scope {i}", "mandate_id": mid,
+            }).json()["id"]
+            project_ids.append(pid)
+        allow, deny = project_ids
+        before = client.get("/v1/projects", headers=worker)
+        assert before.status_code == 200
+        assert allow not in [p["id"] for p in before.json()]
+        assert deny not in [p["id"] for p in before.json()]
+        assert client.get(f"/v1/projects/{deny}/board", headers=worker).status_code == 403
+        granted = client.post(f"/v1/projects/{allow}/grants", headers=ceo, json={
+            "principal_id": "development-worker", "capability": "project.read",
+        })
+        assert granted.status_code == 201, granted.text
+        visible = client.get("/v1/projects", headers=worker)
+        assert visible.status_code == 200
+        ids = [p["id"] for p in visible.json()]
+        assert allow in ids and deny not in ids
+        assert client.get(f"/v1/projects/{allow}/board", headers=worker).status_code == 200
+        assert client.get(f"/v1/projects/{deny}/board", headers=worker).status_code == 403
+        assert client.get(f"/v1/projects/{deny}/board", headers=ceo).status_code == 200
