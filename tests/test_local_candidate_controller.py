@@ -161,6 +161,23 @@ def test_rejects_non_private_existing_state_directory(
         register_candidate(root, target, candidate, state, target_ref=target_ref)
 
 
+def test_candidate_artifact_collision_fails_closed_without_leaving_temp_files(
+    tmp_path: Path,
+    repository: tuple[Path, str, str, str],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    root, target, candidate, target_ref = repository
+    state = tmp_path / "state"
+
+    def collision(*_args: object, **_kwargs: object) -> None:
+        raise FileExistsError("concurrent artifact writer")
+
+    monkeypatch.setattr(local_candidate_controller.os, "link", collision)
+    with pytest.raises(CandidateControllerError, match="already exists; refusing overwrite"):
+        register_candidate(root, target, candidate, state, target_ref=target_ref)
+    assert list(state.iterdir()) == []
+
+
 def test_rejects_duplicate_record_tampering_and_unallowlisted_check(
     tmp_path: Path, repository: tuple[Path, str, str, str], monkeypatch: pytest.MonkeyPatch
 ) -> None:

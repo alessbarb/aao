@@ -115,7 +115,14 @@ def _write_json(path: Path, value: dict[str, Any]) -> str:
             stream.write(payload)
             stream.flush()
             os.fsync(stream.fileno())
-        os.link(temporary, path)
+        try:
+            os.link(temporary, path)
+        except FileExistsError as exc:
+            raise CandidateControllerError(
+                "candidate artifact already exists; refusing overwrite"
+            ) from exc
+        except OSError as exc:
+            raise CandidateControllerError("candidate artifact could not be persisted") from exc
         directory = os.open(path.parent, os.O_RDONLY | os.O_DIRECTORY)
         try:
             os.fsync(directory)
