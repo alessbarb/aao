@@ -31,17 +31,21 @@ class BootstrapError(RuntimeError):
 
 
 def request_json(base_url: str, path: str, *, method: str = "GET",
-                 ceo_token: str, body: dict | None = None) -> dict | list:
+                 ceo_token: str | None = None, agent_token: str | None = None,
+                 body: dict | None = None) -> dict | list:
+    headers = {"Accept": "application/json"}
+    if body is not None:
+        headers["Content-Type"] = "application/json"
+    if ceo_token is not None:
+        headers["X-CEO-Token"] = ceo_token
+    if agent_token is not None:
+        headers["X-Agent-Token"] = agent_token
     payload = None if body is None else json.dumps(body).encode()
     request = Request(
         f"{base_url}{path}",
         data=payload,
         method=method,
-        headers={
-            "Accept": "application/json",
-            "Content-Type": "application/json",
-            "X-CEO-Token": ceo_token,
-        },
+        headers=headers,
     )
     try:
         with urlopen(request, timeout=5) as response:
@@ -125,6 +129,13 @@ def bootstrap(base_url: str) -> tuple[str, str, datetime, Path]:
             )
             if not isinstance(response, dict) or response.get("created") is not True:
                 raise BootstrapError("a narrowly scoped project grant was not created")
+        visible_projects = request_json(
+            base_url, "/v1/projects", agent_token=agent_token,
+        )
+        if not isinstance(visible_projects, list) or not any(
+            item.get("id") == project["id"] for item in visible_projects
+        ):
+            raise BootstrapError("the issued AGENT identity failed its scoped read check")
         write_private_token(token_path, agent_token)
     except BaseException:
         try:
