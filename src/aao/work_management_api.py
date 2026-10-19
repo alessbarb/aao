@@ -597,14 +597,30 @@ def review(work_id: str, payload: ReviewRequest, principal: str = Depends(requir
         if principal == author:
             raise HTTPException(403, "Author cannot review own work")
         executions = db.execute(
-            "SELECT id,status FROM execution_queue WHERE work_id=%s FOR UPDATE",
+            "SELECT id,status,result_json FROM execution_queue WHERE work_id=%s FOR UPDATE",
             (work_id,),
         ).fetchall()
         if payload.decision == "APPROVE" and any(
             execution_status != "SUCCEEDED"
-            for _, execution_status in executions
+            for _, execution_status, _ in executions
         ):
             raise HTTPException(409, "Execution must succeed before work review")
+        if payload.decision == "APPROVE" and any(
+            isinstance(result, dict)
+            and result.get("kind") == "aao.repository-check.v1"
+            and (
+                result.get("conclusion") != "success"
+                or result.get("check_id") not in {"core-unit"}
+                or not isinstance(result.get("candidate_sha"), str)
+                or len(result["candidate_sha"]) != 40
+                or any(char not in "0123456789abcdef" for char in result["candidate_sha"])
+            )
+            for _, _, result in executions
+        ):
+            raise HTTPException(
+                409,
+                "Repository check must succeed with a full candidate SHA before approval",
+            )
         if db.execute(
             "SELECT 1 FROM execution_journal j "
             "JOIN execution_queue q ON q.id=j.execution_id "

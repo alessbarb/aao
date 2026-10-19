@@ -263,6 +263,81 @@ def test_postgres_review_is_separate_from_author_and_required_for_done(monkeypat
     not os.getenv("AAO_TEST_POSTGRES_URL") or os.getenv("AAO_TEST_DB_DISPOSABLE") != "yes",
     reason="Explicit disposable PostgreSQL database required",
 )
+@pytest.mark.parametrize(
+    ("conclusion", "expected_detail"),
+    [
+        ("failure", "Repository check must succeed with a full candidate SHA before approval"),
+        ("success", "Approval disabled until independent identity and evidence verification exist"),
+    ],
+)
+def test_repository_check_approval_requires_successful_result(
+    monkeypatch, conclusion, expected_detail,
+):
+    """Only a completed successful repository check can support approval."""
+    from aao.execution_queue import claim, complete
+    from aao.work_management_api import app
+
+    monkeypatch.setenv("AAO_POSTGRES_URL", os.environ["AAO_TEST_POSTGRES_URL"])
+    monkeypatch.setenv("AAO_CEO_TOKEN", "failed-check-ceo")
+    monkeypatch.setenv("AAO_SANDBOX_QUEUE_ENABLED", "true")
+    ceo = {"X-CEO-Token": "failed-check-ceo"}
+
+    with TestClient(app) as client:
+        agent_id = "check-agent-" + str(uuid4())
+        auditor_id = "check-auditor-" + str(uuid4())
+        agent_token = client.post("/v1/principals/credentials", headers=ceo, json={
+            "principal_id": agent_id, "kind": "AGENT",
+        }).json()["token"]
+        auditor_token = client.post("/v1/principals/credentials", headers=ceo, json={
+            "principal_id": auditor_id, "kind": "AUDITOR",
+        }).json()["token"]
+        agent = {"X-Agent-Token": agent_token}
+        auditor = {"X-Auditor-Token": auditor_token}
+        mandate = client.post("/v1/mandates", headers=ceo, json={
+            "title": "Failed check " + str(uuid4()),
+            "objective": "Do not approve failed repository checks",
+        }).json()["id"]
+        assert client.post(f"/v1/mandates/{mandate}/confirm", headers=ceo).status_code == 200
+        project = client.post("/v1/projects", headers=ceo, json={
+            "name": "Failed check", "mandate_id": mandate,
+        }).json()["id"]
+        for principal, capabilities in (
+            (agent_id, ("work.create", "work.admit", "work.progress", "execution.claim")),
+            (auditor_id, ("work.review",)),
+        ):
+            for capability in capabilities:
+                assert client.post(f"/v1/projects/{project}/grants", headers=ceo, json={
+                    "principal_id": principal, "capability": capability,
+                }).status_code == 201
+        work = client.post(f"/v1/projects/{project}/work", headers=agent, json={
+            "title": "Failing candidate check", "author_id": agent_id,
+            "acceptance_criteria": ["Repository checks pass"],
+        }).json()["id"]
+        assert client.post(f"/v1/work/{work}/admit", headers=agent).status_code == 200
+        assert client.post(f"/v1/work/{work}/progress", headers=agent).json()["status"] == "IN_PROGRESS"
+        staged = client.post(f"/v1/work/{work}/stage-repository-check", headers=agent,
+                             json={"check_id": "core-unit"})
+        assert staged.status_code == 202, staged.text
+        lease = claim(agent_id, agent_credential=agent_token, project_id=project)
+        assert lease and lease["execution_id"] == staged.json()["execution_id"]
+        complete(lease["execution_id"], lease["token"], agent_id, {
+            "kind": "aao.repository-check.v1", "check_id": "core-unit",
+            "candidate_sha": "a" * 40, "conclusion": conclusion,
+            "exit_code": 0 if conclusion == "success" else 1,
+        }, agent_credential=agent_token)
+        assert client.post(f"/v1/work/{work}/progress", headers=agent).json()["status"] == "IN_REVIEW"
+
+        approval = client.post(f"/v1/work/{work}/reviews", headers=auditor, json={
+            "decision": "APPROVE", "evidence": ["sha256:failed-check-result"],
+        })
+        assert approval.status_code == 409, approval.text
+        assert approval.json()["detail"] == expected_detail
+
+
+@pytest.mark.skipif(
+    not os.getenv("AAO_TEST_POSTGRES_URL") or os.getenv("AAO_TEST_DB_DISPOSABLE") != "yes",
+    reason="Explicit disposable PostgreSQL database required",
+)
 def test_postgres_workboard_requires_ceo_read_credentials(monkeypatch):
     """The browser and API share an origin, but project reads stay protected."""
     from aao.work_management_api import app
