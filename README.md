@@ -11,20 +11,26 @@ project-scoped grants, execution leases, and an inert queue exist. Shared
 worker/reviewer tokens and the legacy worker-registration table have been
 removed from the PostgreSQL runtime; migration 006 unifies execution identity.
 Protected transactions recheck credentials and lock grants for the operations
-covered by current integration tests. The static CEO bearer is restricted to
-explicit development/test modes and rejected elsewhere; production CEO identity
-and constitutional approval are not implemented. Remaining gaps include HTTP
-credential-rotation races, broader grant/revocation ordering, adversarial
-lease/recovery behavior, and independent review. Approval and DONE transitions
-currently fail closed because reviewer independence and evidence references
-are not independently verified; the read-only workboard labels this boundary
-and displays stored status without certifying it. See the current authorization
-matrix and verification register for exact scope and evidence.
+covered by current integration tests. Migrations 008/009 add project-scoped,
+content-addressed evidence, digest rechecking, internal authorized auditor
+inspection, and row-level update/delete/truncate guards. These do not prove
+evidence truth, human authorship, or immunity from a database owner. The static
+CEO bearer is restricted to explicit development/test modes and rejected
+elsewhere; production CEO identity and constitutional approval are not
+implemented. Remaining gaps include independent human auditor identity,
+database-role isolation, broader adversarial recovery coverage, and formal
+independent review. Approval and DONE transitions remain fail-closed. See the
+[M2 compliance matrix](docs/M2_COMPLIANCE_MATRIX.md),
+[technical audit](docs/M2_TECHNICAL_AUDIT.md), and exact
+[verification register](docs/VERIFICATION_EVIDENCE_REGISTER.md) for scope and
+evidence. The independent review package is prepared but no formal review has
+been obtained.
 
 The latest exact local engineering validation is recorded in
 [`docs/VERIFICATION_EVIDENCE_REGISTER.md`](docs/VERIFICATION_EVIDENCE_REGISTER.md).
-The current candidate is not M2-accepted. CI is checked against each exact SHA;
-a green result is not independent security review or acceptance.
+The current candidate is not M2-accepted. CI was not awaited for the latest
+local checkpoint per operator direction; a green result is not independent
+security review or acceptance.
 
 No external effects, model adapters or autonomous operations are enabled. The
 CEO token remains a provisional development bearer, not constitutional

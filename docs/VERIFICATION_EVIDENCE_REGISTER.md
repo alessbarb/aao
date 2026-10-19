@@ -734,3 +734,40 @@ coverage, independent review, or M2 acceptance.
   instruction.
 - This verifies these stale-context denials only; it is not exhaustive
   revocation-ordering coverage, independent review, or M2 acceptance.
+
+## Content-addressed reconciliation evidence and authorized inspection — 2026-10-19
+
+- Exact source revision: `c3b944f07e1b94b52d3268575ff72c820d7c4824` on
+  `feat/aao-m0-foundation`.
+- Added migrations 008/009 for project-scoped content-addressed evidence and
+  UPDATE/DELETE/TRUNCATE denial triggers. Agent submission is individually
+  authenticated and grant-checked; reconciliation resolves and re-hashes
+  references; an individually authenticated auditor with a reconciliation
+  grant can inspect artifact bytes through the internal Python interface.
+- Local disposable-PostgreSQL database migration application was guarded by
+  test mode, the explicit disposable flag, and configured test DSN. The DSN was
+  not emitted. The full command
+  `AAO_ENV=test AAO_ENV_FILE=.env.test python -m pytest -q -rs -W error`
+  passed **78 tests, 0 failures, 0 skips, 0 warnings** in **19.55 s**.
+- `python -m compileall -q src tests`, `python -m ruff check src tests`,
+  `python -m pip check`, and `git diff --check` all passed on the same source
+  tree immediately before commit. CI was not run or awaited per operator
+  direction.
+- This proves only the tested local behavior. It does not prove evidence truth,
+  human authorship, reviewer independence, owner-resistant immutability,
+  production permissions, or M2 acceptance. A PostgreSQL owner can disable
+  triggers; there is no HTTP artifact interface. No formal independent review
+  was obtained.
+
+## Evidence inspection authorization negatives — 2026-10-19
+
+- Exact source revision: `88ec4264d655e6d25ec2b8f6859019a411a797fa` on
+  `feat/aao-m0-foundation`; this adds negative integration assertions that an
+  AGENT cannot use auditor artifact inspection and an AUDITOR without the
+  requested project capability cannot inspect evidence.
+- The full explicitly disposable PostgreSQL suite passed **78 tests, 0
+  failures, 0 skips, 0 warnings** in **19.54 s** under `-W error`. Compilation,
+  Ruff, `pip check`, and `git diff --check` also passed immediately before
+  commit. CI was not awaited per operator direction.
+- This adds denial coverage only; it does not prove human independence,
+  evidence truth, all read/submit/revocation races, or M2 acceptance.
