@@ -32,6 +32,9 @@ as live issue statuses.
 - **M2-04 — BLOQUEADO on scope, not technically complete:** sandbox runners
   with operation-scoped capabilities are explicitly named in this planning
   seed but are not implemented. The current worker is deliberately inert.
+  The SQLite prototype's `sandbox-queue` route is not a sandbox runner: it
+  accepts no tool/model operation and provides no operation-scoped capability
+  isolation. Its tests do not satisfy or evidence the PostgreSQL M2-04 item.
   A scope decision is required before treating sandbox execution as either an
   acceptance requirement or a deferral.
 - **Formal acceptance — PENDIENTE:** the Constitution is a draft; no ratified

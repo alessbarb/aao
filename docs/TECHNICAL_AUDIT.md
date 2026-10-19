@@ -81,6 +81,11 @@ claimed.
 
 - Keep the worker and effect adapter inert. Provider-side exactly-once behavior
   cannot be validated without an authorized external system and is deferred.
+- The separate SQLite prototype's `sandbox-queue` endpoint must not be treated
+  as the PostgreSQL execution boundary or as M2-04 evidence. Its admission
+  inputs include simulated `authorized`, dependency, capacity, budget and risk
+  values, and it implements no operation-scoped sandbox isolation. Keep it
+  explicitly non-operational; do not route real work through it.
 - Keep `APPROVE` and `VERIFIED -> DONE` fail-closed until independent human
   identity, inspectable evidence and an approved review policy exist.
 - Treat AAO as eligible to be its own first managed project, not as an implicit
