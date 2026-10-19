@@ -116,6 +116,11 @@ class ReviewRequest(BaseModel):
     evidence: list[str] = Field(min_length=1)
 
 
+class PrincipalCredentialRequest(BaseModel):
+    principal_id: str = Field(min_length=1, max_length=128, pattern=r"^[a-zA-Z0-9_-]+$")
+    kind: str = Field(pattern=r"^(AGENT|AUDITOR)$")
+
+
 class GrantRequest(BaseModel):
     principal_id: str = Field(min_length=1)
     capability: str = Field(pattern=r"^(?:work\.(?:create|admit|review|progress)|project\.read|execution\.claim)$")
@@ -133,6 +138,65 @@ def workboard_ui():
 @app.get("/health")
 def health():
     return {"service": "postgres-dev", "autonomous_execution": False}
+
+
+@app.post("/v1/principals/credentials", status_code=201)
+def issue_principal_credential(
+    payload: PrincipalCredentialRequest, _: str = Depends(require_ceo)
+):
+    """CEO-only development issuance. Secret returned once, digest persisted."""
+    from aao.pg_principals import digest_token
+
+    token = secrets.token_urlsafe(32)
+    with tx() as db:
+        if db.execute(
+            "SELECT 1 FROM principal_credentials WHERE principal_id=%s FOR UPDATE",
+            (payload.principal_id,),
+        ).fetchone():
+            raise HTTPException(409, "Principal already registered; use rotation")
+        db.execute(
+            "INSERT INTO principal_credentials(principal_id,kind,token_digest,enabled) "
+            "VALUES (%s,%s,%s,true)",
+            (payload.principal_id, payload.kind, digest_token(token)),
+        )
+        audit(db, str(uuid4()), "principal.credential.issued",
+              {"principal_id": payload.principal_id, "kind": payload.kind})
+    return {"principal_id": payload.principal_id, "kind": payload.kind, "token": token}
+
+
+@app.post("/v1/principals/{principal_id}/revoke")
+def revoke_principal(principal_id: str, _: str = Depends(require_ceo)):
+    """Revocation prevents new authentication and lease completion."""
+    with tx() as db:
+        row = db.execute(
+            "UPDATE principal_credentials SET enabled=false "
+            "WHERE principal_id=%s AND enabled=true RETURNING kind",
+            (principal_id,),
+        ).fetchone()
+        if not row:
+            raise HTTPException(404, "Active principal credential not found")
+        audit(db, str(uuid4()), "principal.credential.revoked",
+              {"principal_id": principal_id, "kind": row[0]})
+    return {"principal_id": principal_id, "enabled": False}
+
+
+@app.post("/v1/principals/{principal_id}/rotate")
+def rotate_principal(principal_id: str, _: str = Depends(require_ceo)):
+    """Atomic rotation invalidates the previous token."""
+    from aao.pg_principals import digest_token
+
+    token = secrets.token_urlsafe(32)
+    with tx() as db:
+        row = db.execute(
+            "UPDATE principal_credentials SET token_digest=%s,enabled=true "
+            "WHERE principal_id=%s RETURNING kind",
+            (digest_token(token), principal_id),
+        ).fetchone()
+        if not row:
+            raise HTTPException(404, "Principal credential not found")
+        audit(db, str(uuid4()), "principal.credential.rotated",
+              {"principal_id": principal_id, "kind": row[0]})
+    return {"principal_id": principal_id, "kind": row[0], "token": token}
 
 
 @app.post("/v1/mandates", status_code=201)
