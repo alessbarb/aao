@@ -199,7 +199,7 @@ def test_unknown_sha_is_refused(env):
 
 
 def test_sandbox_has_read_only_candidate_and_no_network(tmp_path):
-    if subprocess.run(["bwrap", "--unshare-all", "--ro-bind", "/", "/", "true"], check=False, capture_output=True).returncode:
+    if not shutil.which("bwrap") or subprocess.run(["bwrap", "--unshare-all", "--ro-bind", "/", "/", "true"], check=False, capture_output=True).returncode:
         pytest.skip("unprivileged bubblewrap namespaces are unavailable")
     (tmp_path / "f").write_text("x")
     probe = ("import socket, pathlib\n"
