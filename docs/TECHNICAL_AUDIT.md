@@ -94,3 +94,12 @@ Read-only architecture, IAM/adversarial, database/concurrency, and evidence
 design subagent reviews were used to find issues and improve the candidate.
 They ran in the same process context and are **not** the formal independent
 review required for acceptance.
+
+At review checkout `62422b15fc69261262bdeaa0aaccd5c5cd6f1cdc`, additional
+read-only IAM/evidence, durable-execution, and scope/documentation passes found
+no concrete authorization bypass or lease/fencing defect in the reviewed
+candidate paths, and no material contradiction among the current M2 reports.
+They reaffirmed the recorded limits: no production CEO identity, independent
+human reviewer proof, automated process-restart recovery, or autonomous
+recovery controller. These passes inspected source and tests but did not
+execute tests; they are internal reviews, not independent assurance.
