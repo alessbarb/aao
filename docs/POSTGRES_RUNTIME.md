@@ -51,3 +51,27 @@ verified artifacts. No OAuth/OIDC identities, signed approvals, reviewer
 qualification/independence assessment, project-scoped read authorization,
 migration/rollback system, worker integration, dynamic risk assessment or
 production-grade audit integrity exists yet. AAO remains development-only.
+
+
+## Increment: PostgreSQL workboard on the same origin
+
+The PostgreSQL API now serves the **read-only** workboard at its root
+(`http://127.0.0.1:8001/`). It fetches `/v1/projects` and each
+`/v1/projects/{id}/board` from the **same PostgreSQL API**, not from
+the SQLite API on port 8000. No CORS proxy and no data synchronization
+between SQLite and PostgreSQL is involved.
+
+Project reads continue to require the development CEO token. On an
+initial 403, the browser prompts for the development CEO token and holds
+it only in the current tab's JavaScript memory, not localStorage or URL.
+This is a **local development workflow only**; entering privileged tokens
+in browser prompts is not an acceptable production authentication method.
+
+SQLite remains available separately at port 8000 for backward inspection,
+but it is no longer required to view the PostgreSQL workboard. The runtime
+is **not fully unified**: CEO/project auth, work submission, effects,
+and lifecycle still need a single hardened PostgreSQL application.
+
+A test was added to verify same-origin page delivery and fail-closed
+project listing without valid CEO credentials. It has not yet been run
+against the operator's PostgreSQL instance.
