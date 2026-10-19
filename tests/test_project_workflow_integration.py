@@ -485,6 +485,63 @@ def test_project_reads_are_scoped_to_granted_worker(monkeypatch):
 
 @pytest.mark.skipif(
     not os.getenv("AAO_TEST_POSTGRES_URL") or os.getenv("AAO_TEST_DB_DISPOSABLE") != "yes",
+    reason="Explicit disposable PostgreSQL test database required",
+)
+def test_agent_can_inspect_only_its_own_project_grants(monkeypatch):
+    from datetime import UTC, datetime, timedelta
+
+    from aao.work_management_api import app
+
+    monkeypatch.setenv("AAO_POSTGRES_URL", os.environ["AAO_TEST_POSTGRES_URL"])
+    monkeypatch.setenv("AAO_CEO_TOKEN", "grant-inventory-ceo")
+    ceo = {"X-CEO-Token": "grant-inventory-ceo"}
+    with TestClient(app) as client:
+        mandate = client.post("/v1/mandates", headers=ceo, json={
+            "title": "Grant inventory " + str(uuid4()),
+            "objective": "Test self-scoped grant discovery",
+        }).json()["id"]
+        assert client.post(f"/v1/mandates/{mandate}/confirm", headers=ceo).status_code == 200
+        project = client.post("/v1/projects", headers=ceo, json={
+            "name": "Grant inventory", "mandate_id": mandate,
+        }).json()["id"]
+        agent_id = "grant-agent-" + str(uuid4())
+        agent_token = client.post("/v1/principals/credentials", headers=ceo, json={
+            "principal_id": agent_id, "kind": "AGENT",
+        }).json()["token"]
+        other_id = "other-agent-" + str(uuid4())
+        client.post("/v1/principals/credentials", headers=ceo, json={
+            "principal_id": other_id, "kind": "AGENT",
+        })
+        expiry = (datetime.now(UTC) + timedelta(hours=1)).isoformat()
+        for principal_id, capability in (
+            (agent_id, "project.read"), (agent_id, "code.propose"),
+            (other_id, "work.create"),
+        ):
+            grant = client.post(f"/v1/projects/{project}/grants", headers=ceo, json={
+                "principal_id": principal_id, "capability": capability,
+                "expires_at": expiry,
+            })
+            assert grant.status_code == 201, grant.text
+
+        assert client.get("/v1/principals/me/grants").status_code == 403
+        response = client.get(
+            "/v1/principals/me/grants", headers={"X-Agent-Token": agent_token},
+        )
+        assert response.status_code == 200, response.text
+        grants = response.json()
+        assert {row["capability"] for row in grants} == {"project.read", "code.propose"}
+        assert {row["project_id"] for row in grants} == {project}
+        assert {row["principal_id"] for row in grants} == {agent_id}
+        assert all(row["active"] for row in grants)
+        assert all(row["expires_at"] for row in grants)
+        assert client.post(f"/v1/principals/{agent_id}/revoke", headers=ceo).status_code == 200
+        assert client.get(
+            "/v1/principals/me/grants", headers={"X-Agent-Token": agent_token},
+        ).status_code == 403
+
+
+@pytest.mark.skipif(
+    not os.getenv("AAO_TEST_POSTGRES_URL") or os.getenv("AAO_TEST_DB_DISPOSABLE") != "yes",
     reason="Explicit disposable PostgreSQL database required",
 )
 def test_grant_revocation_serializes_after_authorized_transaction(monkeypatch):

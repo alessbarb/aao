@@ -42,6 +42,10 @@ should tolerate additive fields and must treat unknown states as non-approved.
   details or credentials are returned.
 - `GET /v1/principals/me`: individual AGENT identity only; returns principal
   ID, kind and enabled state, never credential material.
+- `GET /v1/principals/me/grants`: returns only that authenticated AGENT's
+  project/capability grants, expiry and a database-clock `active` value. It is
+  read-only inventory, not a capability token or authorization decision;
+  each protected operation must continue to check its grant transactionally.
 
 ### Project and work read model
 
@@ -152,6 +156,9 @@ These are proposals for interface alignment, not changes to other teams' code:
 4. **Capability consumers:** treat registry entries as descriptions, not
    permissions. A runtime operation must still check principal kind, project
    grant, task state, capability type/version and its fixed allowlisted contract.
+5. **Agent runtime:** use the self-grant inventory only to plan or explain
+   authorization state. It must not cache the result as permission or retry a
+   denied operation with another principal or stronger credential.
 
 ## Explicit non-contracts and unresolved ownership
 
