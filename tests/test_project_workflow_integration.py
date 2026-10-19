@@ -116,9 +116,11 @@ def test_grant_creation_requires_active_principal_with_matching_kind(monkeypatch
         assert client.post("/v1/principals/credentials", headers=ceo, json={
             "principal_id": agent, "kind": "AGENT",
         }).status_code == 201
-        assert client.post("/v1/principals/credentials", headers=ceo, json={
+        auditor_credential = client.post("/v1/principals/credentials", headers=ceo, json={
             "principal_id": auditor, "kind": "AUDITOR",
-        }).status_code == 201
+        })
+        assert auditor_credential.status_code == 201
+        reader = {"X-Auditor-Token": auditor_credential.json()["token"]}
         mandate = client.post("/v1/mandates", headers=ceo, json={
             "title": "Grant validation " + str(uuid4()),
             "objective": "Reject grants inconsistent with principal authority",
@@ -137,6 +139,24 @@ def test_grant_creation_requires_active_principal_with_matching_kind(monkeypatch
                 "principal_id": principal, "capability": capability,
             })
             assert response.status_code == status, response.text
+
+        assert client.get("/v1/projects", headers=reader).json() == []
+        assert client.get(f"/v1/projects/{project}", headers=reader).status_code == 403
+        valid_reader = client.post(f"/v1/projects/{project}/grants", headers=ceo, json={
+            "principal_id": auditor, "capability": "project.read",
+        })
+        assert valid_reader.status_code == 201, valid_reader.text
+        visible_projects = client.get("/v1/projects", headers=reader)
+        assert visible_projects.status_code == 200, visible_projects.text
+        assert [row["id"] for row in visible_projects.json()] == [project]
+        assert client.get(f"/v1/projects/{project}", headers=reader).status_code == 200
+        assert client.get(f"/v1/projects/{project}/board", headers=reader).status_code == 200
+        assert client.get(f"/v1/projects/{project}/activity", headers=reader).status_code == 200
+        assert client.get(f"/v1/projects/{project}/work/{uuid4()}", headers=reader).status_code == 404
+        assert client.post(f"/v1/projects/{project}/work", headers=reader, json={
+            "title": "Must not write", "author_id": auditor,
+            "acceptance_criteria": ["Read grant is not write grant"],
+        }).status_code == 403
 
         valid_agent = client.post(f"/v1/projects/{project}/grants", headers=ceo, json={
             "principal_id": agent, "capability": "work.create",

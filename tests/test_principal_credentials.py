@@ -140,6 +140,80 @@ def test_grant_rechecks_principal_inside_transaction(monkeypatch):
     assert active.queries[1][1] == ("agent-1", "project-1", "work.create")
 
 
+def test_reader_authentication_accepts_individual_auditor_without_ceo_fallback(monkeypatch):
+    from fastapi import HTTPException
+
+    from aao.work_management_api import AuthenticatedPrincipal, read_principal
+
+    monkeypatch.setenv("AAO_ENV", "development")
+    monkeypatch.setenv("AAO_CEO_TOKEN", "ceo-only")
+    monkeypatch.setattr(
+        "aao.principal_credentials.authenticate",
+        lambda token, *, kind: "audit-reader" if token == "auditor-only" and kind == "AUDITOR" else (_ for _ in ()).throw(PrincipalDenied("wrong identity")),
+    )
+    principal = read_principal(
+        x_ceo_token=None, x_agent_token=None, x_auditor_token="auditor-only",
+    )
+    assert principal == "audit-reader"
+    assert isinstance(principal, AuthenticatedPrincipal)
+    assert principal.kind == "AUDITOR"
+    with pytest.raises(HTTPException) as denied:
+        read_principal(
+            x_ceo_token=None, x_agent_token="agent-token",
+            x_auditor_token="auditor-token",
+        )
+    assert denied.value.status_code == 403
+
+
+def test_project_read_grant_accepts_auditor_only_with_explicit_capability():
+    from fastapi import HTTPException
+
+    from aao.work_management_api import AuthenticatedPrincipal, require_grant
+
+    auditor = AuthenticatedPrincipal("audit-reader", "digest", "AUDITOR")
+    db = _GrantQuery(("AUDITOR", True))
+    require_grant(db, auditor, "project-1", "project.read")
+    assert len(db.queries) == 2
+    assert db.queries[1][1] == ("audit-reader", "project-1", "project.read")
+
+    with pytest.raises(HTTPException) as denied:
+        require_grant(_GrantQuery(("AUDITOR", True)), auditor, "project-1", "work.create")
+    assert denied.value.status_code == 403
+
+
+def test_auditor_cannot_become_ceo_reader_by_principal_name(monkeypatch):
+    from contextlib import contextmanager
+
+    from aao import work_management_api
+
+    class ReaderDb:
+        def __init__(self):
+            self.queries = []
+
+        def execute(self, query, args=None):
+            self.queries.append((query, args))
+            return self
+
+        def fetchone(self):
+            return ("AUDITOR", True)
+
+        def fetchall(self):
+            if "JOIN project_grants" in self.queries[-1][0]:
+                return []
+            return [("unscoped-project", "must-not-be-listed", "ACTIVE")]
+
+    db = ReaderDb()
+
+    @contextmanager
+    def fake_tx():
+        yield db
+
+    monkeypatch.setattr(work_management_api, "tx", fake_tx)
+    principal = work_management_api.AuthenticatedPrincipal("ceo", "digest", "AUDITOR")
+    assert work_management_api.projects(principal=principal) == []
+    assert "JOIN project_grants" in db.queries[1][0]
+
+
 def test_reviewer_grant_requires_individual_auditor_kind():
     from fastapi import HTTPException
 

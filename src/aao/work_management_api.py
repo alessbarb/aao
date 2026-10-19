@@ -284,15 +284,24 @@ def change_project_state(
 def read_principal(
     x_ceo_token: str | None = Header(None),
     x_agent_token: str | None = Header(None),
+    x_auditor_token: str | None = Header(None),
 ):
     ceo = os.getenv("AAO_CEO_TOKEN")
     if (_ceo_bearer_enabled() and ceo and x_ceo_token
             and secrets.compare_digest(ceo, x_ceo_token)):
         return _CEO_PRINCIPAL
+    if x_agent_token is not None and x_auditor_token is not None:
+        raise HTTPException(403, "Present exactly one individual reader credential")
     if x_agent_token is not None:
         from aao.principal_credentials import PrincipalDenied
         try:
             return _authenticate_request_principal(x_agent_token, "AGENT")
+        except PrincipalDenied as exc:
+            raise HTTPException(403, "Individual reader credential rejected") from exc
+    if x_auditor_token is not None:
+        from aao.principal_credentials import PrincipalDenied
+        try:
+            return _authenticate_request_principal(x_auditor_token, "AUDITOR")
         except PrincipalDenied as exc:
             raise HTTPException(403, "Individual reader credential rejected") from exc
     raise HTTPException(403, "Authenticated reader required")
@@ -304,14 +313,16 @@ def projects(principal: str = Depends(read_principal)):
         if principal is _CEO_PRINCIPAL:
             rows = db.execute("SELECT id,name,state FROM projects ORDER BY name,id").fetchall()
         else:
-            if not isinstance(principal, AuthenticatedPrincipal):
+            if (not isinstance(principal, AuthenticatedPrincipal)
+                    or principal.kind not in {"AGENT", "AUDITOR"}):
                 raise HTTPException(403, "Individual reader credential required")
             credential = db.execute(
                 "SELECT kind,enabled FROM principal_credentials "
                 "WHERE principal_id=%s AND token_digest=%s FOR SHARE",
                 (principal, principal.token_digest),
             ).fetchone()
-            if not credential or credential[0] != "AGENT" or not credential[1]:
+            if (not credential or credential[0] != principal.kind
+                    or credential[0] not in {"AGENT", "AUDITOR"} or not credential[1]):
                 raise HTTPException(403, "Individual reader invalid or revoked")
             rows = db.execute(
                 "SELECT p.id,p.name,p.state FROM projects p JOIN project_grants g ON g.project_id=p.id "
@@ -336,14 +347,16 @@ def grant(project_id: str, payload: GrantRequest, _: str = Depends(require_ceo))
             raise HTTPException(404, "Principal not found")
         if not principal[1]:
             raise HTTPException(409, "Principal credential is disabled")
-        required_kind = (
-            "AUDITOR" if payload.capability in {
+        required_kinds = (
+            {"AGENT", "AUDITOR"} if payload.capability == "project.read"
+            else {"AUDITOR"} if payload.capability in {
                 "work.review", "execution.reconcile", "effect.reconcile",
-            } else "AGENT"
+            }
+            else {"AGENT"}
         )
-        if principal[0] != required_kind:
+        if principal[0] not in required_kinds:
             raise HTTPException(
-                422, f"Capability requires a {required_kind} principal",
+                422, f"Capability requires one of {sorted(required_kinds)}",
             )
         inserted = db.execute(
             "INSERT INTO project_grants(principal_id,project_id,capability) VALUES (%s,%s,%s) "
@@ -395,8 +408,15 @@ def require_grant(db, principal: str, project_id: str, capability: str):
         "WHERE principal_id=%s AND token_digest=%s FOR SHARE",
         (principal, principal.token_digest),
     ).fetchone()
-    expected_kind = "AUDITOR" if capability in {"work.review", "execution.reconcile", "effect.reconcile"} else "AGENT"
-    if not row or row[0] != expected_kind or row[0] != principal.kind or not row[1]:
+    expected_kinds = (
+        {"AGENT", "AUDITOR"} if capability == "project.read"
+        else {"AUDITOR"} if capability in {
+            "work.review", "execution.reconcile", "effect.reconcile",
+        }
+        else {"AGENT"}
+    )
+    if (not row or row[0] not in expected_kinds
+            or row[0] != principal.kind or not row[1]):
         raise HTTPException(403, "Individual principal invalid or revoked")
     if not db.execute(
         "SELECT 1 FROM project_grants WHERE principal_id=%s AND project_id=%s "
