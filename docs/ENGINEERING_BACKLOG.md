@@ -1,5 +1,34 @@
 # AAO implementation backlog — initial internal planning seed
 
+**Status update — 2026-10-19:** this file began as a planning seed, not an
+authoritative issue tracker. The PostgreSQL API, individual development
+credentials, project-scoped API grants, durable inert queue, lease quarantine
+and effect proposal/reconciliation helpers have since been implemented in
+part. The current authorization inventory is
+[`PRINCIPAL_AUTHORIZATION_MATRIX.md`](PRINCIPAL_AUTHORIZATION_MATRIX.md); the
+latest exact local baseline is in
+[`VERIFICATION_EVIDENCE_REGISTER.md`](VERIFICATION_EVIDENCE_REGISTER.md).
+M2 remains in progress and is not accepted. Do not interpret old `[candidate]`
+or `[BLOCKED]` labels below as live issue statuses.
+
+## Current M2 engineering priorities
+
+1. Retire the `worker_registrations` authentication path and transitional
+   shared worker/reviewer credentials without aliases or loss of applicable
+   development identities.
+2. Define and enforce grant lifecycle semantics, including transactional
+   grant-row locking/linearization for protected operations and concurrent
+   revocation tests.
+3. Bind execution/effect reconciliation to authenticated AUDITOR identity and
+   transactional authorization before considering any HTTP exposure.
+4. Verify lease expiry, credential/grant revocation, effect proposal/retry,
+   quarantine/completion ordering, and cold-restart recovery with repeated
+   PostgreSQL concurrency tests.
+5. Make PostgreSQL integration tests part of CI with a fresh disposable
+   database and migrations; ordinary CI currently can skip those tests.
+6. Obtain adversarial independent security/architecture review and competent
+   acceptance. Codex cannot substitute for either.
+
 This document is a repository bootstrap artifact. **It is not GitHub Issues or GitHub Projects as the operational Kanban.** On M1, import the work definitions into AAO's own database and manage all status transitions there.
 
 ## M0 · Constitutional foundation

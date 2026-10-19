@@ -2,22 +2,46 @@
 
 An independently governed, private, multi-project AI organization. AAO is **not** Biopeia-specific; Biopeia is intended to be its first authorized project.
 
-## Current milestone
+## Current status — 2026-10-19
 
-**M0 foundation candidate** — not a deployed autonomous agent system. This branch implements:
+PR #1 merged the M0 foundation. The current feature branch continues PostgreSQL
+development work toward M2; M2 is **not accepted** and this repository is not a
+deployed autonomous-agent system. The PostgreSQL development API, individual
+AGENT/AUDITOR credentials, project grants, execution leases and an inert queue
+exist, but shared development tokens and legacy worker registrations remain.
+Credential revalidation exists for protected API operations, while grant
+revocation races, adversarial lease/recovery behavior, trusted reconciliation
+identity, production authentication and independent review remain unresolved.
+The authorization inventory is in
+[`docs/PRINCIPAL_AUTHORIZATION_MATRIX.md`](docs/PRINCIPAL_AUTHORIZATION_MATRIX.md).
 
-- deterministic constitutional gates for reserved actions;
-- CEO-confirmed draft mandates (local development token only);
-- project creation against confirmed mandates;
-- internal Kanban work records and event history;
-- fail-closed verification (no premature DONE);
-- automated tests and CI.
+The latest exact local engineering validation is commit
+`d080da58d4a8a41749a932d8fdf2c1caec5ac652`: compileall and Ruff passed; the
+explicit disposable PostgreSQL suite completed 51 tests with warnings treated
+as errors; `pip check` and `git diff --check` passed. The current branch has
+later documentation-only commits. CI for the previous code revision
+`60de4cb7792a3e7a8229f1e9487bdac49f828294` failed on Ruff B023; the fix is in
+the local feature branch and has no CI result until pushed. Normal GitHub CI
+does not configure PostgreSQL, so it does not by itself establish that the
+guarded PostgreSQL integration tests ran.
 
-Not implemented: independent review, production authentication, distributed workers, model adapters, durable engine, PostgreSQL deployment, office UI, and autonomous scheduling. No external effects are enabled.
+No external effects, model adapters or autonomous operations are enabled. The
+CEO token remains a provisional development bearer, not constitutional
+confirmation. Local test success is not independent security review, formal
+acceptance, or production readiness.
 
-## Current PostgreSQL development path (19 October 2026)
+## Historical PostgreSQL development notes
 
-The sections below preserve the incremental history of the prototype; they must not be read as the present acceptance status. The PostgreSQL-backed development API is `aao.work_management_api:app`, while the separate SQLite prototype remains at `aao.sqlite_api:app`. The PostgreSQL integration suite is `tests/test_project_workflow_integration.py`, `tests/test_execution_leases_integration.py`, `tests/test_execution_reconciliation_integration.py`, and `tests/test_principal_credential_lifecycle_integration.py`. Schema migrations `001` through `005` are immutable historical artifacts.
+The sections below preserve incremental prototype history; their checkpoint
+claims are not the present acceptance status and may be superseded by the
+evidence register. The PostgreSQL-backed development API is
+`aao.work_management_api:app`, while the separate SQLite prototype remains at
+`aao.sqlite_api:app`. The PostgreSQL integration suite is
+`tests/test_project_workflow_integration.py`,
+`tests/test_execution_leases_integration.py`,
+`tests/test_execution_reconciliation_integration.py`, and
+`tests/test_principal_credential_lifecycle_integration.py`. Schema migrations
+`001` through `005` are immutable historical artifacts.
 
 For the local disposable test database, after configuring the private `.env.test` file and applying the existing migrations:
 
@@ -26,9 +50,16 @@ AAO_ENV=test AAO_ENV_FILE=.env.test python -m pytest -v -rs
 python -m uvicorn aao.work_management_api:app --host 127.0.0.1 --port 8001
 ```
 
-The 47 passing tests were recorded against commit `1006902c2184fc7fed0f76c677c64ab6599f4669` **before** the naming refactor. They have not been rerun on the current branch by this documentation change. Individual development credentials and a deliberately inert execution worker are present, but M2 remains open and external effects remain disabled. This is not production authentication, independent security acceptance, or permission to enable autonomous operations.
+The original 47-test statement belongs to commit
+`1006902c2184fc7fed0f76c677c64ab6599f4669` and is historical. The newer
+verified checkpoint is recorded above and in
+`docs/VERIFICATION_EVIDENCE_REGISTER.md`. Individual development credentials
+and a deliberately inert execution worker are present, but M2 remains open
+and external effects remain disabled. This is not production authentication,
+independent security acceptance, or permission to enable autonomous
+operations.
 
-## Local development
+## Local development — SQLite prototype
 
 Requires Python 3.12+.
 
@@ -57,17 +88,21 @@ Do not expose this dev server publicly; the development token headers are not su
 
 See [Constitution](docs/CONSTITUTION.md).
 
-## M1 candidate (development only)
+## Historical M1 candidate snapshot (development only)
 
 This branch adds declared work author identity, separate reviewer token, review decision records, and gated transitions into VERIFIED/DONE. Pause/resume is available to the development worker credential; cancellation requires CEO credentials. None of these tokens establish real actor identity or independent auditor authority. Read APIs are still unscoped and must remain on a trusted development network.
 
 The SQLite schema uses additive prototype initialization; PostgreSQL migrations, verified authN/authZ, actual evidence checking, independent audit, distributed execution and a UI remain necessary. See [M1 scope](docs/WORK_MANAGEMENT_SCOPE.md).
 
-## Latest increment: M1/M2 engineering candidates
+## Historical M1/M2 increment snapshot
+
+The bullets below describe an earlier implementation checkpoint; consult the
+current status above and the authorization matrix before treating them as
+current behavior.
 
 The branch also contains:
 
-- a PostgreSQL foundation schema (NOT wired to the API yet);
+- a PostgreSQL development API and foundation schema;
 - pure project-scoped grant checks with expiry;
 - a deterministic admission policy with resource/risk gates;
 - a development-only reviewer workflow and project pause/resume/cancel;
@@ -98,7 +133,7 @@ The initial project workboard and the queue have automated test cases committed
 but **their execution remains unverified in this session**. Do not promote or
 deploy until runtime verification and independent security review.
 
-## PostgreSQL development service (M1 next slice)
+## Historical PostgreSQL development service snapshot
 
 A separate API `aao.work_management_api:app` now uses PostgreSQL transactions for actual
 mandate, project, project grant, work-item and READY-admission writes. This is

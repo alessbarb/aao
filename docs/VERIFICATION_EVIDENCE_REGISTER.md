@@ -1,4 +1,10 @@
-# AAO local validation evidence — 2026-10-19
+# AAO verification evidence register — append-only snapshots
+
+Each entry records evidence and status at its stated revision/time. Earlier
+"pending" or "not verified" statements describe those checkpoints only and
+are superseded where a later entry says validation was completed. Current
+acceptance remains unproven unless explicitly supported by competent review;
+the latest local engineering run is not independent review or M2 acceptance.
 
 ## Environment
 - Branch: `feat/aao-m0-foundation`

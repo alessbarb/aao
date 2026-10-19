@@ -1,21 +1,34 @@
-# M2 individual development principals
+# Principal identity and credential management
+
+This document retains incremental implementation notes. **Current status:**
+individual AGENT/AUDITOR bearer credentials are wired into PostgreSQL work,
+review and project-read routes, and AGENT credentials are accepted by queue
+claim/completion. The verified local baseline is recorded in
+`VERIFICATION_EVIDENCE_REGISTER.md`; the exact current HTTP/internal operation
+map is in `PRINCIPAL_AUTHORIZATION_MATRIX.md`. This remains development-only:
+shared worker/reviewer fallbacks and the separate legacy `worker_registrations`
+registry still exist, the CEO bearer is provisional, and concurrent grant
+revocation, reconciliation identity and independent review are unresolved.
+M2 is not accepted.
+
+## Initial implementation snapshot (historical)
 
 Migration 005 adds an enabled/disabled credential record for independently
 identified AGENT and AUDITOR principals. The Python verifier maps a presented
 token to the stored principal identifier, without trusting caller-supplied IDs.
 Disabled and unrecognized credentials are rejected.
 
-This is a **preparatory component** and is not yet wired into the HTTP work
-and review routes, which still use shared development tokens. SHA-256 bearer
-token digests assume high-entropy generated tokens and are not for passwords.
-No administrative provisioning API has been exposed.
+At this initial checkpoint the registry was not wired into HTTP work/review
+routes and no administrative provisioning API existed. That state has since
+changed as described below. SHA-256 bearer-token digests assume high-entropy
+generated tokens and are not for passwords.
 
 Before adoption: add trusted credential provisioning, per-principal grants,
 request-level principal binding, project isolation tests, revocation and
 independence proofs, and migration integration validation. Do not enable
 external-effect execution.
 
-## First API adoption
+## First API adoption (historical checkpoint)
 
 `POST /v1/work/{id}/reviews` now additionally accepts an individually
 provisioned `X-Auditor-Token` and resolves the reviewer identity from the
@@ -33,7 +46,7 @@ messages or documentation. Provisioning and rotation need a governed
 administrative workflow; do not manually insert production credentials.
 No execution authority is granted by authentication alone.
 
-## Individual agent work identity
+## Individual agent work identity (historical checkpoint)
 
 The PostgreSQL work endpoints also accept `X-Agent-Token` with an enabled
 `AGENT` principal credential. A valid bearer token resolves to the registered
@@ -51,7 +64,7 @@ non-spoofable work authorship and credential revocation. Execution leases
 are still authenticated through a separate worker registration mechanism;
 the two identity registries must be consolidated before M2 acceptance.
 
-## Shared identity across work and inert execution (candidate)
+## Shared identity across work and inert execution (historical checkpoint)
 
 The PostgreSQL queue's `claim()` and `complete()` accept
 `agent_credential` and map it to an enabled `AGENT` principal in the
@@ -65,7 +78,7 @@ production authentication. A database-backed test has been added for invalid
 credential, authorized project claim, and revocation after claim. **It has not
 yet been executed on the operator's machine.**
 
-## Restriction of transitional shared credentials
+## Restriction of transitional shared credentials (historical checkpoint)
 
 The work API, review API and project/board reads recognize individual AGENT /
 AUDITOR bearer credentials. Project/board reads with `X-Agent-Token` are
@@ -79,10 +92,12 @@ constitute production readiness: CEO still uses a prototype shared token,
 provisioning and rotation require governance, and worker registrations remain
 available through the old internal queue API. All external effects remain off.
 
-The new negative unit tests and integration behavior require validation by the
-operator before M2 can be accepted.
+The original validation-pending note for these changes is superseded by the
+local validation recorded for commit
+`d080da58d4a8a41749a932d8fdf2c1caec5ac652`. That run is engineering evidence,
+not a concurrent revocation test, independent review or M2 acceptance.
 
-## Credential lifecycle — candidate for local validation
+## Credential lifecycle (historical validation checkpoint)
 
 The development PostgreSQL API now exposes CEO-authorized operations:
 `POST /v1/principals/credentials` (issue),
@@ -95,5 +110,7 @@ of the token. Rotating invalidates the prior token; revocation sets
 This is development administration, not a hardened production identity
 provider or independent authorization to execute any project work.
 
-The new integration regression checks CEO-only issuance, duplicate denial,
-rotation, revocation and audit events. It has **not been validated locally**.
+The integration regression checks CEO-only issuance, duplicate denial,
+rotation, revocation and audit events. It was included in the 51-test local
+run recorded in `VERIFICATION_EVIDENCE_REGISTER.md`; that does not establish
+production governance or M2 acceptance.
