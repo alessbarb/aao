@@ -532,6 +532,10 @@ def test_postgres_workboard_requires_ceo_read_credentials(monkeypatch):
             "Evidencias", "Decisiones reservadas",
         ):
             assert label in page.text
+        assert "Identidad individual" in page.text
+        assert 'id="session-status"' in page.text
+        assert "proyectos según grants" in page.text
+        assert "CEO" not in page.text.split("type=\"password\"", 1)[-1].split("</form>", 1)[0]
         assert "no se muestran datos de ejemplo" in page.text
         assert "localStorage" not in page.text
         assert client.get("/v1/projects").status_code == 403

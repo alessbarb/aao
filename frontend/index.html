@@ -23,7 +23,7 @@
   <div class="shell">
     <header class="topbar">
       <div class="brand"><div class="mark" aria-hidden="true">A</div><div><h1>AAO Control Center</h1><span class="muted">Operaciones organizativas · desarrollo local</span></div></div>
-      <div class="top-actions"><label class="hidden" for="project">Proyecto</label><select id="project" aria-label="Proyecto"></select><button id="reload" type="button">Actualizar</button><button id="disconnect" type="button" class="hidden">Desconectar</button></div>
+      <div class="top-actions"><span id="session-status" class="muted hidden" role="status"></span><label class="hidden" for="project">Proyecto</label><select id="project" aria-label="Proyecto"></select><button id="reload" type="button">Actualizar</button><button id="disconnect" type="button" class="hidden">Desconectar</button></div>
     </header>
     <form id="auth-panel" class="auth-panel" autocomplete="off">
       <label for="reader-kind">Identidad individual
@@ -55,7 +55,7 @@
     const states=["INBOX","READY","IN_PROGRESS","IN_REVIEW","VERIFIED","DONE"];
     const labels={INBOX:"Entrada",READY:"Preparado",IN_PROGRESS:"En curso",IN_REVIEW:"En revisión",VERIFIED:"Verificado",DONE:"Completado"};
     const projectSelect=document.querySelector("#project"),content=document.querySelector("#content"),message=document.querySelector("#message");
-    const authPanel=document.querySelector("#auth-panel"),authInput=document.querySelector("#auth-token"),readerKind=document.querySelector("#reader-kind"),disconnectButton=document.querySelector("#disconnect");
+    const authPanel=document.querySelector("#auth-panel"),authInput=document.querySelector("#auth-token"),readerKind=document.querySelector("#reader-kind"),disconnectButton=document.querySelector("#disconnect"),sessionStatus=document.querySelector("#session-status");
     let projects=[],selectedProject=null,board=[],detail=null,activity=[],selectedTask=null,activePage="home",readerToken=null,readerIdentity="AGENT";
     function el(tag,text,cls){const item=document.createElement(tag);if(text!==undefined)item.textContent=text;if(cls)item.className=cls;return item}
     function panel(title){const p=el("section",undefined,"panel");p.append(el("h2",title));return p}
@@ -65,7 +65,7 @@
       const headers=readerToken?{[readerIdentity==="AUDITOR"?"X-Auditor-Token":"X-Agent-Token"]:readerToken}:{};
       const response=await fetch(path,{credentials:"same-origin",headers});
       if(response.status===401||response.status===403){
-        if(readerToken){readerToken=null;authInput.value="";readerKind.disabled=false;disconnectButton.classList.add("hidden")}
+        if(readerToken){readerToken=null;authInput.value="";readerKind.disabled=false;disconnectButton.classList.add("hidden");sessionStatus.classList.add("hidden");sessionStatus.textContent=""}
         authPanel.classList.remove("hidden");
         throw new Error("Acceso no autorizado. Introduce una credencial de desarrollo para continuar.");
       }
@@ -183,8 +183,8 @@
     function render(){content.replaceChildren();if(!projects.length){renderHome();return}if(activePage==="home")renderHome();else if(activePage==="project")renderProject();else if(activePage==="activity")renderActivity();else if(activePage==="evidence")void renderEvidence();else renderDecisions();syncNav()}
     projectSelect.addEventListener("change",()=>{selectedProject=projectSelect.value;selectedTask=null;loadProjectData()});
     document.querySelector("#reload").addEventListener("click",()=>loadProjects().catch(err=>setMessage("No se pudo actualizar: "+err.message,true)));
-    authPanel.addEventListener("submit",event=>{event.preventDefault();const token=authInput.value.trim();if(!token)return;readerIdentity=readerKind.value;readerToken=token;readerKind.disabled=true;authInput.value="";disconnectButton.classList.remove("hidden");loadProjects().then(()=>authPanel.classList.add("hidden")).catch(err=>{readerKind.disabled=false;setMessage("No se pudo conectar: "+err.message,true)})});
-    disconnectButton.addEventListener("click",()=>{readerToken=null;readerIdentity="AGENT";readerKind.value="AGENT";readerKind.disabled=false;projects=[];selectedProject=null;board=[];detail=null;activity=[];disconnectButton.classList.add("hidden");authPanel.classList.remove("hidden");render();setMessage("Sesión de lectura desconectada.")});
+    authPanel.addEventListener("submit",event=>{event.preventDefault();const token=authInput.value.trim();if(!token)return;readerIdentity=readerKind.value;readerToken=token;readerKind.disabled=true;authInput.value="";disconnectButton.classList.remove("hidden");loadProjects().then(()=>{authPanel.classList.add("hidden");sessionStatus.textContent="Identidad autenticada · "+(readerIdentity==="AUDITOR"?"auditor":"agente")+" · proyectos según grants";sessionStatus.classList.remove("hidden")}).catch(err=>{readerKind.disabled=false;sessionStatus.classList.add("hidden");setMessage("No se pudo conectar: "+err.message,true)})});
+    disconnectButton.addEventListener("click",()=>{readerToken=null;readerIdentity="AGENT";readerKind.value="AGENT";readerKind.disabled=false;projects=[];selectedProject=null;board=[];detail=null;activity=[];disconnectButton.classList.add("hidden");sessionStatus.classList.add("hidden");sessionStatus.textContent="";authPanel.classList.remove("hidden");render();setMessage("Sesión de lectura desconectada.")});
     document.querySelectorAll(".nav button").forEach(button=>button.addEventListener("click",()=>{activePage=button.dataset.page;selectedTask=null;render()}));
     authPanel.classList.remove("hidden");
   </script>
