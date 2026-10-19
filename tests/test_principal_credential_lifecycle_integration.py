@@ -228,8 +228,9 @@ def test_individual_auditor_credential_is_bound_to_review(monkeypatch):
     not os.getenv("AAO_TEST_POSTGRES_URL") or os.getenv("AAO_TEST_DB_DISPOSABLE") != "yes",
     reason="Explicit disposable PostgreSQL database required",
 )
-def test_review_rejection_serializes_with_auditor_credential_revocation(monkeypatch):
-    """An in-flight authorized rejection commits before credential revocation."""
+@pytest.mark.parametrize("revocation", ["credential", "grant"])
+def test_review_rejection_serializes_with_auditor_revocation(monkeypatch, revocation):
+    """An in-flight rejection commits before its credential or grant is revoked."""
     import aao.work_management_api as work_api
     from aao.postgresql_connection import connect_postgres
     from aao.work_management_api import app
@@ -296,9 +297,20 @@ def test_review_rejection_serializes_with_auditor_credential_revocation(monkeypa
                 json={"decision": "REJECT", "evidence": ["needs more work"]},
             )
             assert authorized.wait(timeout=5), "review did not reach its in-transaction grant check"
-            revoke_future = pool.submit(
-                client.post, f"/v1/principals/{auditor_id}/revoke", headers=ceo,
-            )
+            if revocation == "credential":
+                revoke_future = pool.submit(
+                    client.post, f"/v1/principals/{auditor_id}/revoke", headers=ceo,
+                )
+                revoke_query = "UPDATE principal_credentials SET enabled=false%%"
+                revoke_status = 200
+            else:
+                revoke_future = pool.submit(
+                    client.delete,
+                    f"/v1/projects/{project}/grants/{auditor_id}/work.review",
+                    headers=ceo,
+                )
+                revoke_query = "DELETE FROM project_grants%%"
+                revoke_status = 204
             try:
                 deadline = time.monotonic() + 5
                 blocked = False
@@ -306,10 +318,10 @@ def test_review_rejection_serializes_with_auditor_credential_revocation(monkeypa
                     with connect_postgres() as observer:
                         blocked = observer.execute(
                             "SELECT EXISTS (SELECT 1 FROM pg_stat_activity "
-                            "WHERE query LIKE 'UPDATE principal_credentials SET enabled=false%%' "
+                            "WHERE query LIKE %s "
                             "AND wait_event_type='Lock' "
                             "AND %s=ANY(pg_blocking_pids(pid)))",
-                            (protected_pid[0],),
+                            (revoke_query, protected_pid[0]),
                         ).fetchone()[0]
                     if blocked:
                         break
@@ -323,7 +335,7 @@ def test_review_rejection_serializes_with_auditor_credential_revocation(monkeypa
 
         assert review_response.status_code == 201, review_response.text
         assert review_response.json()["status"] == "IN_PROGRESS"
-        assert revoke_response.status_code == 200, revoke_response.text
+        assert revoke_response.status_code == revoke_status, revoke_response.text
         denied = client.post(f"/v1/work/{work}/reviews", headers={
             "X-Auditor-Token": auditor_token,
         }, json={"decision": "REJECT", "evidence": ["stale credential"]})
