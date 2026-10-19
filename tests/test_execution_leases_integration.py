@@ -43,6 +43,11 @@ def test_postgres_inert_staging_is_default_off_and_idempotent(monkeypatch):
         assert client.post(f"/v1/work/{wid}/stage-inert", headers=worker).status_code == 503
         assert client.post(f"/v1/work/{wid}/admit", headers=worker).status_code == 200
         monkeypatch.setenv("AAO_SANDBOX_QUEUE_ENABLED", "true")
+        denied = client.post(f"/v1/work/{wid}/stage-inert", headers=worker)
+        assert denied.status_code == 403, denied.text
+        assert client.post(f"/v1/projects/{pid}/grants", headers=ceo, json={
+            "principal_id": worker_id, "capability": "execution.claim",
+        }).status_code == 201
         first = client.post(f"/v1/work/{wid}/stage-inert", headers=worker)
         assert first.status_code == 202, first.text
         again = client.post(f"/v1/work/{wid}/stage-inert", headers=worker)

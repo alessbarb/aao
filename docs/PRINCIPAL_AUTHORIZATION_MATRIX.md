@@ -21,7 +21,7 @@ M2 acceptance.
 | `POST /v1/work/{id}/admit` | Individual AGENT bearer | `work.admit`; credential and grant recheck under `FOR SHARE` | Deterministic admission call uses simulated capacity, budget, risk and emergency-stop inputs; not real resource admission. |
 | `POST /v1/work/{id}/progress` | Individual AGENT bearer | `work.progress`; credential and grant recheck under `FOR SHARE` | Advances allowed states; VERIFIED-to-DONE checks for any approval but does not establish independent evidence validation. |
 | `POST /v1/work/{id}/reviews` | Individual AUDITOR bearer | `work.review`; individual AUDITOR credential and grant rows locked under `FOR SHARE` | Rejects same principal as author; does not establish independence from executor/approver or validate evidence references. |
-| `POST /v1/work/{id}/stage-inert` | Individual AGENT bearer | Checks `work.admit`, not `execution.claim`; credential and grant rows locked under `FOR SHARE` | Feature-flagged staging of fixed inert payload only. No model/tool/external action. Capability mismatch remains unresolved as an execution boundary. |
+| `POST /v1/work/{id}/stage-inert` | Individual AGENT bearer | Requires both `work.admit` and `execution.claim`; credential and grant rows locked under `FOR SHARE` | Feature-flagged staging of fixed inert payload only. No model/tool/external action. A negative integration case rejects an admitted agent without the execution capability. |
 
 The PostgreSQL API no longer accepts shared worker/reviewer tokens. SQLite
 prototype tokens are a separate path. Individual bearer authentication first

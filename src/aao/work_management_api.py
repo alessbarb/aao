@@ -434,6 +434,7 @@ def stage_inert(work_id: str, principal: str = Depends(require_worker)):
         if not project or project[0] != "ACTIVE" or status != "READY":
             raise HTTPException(409, "Work not ready in active project")
         require_grant(db, principal, project_id, "work.admit")
+        require_grant(db, principal, project_id, "execution.claim")
         existing = db.execute(
             "SELECT id,status FROM execution_queue WHERE work_id=%s", (work_id,)
         ).fetchone()
