@@ -483,6 +483,31 @@ def test_sandbox_worker_persists_self_development_cycle(monkeypatch):
         activity = client.get(f"/v1/projects/{project}/activity", headers=ceo).json()
         assert any(event["kind"] == "execution.completed"
                    and event["subject_id"] == staged.json()["execution_id"] for event in activity)
+        assert client.get("/v1/projects", headers=auditor).json() == []
+        assert client.get(
+            f"/v1/projects/{project}/work/{work}", headers=auditor,
+        ).status_code == 403
+        read_grant = client.post(f"/v1/projects/{project}/grants", headers=ceo, json={
+            "principal_id": auditor_id, "capability": "project.read",
+        })
+        assert read_grant.status_code == 201, read_grant.text
+        visible = client.get("/v1/projects", headers=auditor)
+        assert visible.status_code == 200, visible.text
+        assert [item["id"] for item in visible.json()] == [project]
+        auditor_details = client.get(
+            f"/v1/projects/{project}/work/{work}", headers=auditor,
+        )
+        assert auditor_details.status_code == 200, auditor_details.text
+        auditor_task = auditor_details.json()
+        assert auditor_task["status"] == "IN_REVIEW"
+        assert auditor_task["executions"][0]["result"]["candidate_sha"] == execution["result"]["candidate_sha"]
+        assert auditor_task["reviews"] == []
+        assert auditor_task["pull_request"]["candidate_sha"] == execution["result"]["candidate_sha"]
+        auditor_activity = client.get(f"/v1/projects/{project}/activity", headers=auditor)
+        assert auditor_activity.status_code == 200, auditor_activity.text
+        assert any(event["kind"] == "execution.completed"
+                   and event["subject_id"] == staged.json()["execution_id"]
+                   for event in auditor_activity.json())
         review = client.post(f"/v1/work/{work}/reviews", headers=auditor, json={
             "decision": "APPROVE", "evidence": ["candidate-sha:" + execution["result"]["candidate_sha"]],
         })
