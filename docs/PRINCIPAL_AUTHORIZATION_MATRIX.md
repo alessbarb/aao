@@ -32,7 +32,7 @@ inside their transaction. The CEO credential is still a single static bearer.
 
 | Operation | Identity / capability check | Transaction boundary | Known boundary |
 | --- | --- | --- | --- |
-| `execution_queue.claim()` / `complete()` | Individual AGENT credential; requires unexpired `execution.claim` project grant | Credential and grant are checked with `FOR SHARE`; queue/project rows are locked. | Migration 006 transfers legacy identities and drops the old registry. Completion captures caller-side `now` before lock acquisition; lease expiry and delayed completion races remain untested. |
+| `execution_queue.claim()` / `complete()` | Individual AGENT credential; requires unexpired `execution.claim` project grant | Credential and grant are checked with `FOR SHARE`; queue/project rows are locked. | Migration 006 transfers legacy identities and drops the old registry. Lease expiry is computed and checked with PostgreSQL `clock_timestamp()`; a real database-lock-wait test covers delayed completion. Other lease/revocation schedules remain open. |
 | `execution_reconciliation.reconcile()` | Active AUDITOR bearer credential resolves reviewer in-transaction; unexpired `execution.reconcile` grant; AGENT credentials denied | Locks credential, queue/project and grant rows | No HTTP endpoint. Evidence references are not verified; credential-revocation race lacks dedicated coverage. Retry-vs-effect-proposal race is not serialized. |
 | `external_effect_registry.propose()` | No principal authentication or project grant check in this helper | Idempotency-key row is locked; execution existence is checked without a lock | Records proposals only; does not execute. It is not safe to treat as an authorization boundary. |
 | `external_effect_reconciliation.reject_unexecuted_proposal()` | Active AUDITOR bearer credential resolves reviewer in-transaction; unexpired `effect.reconcile` grant; AGENT credentials denied | Locks credential, effect/queue and grant rows | Evidence references are not verified; internal helper only. No external effect is executed. |
@@ -49,9 +49,10 @@ inside their transaction. The CEO credential is still a single static bearer.
   do not prove real PostgreSQL lock behavior. Direct transaction-level tests
   now verify grant deletion and auditor credential revocation lock behavior;
   races against full business writes, claims and completion are still needed.
-- Current full local suite has 53 tests, including grant-row and auditor
-  credential-lock coverage, but still does not cover lease expiry during lock wait,
-  quarantine/completion ordering, or effect-proposal/retry races.
+- The current full local suite has 52 tests, including grant-row, auditor
+  credential-lock, and completion-after-lease-expiry-during-row-lock-wait
+  coverage. Quarantine/completion ordering, repeated adversarial schedules,
+  and effect-proposal/retry races remain untested.
 - GitHub CI now configures a fresh disposable PostgreSQL service and runs the
   guarded integration suite; run `39251540849` passed on `585b422`. Current
   local results are recorded in the evidence register; this is not independent

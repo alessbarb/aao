@@ -1,5 +1,7 @@
 """PostgreSQL integration tests, opt-in for explicitly disposable databases."""
 import os
+import time
+from concurrent.futures import ThreadPoolExecutor
 from uuid import uuid4
 
 import pytest
@@ -104,6 +106,47 @@ def test_worker_claim_complete_respects_identity_and_project_state(monkeypatch):
             db.execute("UPDATE projects SET state='ACTIVE' WHERE id=%s", (project_id,))
         complete(eid, lease["token"], worker_id, {"ok": True}, agent_credential=token)
         assert state(eid)["status"] == "SUCCEEDED"
+
+        # A completion blocked beyond its lease deadline must use the database
+        # clock at the guarded update, not a timestamp captured before waiting.
+        delayed_work = client.post(f"/v1/projects/{project_id}/work", headers=worker, json={
+            "title": "Delayed completion", "author_id": worker_id,
+            "acceptance_criteria": ["expired lease is denied"],
+        }).json()["id"]
+        client.post(f"/v1/work/{delayed_work}/admit", headers=worker)
+        delayed_execution = client.post(
+            f"/v1/work/{delayed_work}/stage-inert", headers=worker,
+        ).json()["execution_id"]
+        delayed_lease = claim(
+            worker_id, agent_credential=token, project_id=project_id, seconds=1,
+        )
+        assert delayed_lease and delayed_lease["execution_id"] == delayed_execution
+        with ThreadPoolExecutor(max_workers=1) as pool, connect_postgres() as blocker:
+            blocker.execute(
+                "SELECT id FROM execution_queue WHERE id=%s FOR UPDATE",
+                (delayed_execution,),
+            )
+            delayed_completion = pool.submit(
+                complete, delayed_execution, delayed_lease["token"], worker_id,
+                {"ok": True}, agent_credential=token,
+            )
+            deadline = time.monotonic() + 5
+            waiting = False
+            while time.monotonic() < deadline:
+                with connect_postgres() as observer:
+                    waiting = observer.execute(
+                        "SELECT EXISTS (SELECT 1 FROM pg_stat_activity "
+                        "WHERE query LIKE 'SELECT project_id FROM execution_queue%' "
+                        "AND wait_event_type='Lock')"
+                    ).fetchone()[0]
+                if waiting:
+                    break
+                time.sleep(0.01)
+            assert waiting, "completion did not block on the execution row"
+            time.sleep(1.1)
+        with pytest.raises(ExecutionConflict, match="Lease stale"):
+            delayed_completion.result(timeout=5)
+        assert state(delayed_execution)["status"] == "RUNNING"
 
 
 @pytest.mark.skipif(

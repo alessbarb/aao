@@ -31,11 +31,13 @@ or `[BLOCKED]` labels below as live issue statuses.
    reconciliation derives the reviewer from a locked individual AUDITOR
    credential inside the transaction, then checks the project grant. Tests
    cover AGENT denial, authorized AUDITOR paths and serialization between
-   credential authentication and revocation. HTTP exposure still requires
-   further design, evidence verification, and review.
-4. Verify lease expiry, credential/grant revocation, effect proposal/retry,
-   quarantine/completion ordering, and cold-restart recovery with repeated
-   PostgreSQL concurrency tests.
+   credential authentication and revocation. No HTTP exposure exists; evidence
+   verification and independent review remain open.
+4. Lease expiry is now computed and checked by PostgreSQL clock, with an
+   integration test proving completion is rejected after waiting past lease
+   expiry on a locked queue row. Still verify repeated revocation schedules,
+   effect proposal/retry, quarantine/completion ordering and cold-restart
+   recovery with repeated PostgreSQL concurrency tests.
 5. Make PostgreSQL integration tests part of CI with a fresh disposable
    database and migrations; ordinary CI currently can skip those tests.
 6. Obtain adversarial independent security/architecture review and competent

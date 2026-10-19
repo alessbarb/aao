@@ -5,7 +5,6 @@ UNCERTAIN and must be reconciled by a separate authorized procedure.
 """
 import hmac
 import json
-from datetime import UTC, datetime, timedelta
 from uuid import uuid4
 
 from aao.postgresql_connection import connect_postgres
@@ -35,10 +34,9 @@ def verify_execution_principal(db, worker_id, agent_credential):
 
 
 def claim(worker_id: str, *, agent_credential: str, project_id: str,
-          seconds: int = 60, now: datetime | None = None):
+          seconds: int = 60):
     if not worker_id or not project_id or seconds < 1:
         raise ExecutionConflict("Worker and positive lease duration required")
-    instant = now or datetime.now(UTC)
     with connect_postgres() as db:
         verify_execution_principal(db, worker_id, agent_credential)
         grant = db.execute(
@@ -67,20 +65,19 @@ def claim(worker_id: str, *, agent_credential: str, project_id: str,
         if not project or project[0] != "ACTIVE":
             return None
         token = str(uuid4())
-        expiry = instant + timedelta(seconds=seconds)
-        db.execute(
+        expiry = db.execute(
             "UPDATE execution_queue SET status='RUNNING',lease_token=%s,"
-            "worker_id=%s,lease_expires_at=%s,attempts=attempts+1 WHERE id=%s",
-            (token, worker_id, expiry, eid),
-        )
+            "worker_id=%s,lease_expires_at=clock_timestamp()+make_interval(secs => %s),"
+            "attempts=attempts+1 WHERE id=%s RETURNING lease_expires_at",
+            (token, worker_id, seconds, eid),
+        ).fetchone()[0]
         journal(db, eid, "claimed", {"worker_id": worker_id})
     return {"execution_id": eid, "token": token, "worker_id": worker_id,
             "expires_at": expiry.isoformat()}
 
 
 def complete(execution_id: str, token: str, worker_id: str, result: dict,
-             *, agent_credential: str, now: datetime | None = None):
-    instant = now or datetime.now(UTC)
+             *, agent_credential: str):
     with connect_postgres() as db:
         verify_execution_principal(db, worker_id, agent_credential)
         execution = db.execute(
@@ -105,21 +102,19 @@ def complete(execution_id: str, token: str, worker_id: str, result: dict,
         updated = db.execute(
             "UPDATE execution_queue SET status='SUCCEEDED',result_json=%s::jsonb "
             "WHERE id=%s AND status='RUNNING' AND lease_token=%s "
-            "AND worker_id=%s AND lease_expires_at>%s AND EXISTS (SELECT 1 FROM projects p WHERE p.id=execution_queue.project_id AND p.state='ACTIVE') RETURNING id",
-            (json.dumps(result), execution_id, token, worker_id, instant),
+            "AND worker_id=%s AND lease_expires_at>clock_timestamp() AND EXISTS (SELECT 1 FROM projects p WHERE p.id=execution_queue.project_id AND p.state='ACTIVE') RETURNING id",
+            (json.dumps(result), execution_id, token, worker_id),
         ).fetchone()
         if not updated:
             raise ExecutionConflict("Lease stale, expired, or execution not running")
         journal(db, execution_id, "completed", {"worker_id": worker_id})
 
 
-def quarantine_expired(*, now: datetime | None = None) -> int:
-    instant = now or datetime.now(UTC)
+def quarantine_expired() -> int:
     with connect_postgres() as db:
         rows = db.execute(
             "UPDATE execution_queue SET status='UNCERTAIN' "
-            "WHERE status='RUNNING' AND lease_expires_at<=%s RETURNING id",
-            (instant,),
+            "WHERE status='RUNNING' AND lease_expires_at<=clock_timestamp() RETURNING id",
         ).fetchall()
         for row in rows:
             journal(db, str(row[0]), "quarantined", {"reason": "lease expired"})

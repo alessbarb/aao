@@ -1,6 +1,6 @@
 """PostgreSQL integration tests, opt-in for explicitly disposable databases."""
 import os
-from datetime import UTC
+import time
 from uuid import uuid4
 
 import pytest
@@ -12,8 +12,6 @@ from fastapi.testclient import TestClient
     reason="Explicit disposable PostgreSQL database required",
 )
 def test_reconciliation_requires_distinct_granted_reviewer(monkeypatch):
-    from datetime import datetime, timedelta
-
     from aao.execution_queue import claim, quarantine_expired, state
     from aao.execution_reconciliation import ReconciliationDenied, reconcile
     from aao.work_management_api import app
@@ -57,11 +55,11 @@ def test_reconciliation_requires_distinct_granted_reviewer(monkeypatch):
         }).json()["id"]
         client.post(f"/v1/work/{wid}/admit", headers=worker)
         eid = client.post(f"/v1/work/{wid}/stage-inert", headers=worker).json()["execution_id"]
-    base = datetime.now(UTC)
-    lease = claim(worker_id, agent_credential=secret, project_id=project, now=base, seconds=1)
+    lease = claim(worker_id, agent_credential=secret, project_id=project, seconds=1)
     assert lease["execution_id"] == eid
     # Quarantine is global: previous tests may leave other expired leases.
-    assert quarantine_expired(now=base + timedelta(seconds=2)) >= 1
+    time.sleep(1.1)
+    assert quarantine_expired() >= 1
     assert state(eid)["status"] == "UNCERTAIN"
     # Re-running quarantine must not alter this execution again.
     assert state(eid)["attempts"] == 1
