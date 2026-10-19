@@ -32,8 +32,8 @@ def test_shared_development_credentials_can_be_disabled(monkeypatch):
     monkeypatch.setenv("AAO_WORK_TOKEN", "dev-worker")
     monkeypatch.setenv("AAO_REVIEW_TOKEN", "dev-auditor")
     for call in (
-        lambda: require_worker(x_work_token="dev-worker"),
-        lambda: require_reviewer(x_review_token="dev-auditor"),
+        lambda: require_worker(x_work_token="dev-worker", x_agent_token=None),
+        lambda: require_reviewer(x_review_token="dev-auditor", x_auditor_token=None),
         lambda: read_principal(x_ceo_token=None, x_work_token="dev-worker", x_agent_token=None),
     ):
         with pytest.raises(HTTPException) as denied:
@@ -51,9 +51,9 @@ def test_shared_development_credentials_require_opt_in(monkeypatch):
     monkeypatch.setenv("AAO_REVIEW_TOKEN", "dev-auditor")
     assert not shared_dev_tokens_enabled()
     with pytest.raises(HTTPException):
-        require_worker(x_work_token="dev-worker")
+        require_worker(x_work_token="dev-worker", x_agent_token=None)
     with pytest.raises(HTTPException):
-        require_reviewer(x_review_token="dev-auditor")
+        require_reviewer(x_review_token="dev-auditor", x_auditor_token=None)
 
 
 def test_individual_reader_cannot_fall_back_to_shared_credential(monkeypatch):
