@@ -37,11 +37,14 @@ advance PR #2's head, so a formal reviewer must use the live PR head SHA and
 identify it in the review report. Do not rewrite the validated implementation
 history to make the SHAs appear equal. After the scope package was committed,
 local `HEAD`, `origin/feat/aao-m0-foundation`, `origin/review/m2-inert-candidate`,
-and live PR #2 matched `acb85a268b3ec32630e858512058d970ae970191`; a later
-evidence-registration-only documentation commit advanced them to
-`0c1c990520d105cf7e16349903f112f485426118`. That is the latest pinned review
-package at this writing. The implementation source remains
-`99760c7339323600368e5dbb145b088d83ad0715`; no runtime code changed after it.
+and live PR #2 matched `acb85a268b3ec32630e858512058d970ae970191`; later
+documentation-only commits advanced the package through
+`0c1c990520d105cf7e16349903f112f485426118` and
+`b15dea4f69823bcb894cb58eda54dcffdb48d602`. At the `b15dea4` checkpoint,
+local `HEAD`, both remote refs, and PR #2 matched. The implementation source
+remains `99760c7339323600368e5dbb145b088d83ad0715`. Subsequent code fixes and
+their evidence are recorded separately; recheck exact live refs before review
+and acceptance.
 
 ## M2-A measurable acceptance criteria
 
@@ -57,7 +60,7 @@ formal independent review or competent acceptance.
 | A-04 | Execution remains inert: the worker produces only a deterministic marker and cannot invoke models, shell, network, tools, providers, or real external effects. | `inert_execution_worker.py`, default-off staging gate, and route/test coverage; no provider adapter is enabled. | **SATISFECHO** within the reviewed code boundary. |
 | A-05 | Expired work is quarantined as `UNCERTAIN`; no automatic retry or external action occurs. A manual retry/failure disposition requires an active individual AUDITOR credential, project grant, current uncertain state, and applicable evidence/effect checks. | Queue/reconciliation code and selected PostgreSQL integration schedules. Restart/scheduler automation is explicitly M2-B/C, not claimed here. | **SATISFECHO** for explicit/manual paths; repeatable operational recovery is not part of A. |
 | A-06 | Evidence references are project-scoped and content-addressed; bytes are rehashed on use; unauthorized or concurrently revoked evidence access fails closed; app-level writes are append-only. | Migrations 008/009, evidence registry, denial and grant-revocation race tests. | **SATISFECHO** for application paths; database-owner tampering and truth/authorship are residual risks. |
-| A-07 | Project pause/cancel state changes fence stale claims/completions; resume does not revive an old generation. | Migration 007 and controlled PostgreSQL pause/completion schedules. | **SATISFECHO** for tested inert queue behavior; not an independent runtime stop controller. |
+| A-07 | CEO-authenticated API can pause, resume, or cancel an inert project; transitions are audited, pause/cancel fence stale claims/completions, and resume does not revive an old generation. | CEO-only PostgreSQL project-state endpoint, audited transitions, generation trigger, and integration coverage for authorization, transitions, event records and generation increments. | **SATISFECHO** for the M2-A inert project control; not an independent runtime stop controller. |
 | A-08 | Positive review approval and transition to DONE remain fail-closed unless reviewer independence and evidence sufficiency are verifiable. | Review route and transition tests. | **SATISFECHO** as a denial control; no positive independent approval is supported. |
 | A-09 | Full local PostgreSQL suite has zero failures, skips, and warnings with warnings as errors; compilation, Ruff, dependency consistency, and diff checks pass at an exact candidate revision. | Exact local run recorded in `VERIFICATION_EVIDENCE_REGISTER.md`; clean-replay full suite also passed. | **SATISFECHO** for local verification only; CI is not asserted. |
 | A-10 | A qualified independent reviewer examines the exact PR head, code candidate, migrations, evidence, residual risks, and this scope disposition; findings are resolved or explicitly dispositioned. | No qualified reviewer is currently assigned or available through repository collaborators. | **PENDIENTE** |

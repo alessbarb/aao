@@ -108,3 +108,30 @@ They reaffirmed the recorded limits: no production CEO identity, independent
 human reviewer proof, automated process-restart recovery, or autonomous
 recovery controller. These passes inspected source and tests but did not
 execute tests; they are internal reviews, not independent assurance.
+
+### Follow-up findings at `b15dea4` and engineering disposition
+
+- **M2-A suspension initiation gap — corrected in candidate worktree.** The
+  PostgreSQL path had generation fencing but no authorized HTTP operation to
+  initiate pause/resume/cancel. Added a CEO-authenticated, audited state
+  transition route and PostgreSQL integration coverage. This corrects the
+  evidence gap for the inert project control; it does not provide an independent
+  stop controller for an active runtime.
+- **Development credential environment boundary — corrected in candidate
+  worktree.** Individual AGENT/AUDITOR verification now fails closed outside
+  `development` and `test`, including transaction-time credential checks used
+  by evidence and reconciliation helpers. Production human identity is still
+  not implemented or claimed.
+- **Concurrent idempotency-key collision across distinct executions — P1
+  follow-up.** The initial existence query in effect proposal handling does not
+  lock an absent global key; concurrent distinct execution proposals can race
+  into the database unique constraint. The unique constraint prevents duplicate
+  durable rows, but the losing request may receive a database error instead of
+  a stable `EffectConflict`/idempotent result. Existing sequential replay
+  coverage does not prove this interleaving. This is limited to inert proposal
+  recording; no external effect can occur. Track for a bounded follow-up and
+  include in formal review; it is not evidence of duplicate external effects.
+
+These source changes had a worktree full-suite/static run recorded in the
+verification register; commit and exact-SHA evidence are required before the
+candidate is treated as reviewable.

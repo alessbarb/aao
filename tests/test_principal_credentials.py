@@ -14,6 +14,20 @@ def test_unauthorized_inputs_rejected_without_database(value, kind):
         authenticate(value, kind=kind)
 
 
+def test_development_principal_credentials_fail_closed_in_production(monkeypatch):
+    monkeypatch.setenv("AAO_ENV", "production")
+    with pytest.raises(PrincipalDenied, match="unavailable"):
+        authenticate("not-a-real-token", kind="AGENT")
+
+
+def test_transactional_development_credentials_fail_closed_in_production(monkeypatch):
+    from aao.principal_credentials import authenticate_in_transaction
+
+    monkeypatch.setenv("AAO_ENV", "production")
+    with pytest.raises(PrincipalDenied, match="unavailable"):
+        authenticate_in_transaction(object(), "not-a-real-token", kind="AUDITOR")
+
+
 def test_grant_contract_accepts_execution_capabilities_only_as_exact_values():
     from pydantic import ValidationError
 

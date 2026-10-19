@@ -82,6 +82,10 @@ class ProjectRequest(BaseModel):
     mandate_id: str
 
 
+class ProjectStateRequest(BaseModel):
+    action: str = Field(pattern=r"^(pause|resume|cancel)$")
+
+
 class WorkRequest(BaseModel):
     title: str = Field(min_length=1, max_length=200)
     author_id: str = Field(min_length=1)
@@ -234,6 +238,37 @@ def create_project(payload: ProjectRequest, _: str = Depends(require_ceo)):
         )
         audit(db, pid, "project.created", {"mandate_id": payload.mandate_id})
     return {"id": pid, "state": "ACTIVE"}
+
+
+@app.post("/v1/projects/{project_id}/state")
+def change_project_state(
+    project_id: str,
+    payload: ProjectStateRequest,
+    _: str = Depends(require_ceo),
+):
+    """CEO-controlled suspension state transition for the inert PostgreSQL path."""
+    transitions = {
+        ("ACTIVE", "pause"): "PAUSED",
+        ("PAUSED", "resume"): "ACTIVE",
+        ("ACTIVE", "cancel"): "CANCELLED",
+        ("PAUSED", "cancel"): "CANCELLED",
+    }
+    with tx() as db:
+        row = db.execute(
+            "SELECT state FROM projects WHERE id=%s FOR UPDATE", (project_id,),
+        ).fetchone()
+        if not row:
+            raise HTTPException(404, "Project not found")
+        next_state = transitions.get((row[0], payload.action))
+        if not next_state:
+            raise HTTPException(409, "Invalid project state transition")
+        db.execute(
+            "UPDATE projects SET state=%s WHERE id=%s", (next_state, project_id),
+        )
+        audit(db, project_id, "project.state_changed", {
+            "from": row[0], "to": next_state, "authority": "ceo",
+        })
+    return {"id": project_id, "state": next_state}
 
 
 def read_principal(

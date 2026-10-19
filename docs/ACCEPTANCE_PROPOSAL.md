@@ -7,20 +7,20 @@ authorize models, tools, providers, production deployment, or external effects.
 
 ## Candidate revisions
 
-- **Implementation source with 80-test evidence:**
-  `99760c7339323600368e5dbb145b088d83ad0715`.
-- **Latest verification package with a full-suite run:**
-  `acb85a268b3ec32630e858512058d970ae970191`, 80 passed, zero failures/skips/warnings,
-  plus compileall, Ruff, `pip check`, and diff checks. A later documentation-only
-  evidence-registration revision `0c1c990520d105cf7e16349903f112f485426118`
-  records that run and is the currently pinned PR package. The live PR head must
-  be rechecked at review time; no runtime code changed after the implementation source.
+- **Previously validated implementation source:**
+  `99760c7339323600368e5dbb145b088d83ad0715`. The current candidate adds a
+  production-mode denial for development principal credentials and an audited
+  CEO-authenticated project suspension API; it must be pinned to its own exact
+  SHA after commit and live PR verification.
+- **Prior evidence package:** `b15dea4f69823bcb894cb58eda54dcffdb48d602`
+  passed 80 tests and static checks. Following the identified fixes, the current
+  worktree passed 83 tests, zero failures/skips/warnings, plus compileall, Ruff,
+  `pip check`, and diff checks. This result is not yet pinned to a commit SHA.
 - **Review vehicle:** [draft GitHub PR #2](https://github.com/alessbarb/aao/pull/2).
-  At the latest live check, local `HEAD`, `origin/feat/aao-m0-foundation`,
-  `origin/review/m2-inert-candidate`, and the PR head matched
-  `0c1c990520d105cf7e16349903f112f485426118`. The formal reviewer must recheck
-  the live PR head and identify it separately from the implementation source SHA.
-  No runtime code was changed to reconcile revision references.
+  At the pre-fix live check, local `HEAD`, both remote refs and PR head matched
+  `b15dea4f69823bcb894cb58eda54dcffdb48d602`. After committing the fixes,
+  update this package SHA and recheck the live PR head. Review report must
+  identify package and source revisions separately.
 
 ## What M2-A evidence demonstrates
 
@@ -48,11 +48,12 @@ acceptance.
 
 ## Conditions before M2-A may be presented for acceptance
 
-1. **Complete:** migrations 001–009 were replayed in order on a newly created
+1. **Complete before current code fixes:** migrations 001–009 were replayed in order on a newly created
    explicitly disposable PostgreSQL database using the CI legacy-row upgrade
    path; the full suite passed against it and the scratch database was dropped.
    Exact local evidence is recorded in the verification register.
-2. Obtain a qualified independent security/architecture review of the exact
+2. **Repeat required:** run the complete suite and static checks against the
+   committed fixes; then obtain a qualified independent security/architecture review of the exact
    PR head and code candidate. The reviewer must be different from the
    implementer and provide an attributable report with methods and findings.
 3. Resolve or explicitly disposition review findings within the M2-A boundary.

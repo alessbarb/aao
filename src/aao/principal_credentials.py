@@ -4,6 +4,7 @@ These are bearer-token development credentials, not production identities.
 """
 import hashlib
 import hmac
+import os
 
 from aao.postgresql_connection import connect_postgres
 
@@ -12,11 +13,19 @@ class PrincipalDenied(ValueError):
     pass
 
 
+def _development_credentials_enabled() -> bool:
+    return os.getenv("AAO_ENV", "development").strip().lower() in {
+        "development", "test",
+    }
+
+
 def digest_token(token: str) -> str:
     return hashlib.sha256(token.encode()).hexdigest()
 
 
 def authenticate(token: str | None, *, kind: str) -> str:
+    if not _development_credentials_enabled():
+        raise PrincipalDenied("Development principal credentials are unavailable")
     if kind not in {"AGENT", "AUDITOR"} or not token:
         raise PrincipalDenied("Principal credential required")
     digest = digest_token(token)
@@ -33,6 +42,8 @@ def authenticate(token: str | None, *, kind: str) -> str:
 
 def authenticate_in_transaction(db, token: str | None, *, kind: str) -> str:
     """Resolve and lock an enabled principal credential in the caller's tx."""
+    if not _development_credentials_enabled():
+        raise PrincipalDenied("Development principal credentials are unavailable")
     if kind not in {"AGENT", "AUDITOR"} or not token:
         raise PrincipalDenied("Principal credential required")
     row = db.execute(

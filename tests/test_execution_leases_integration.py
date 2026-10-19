@@ -14,6 +14,52 @@ from fastapi.testclient import TestClient
     os.getenv("AAO_TEST_DB_DISPOSABLE") != "yes",
     reason="Explicit disposable PostgreSQL database required",
 )
+def test_ceo_project_suspension_transitions_are_audited_and_fence_generation(monkeypatch):
+    from aao.postgresql_connection import connect_postgres
+    from aao.work_management_api import app
+
+    monkeypatch.setenv("AAO_ENV", "test")
+    monkeypatch.setenv("AAO_POSTGRES_URL", os.environ["AAO_TEST_POSTGRES_URL"])
+    monkeypatch.setenv("AAO_CEO_TOKEN", "test-ceo")
+    ceo = {"X-CEO-Token": "test-ceo"}
+    with TestClient(app) as client:
+        mandate = client.post("/v1/mandates", headers=ceo, json={
+            "title": "Suspension " + str(uuid4()), "objective": "Test control",
+        }).json()["id"]
+        assert client.post(f"/v1/mandates/{mandate}/confirm", headers=ceo).status_code == 200
+        project = client.post("/v1/projects", headers=ceo, json={
+            "name": "Suspension project", "mandate_id": mandate,
+        }).json()["id"]
+        endpoint = f"/v1/projects/{project}/state"
+        assert client.post(endpoint, json={"action": "pause"}).status_code == 403
+        paused = client.post(endpoint, headers=ceo, json={"action": "pause"})
+        assert paused.status_code == 200, paused.text
+        assert paused.json()["state"] == "PAUSED"
+        resumed = client.post(endpoint, headers=ceo, json={"action": "resume"})
+        assert resumed.status_code == 200, resumed.text
+        assert resumed.json()["state"] == "ACTIVE"
+        cancelled = client.post(endpoint, headers=ceo, json={"action": "cancel"})
+        assert cancelled.status_code == 200, cancelled.text
+        assert cancelled.json()["state"] == "CANCELLED"
+        assert client.post(endpoint, headers=ceo, json={"action": "resume"}).status_code == 409
+
+    with connect_postgres() as db:
+        generation = db.execute(
+            "SELECT state_generation FROM projects WHERE id=%s", (project,),
+        ).fetchone()[0]
+        events = db.execute(
+            "SELECT count(*) FROM events WHERE subject_id=%s AND kind='project.state_changed'",
+            (project,),
+        ).fetchone()[0]
+    assert generation == 3
+    assert events == 3
+
+
+@pytest.mark.skipif(
+    not os.getenv("AAO_TEST_POSTGRES_URL") or
+    os.getenv("AAO_TEST_DB_DISPOSABLE") != "yes",
+    reason="Explicit disposable PostgreSQL database required",
+)
 def test_postgres_inert_staging_is_default_off_and_idempotent(monkeypatch):
     from aao.execution_queue import claim, state
     from aao.work_management_api import app
