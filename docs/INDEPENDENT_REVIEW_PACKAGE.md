@@ -6,16 +6,22 @@ only of M2-A's bounded PostgreSQL-backed, development-identity, inert execution
 candidate. M2-B and M2-C requirements remain in the compliance matrix and are
 not acceptance claims or implementation authorization.
 
-**Implementation candidate:** `dc084417a2ba683fe4737342f89e9cd1036b38ad` on
-`feat/aao-m0-foundation`, with 83-test local evidence recorded in the evidence
-register. The earlier base implementation is `99760c7339323600368e5dbb145b088d83ad0715`.
-The review-package document and related compliance records have had
-documentation-only updates after the implementation candidate. To avoid a
-self-referential SHA embedded in a document that changes the package SHA, use
-the live PR #2 head as the package revision at review time. Confirm that it
-exactly matches the requested package SHA in the PR description and latest
-review-request comment before starting; report that package SHA separately
-from implementation SHA `dc084417a2ba683fe4737342f89e9cd1036b38ad`.
+**Frozen PR #2 pair:** implementation `dc084417a2ba683fe4737342f89e9cd1036b38ad`;
+package/PR head `ef1a6e64ad4d6523cacd6c98a3b25ae7cebf4ad5`. The PR remains
+OPEN/DRAFT and is not to be merged. A separate H-01 correction is proposed at
+implementation SHA `31e7397be082394a6da95eadebd0d8ad6bf99c39`; its 91-test
+local evidence is recorded separately. The correction is not present in PR
+#2. This updated package describes both pairs; do not infer this document's
+own final package SHA from the frozen PR. A formal review request must pin the
+corrected implementation SHA and the exact final package checkout SHA
+separately before review begins.
+
+The earlier base implementation is
+`99760c7339323600368e5dbb145b088d83ad0715`. H-01 arose because frozen
+`dc084417` implicitly treated an absent `AAO_ENV` as development; the corrected
+candidate requires an explicit recognized development/test mode. The external
+adversarial findings and dispositions are recorded in
+[`ADVERSARIAL_AUDIT_20261019.md`](ADVERSARIAL_AUDIT_20261019.md).
 
 This is a prepared package for a qualified independent reviewer. It is not
 itself the requested independent review and does not claim formal acceptance.
@@ -96,6 +102,15 @@ formal independence evidence.
   times. CI was not awaited and no
   production/deployment test was run. The documentation package is a later
   revision; the review request must pin its exact checkout separately.
+- At corrected implementation SHA `31e7397be082394a6da95eadebd0d8ad6bf99c39`,
+  a fresh disposable PostgreSQL database replayed migrations 001–009, including
+  the synthetic legacy-row path; the full suite passed 91 tests with warnings
+  as errors. Compileall, Ruff, `pip check`, and `git diff --check` passed.
+  This does not constitute CI, formal independent review, or acceptance.
+- The separate 2026-10-19 adversarial report did not execute code/tests and
+  does not satisfy the independent review gate. H-02 owner-tampering limits,
+  H-03 human identity/evidence limits, and H-04 lack of automated restart
+  recovery remain recorded as residual risks or later-stage work.
 - Internal follow-up identified and corrected the missing CEO-authenticated
   PostgreSQL suspension initiation path, added a fail-closed production
   environment guard for development credentials, and fixed concurrent absent

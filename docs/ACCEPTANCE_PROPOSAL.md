@@ -5,6 +5,13 @@ defined stage scope in [`SCOPE_DISPOSITION.md`](SCOPE_DISPOSITION.md), but has
 not accepted the implementation or residual risks. The decision does not
 authorize models, tools, providers, production deployment, or external effects.
 
+The previous frozen review pair was implementation `dc084417a2ba683fe4737342f89e9cd1036b38ad`
+and PR/package `ef1a6e64ad4d6523cacd6c98a3b25ae7cebf4ad5`. Static external
+finding H-01 was confirmed on that code. A separate corrected engineering
+candidate is `31e7397be082394a6da95eadebd0d8ad6bf99c39`; do not treat the frozen
+PR package as containing the correction. The corrected candidate has not been
+formally reviewed and PR #2 remains unchanged and open/draft.
+
 ## Candidate revisions
 
 - **Implementation candidate:** `dc084417a2ba683fe4737342f89e9cd1036b38ad`,
@@ -57,14 +64,14 @@ acceptance.
    explicitly disposable PostgreSQL database using the CI legacy-row upgrade
    path; the full suite passed against it and the scratch database was dropped.
    Exact local evidence is recorded in the verification register.
-2. **Engineering checks:** full suite and static checks are recorded at the
-   exact implementation source SHA `dc08441`; the subsequent package commits
-   are documentation only. Re-run only if code changes or
-   the formal reviewer cannot reproduce the recorded environment. Obtain a
-   qualified independent security/architecture review of the exact live PR
-   package SHA and code SHA `dc084417a2ba683fe4737342f89e9cd1036b38ad`. The
-   reviewer must be different from the implementer and provide an attributable
-   report with methods and findings.
+2. **Engineering checks and review:** the frozen `dc084417` checks remain
+   historical evidence for PR #2, which contains H-01. The corrected candidate
+   `31e7397be082394a6da95eadebd0d8ad6bf99c39` has fresh full PostgreSQL and
+   static-check evidence. It requires a new exact package SHA and a qualified
+   independent security/architecture review of the corrected code plus that
+   package. The reviewer must be different from the implementer and provide an
+   attributable report with methods and findings. Do not move PR #2 or claim
+   its old head contains the correction.
 3. Resolve or explicitly disposition review findings within the M2-A boundary.
 4. Present exact-SHA evidence and the residual-risk list below for competent
    acceptance. The engineering agent must not self-accept M2-A.
@@ -89,6 +96,17 @@ the formal independence condition.
   resource/risk controls and must not be treated as evidence that the candidate
   can safely admit real work; autonomous work admission remains outside M2-A.
 - No production/deployment, continuous-service, or CI result is claimed here.
+
+The external audit dispositions are itemized in
+[`ADVERSARIAL_AUDIT_20261019.md`](ADVERSARIAL_AUDIT_20261019.md). In
+particular, M2-A must not claim owner-resistant database immutability; its
+disposable test database used an owner role and did not prove least-privilege
+runtime permissions. The internal reconciliation function and tested
+quarantine/manual paths do not provide an HTTP/operator interface or automated
+restart recovery. Human identity and reviewer independence remain unproven;
+positive approval stays disabled. These points are not accepted merely by
+their appearance here; competent authority must explicitly disposition
+applicable residual risks after formal review.
 
 ## Later stages and retained requirements
 

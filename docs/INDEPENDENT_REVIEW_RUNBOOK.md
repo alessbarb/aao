@@ -1,28 +1,41 @@
 # M2-A external review runbook
 
-**Purpose:** let a qualified reviewer inspect the frozen, inert M2-A candidate
+**Purpose:** let a qualified reviewer inspect the inert M2-A candidate
 and reproduce local checks without write access to the upstream repository or
 any non-disposable service. This procedure does not grant review, deployment,
 merge, or operating authority.
 
-## Frozen review target
+## Review targets and preserved references
 
-- Package/documentation revision: `ef1a6e64ad4d6523cacd6c98a3b25ae7cebf4ad5`.
-- Implementation revision: `dc084417a2ba683fe4737342f89e9cd1036b38ad`.
-- Review vehicle: draft PR #2. Its head must remain exactly the package SHA
-  above until the review is complete or a separately authorized disposition is
-  made. Do not push to the candidate branch, update the PR, or merge it as part
-  of this runbook.
-- The implementation revision is an ancestor of the package revision. The
-  changes between them are documentation only; verify this before review as
-  shown below. This binds source-level claims to the implementation SHA while
-  binding the full review record and scope documents to the package SHA.
+- **Frozen historical PR #2 pair:** implementation
+  `dc084417a2ba683fe4737342f89e9cd1036b38ad`; package/PR head
+  `ef1a6e64ad4d6523cacd6c98a3b25ae7cebf4ad5`. This pair is preserved as-is;
+  the package contains H-01. PR #2 remains OPEN/DRAFT and must not be updated
+  or merged under this procedure.
+- **Corrected candidate source:**
+  `31e7397be082394a6da95eadebd0d8ad6bf99c39`. It is a separate proposed
+  revision containing the H-01 fix and regression tests. The current runbook
+  package is the exact checkout SHA from which this file is read; record that
+  full `PACKAGE_SHA` in the review request after the package commit is
+  published. The final report must bind this package SHA and corrected source
+  SHA separately. Do not use PR #2's frozen head as if it included the fix.
+- Until a distinct review vehicle is explicitly prepared, the corrected
+  candidate is reviewed by its exact package SHA from a read-only checkout;
+  this runbook does not move refs or merge/update PR #2. The implementation
+  source is an ancestor of the package and its exact code/test delta is shown
+  below.
 
-If either live PR head or branch ref differs, stop. Do not silently substitute
-another commit. Ask the repository owner to restore or explicitly re-pin the
-candidate before beginning. The PR must remain OPEN and DRAFT for this process.
+If any pinned revision is unavailable or differs, stop. Do not silently
+substitute another commit. Confirm separately that PR #2 still has its frozen
+head and remains OPEN/DRAFT; that is a preservation check, not the review head
+for the corrected candidate.
 
 ## Access and safety boundary
+
+Run the shell blocks in order in a single dedicated shell so the pinned SHA,
+temporary paths, container name, and disposable DSN remain consistent. The
+reviewer-owned pinned clone is read-only by procedure; package installation
+and tests use only the separate scratch copy.
 
 1. Obtain read-only access to the repository and review evidence. Do not request
    write, merge, deploy, production, secret-store, or database access.
@@ -51,23 +64,25 @@ umask 077
 ROOT="$(mktemp -d "${TMPDIR:-/tmp}/aao-m2a-review.XXXXXX")"
 REPO="$ROOT/repository"
 RUN="$ROOT/run-copy"
-PACKAGE_SHA=ef1a6e64ad4d6523cacd6c98a3b25ae7cebf4ad5
-SOURCE_SHA=dc084417a2ba683fe4737342f89e9cd1036b38ad
+PACKAGE_SHA=SET_TO_EXACT_PUBLISHED_REVIEW_PACKAGE_SHA
+SOURCE_SHA=31e7397be082394a6da95eadebd0d8ad6bf99c39
 
 git clone https://github.com/alessbarb/aao.git "$REPO"
 git -C "$REPO" checkout --detach "$PACKAGE_SHA"
 test "$(git -C "$REPO" rev-parse HEAD)" = "$PACKAGE_SHA"
 git -C "$REPO" merge-base --is-ancestor "$SOURCE_SHA" "$PACKAGE_SHA"
-git -C "$REPO" diff --exit-code "$SOURCE_SHA" "$PACKAGE_SHA" -- src tests db
+git -C "$REPO" diff --name-status "$SOURCE_SHA" "$PACKAGE_SHA"
 git -C "$REPO" status --short
 ```
 
-The final command must print no changes. Separately confirm the live PR #2
-head is `PACKAGE_SHA` using GitHub's read-only UI or API. Record the UTC time,
-repository URL, both SHAs, PR state, and the exact command output in the
-reviewer's workpaper. If the repository is not anonymously readable, use the
-reviewer's authorized read-only Git credentials; never place a token in a
-command argument, shell history, or report.
+Review the full package diff; verify source changes after `SOURCE_SHA` are
+limited to the recorded documentation/test package. Do not claim PR #2's head
+equals `PACKAGE_SHA`. Independently confirm PR #2 remains OPEN/DRAFT at frozen
+SHA `ef1a6e64ad4d6523cacd6c98a3b25ae7cebf4ad5` using GitHub's read-only UI or
+API. Record UTC time, repository URL, both review SHAs, frozen PR state/head,
+and exact command output in the reviewer's workpaper. If the repository is not
+anonymously readable, use authorized read-only Git credentials; never place a
+token in a command argument, shell history, or report.
 
 For mutable build/test output, make an isolated copy. All subsequent commands
 operate on that copy, not on the pinned source clone:
@@ -89,7 +104,15 @@ docker run --rm --detach --name "$PG_CONTAINER" \
   -e POSTGRES_DB=aao_test \
   -e POSTGRES_HOST_AUTH_METHOD=trust \
   -p 127.0.0.1:55432:5432 postgres:16
-trap 'docker stop "$PG_CONTAINER" >/dev/null 2>&1 || true; rm -rf "$ROOT"' EXIT
+cleanup() {
+  docker stop "$PG_CONTAINER" >/dev/null 2>&1 || true
+  case "$ROOT" in
+    "${TMPDIR:-/tmp}"/aao-m2a-review.*)
+      python3 -c 'import shutil,sys; shutil.rmtree(sys.argv[1])' "$ROOT" ;;
+    *) echo "Refusing cleanup outside generated review temp path" >&2; return 1 ;;
+  esac
+}
+trap cleanup EXIT
 
 until docker exec "$PG_CONTAINER" pg_isready -U aao_auditor -d aao_test; do
   sleep 1
@@ -97,6 +120,7 @@ done
 export AAO_ENV=test
 export AAO_TEST_DB_DISPOSABLE=yes
 export AAO_TEST_POSTGRES_URL=postgresql://aao_auditor@127.0.0.1:55432/aao_test
+export AAO_POSTGRES_URL="$AAO_TEST_POSTGRES_URL"
 ```
 
 The `trust` authentication setting is confined to the container's loopback
@@ -147,17 +171,18 @@ Create an isolated Python environment and run checks from the `RUN` copy:
 ```sh
 python3.12 -m venv "$ROOT/venv"
 . "$ROOT/venv/bin/activate"
-python -m pip install "$RUN[dev,postgres]"
+python -m pip install -e "$RUN[dev,postgres]"
 python -m pip check
 python -m compileall -q src tests
 python -m ruff check src tests
 AAO_ENV=test AAO_TEST_DB_DISPOSABLE=yes \
+  AAO_POSTGRES_URL="$AAO_POSTGRES_URL" \
   AAO_TEST_POSTGRES_URL="$AAO_TEST_POSTGRES_URL" \
   python -m pytest -q -rs -W error -p no:cacheprovider
 git status --short
 ```
 
-Expected at the recorded implementation candidate: 83 passed, zero failed,
+Expected at corrected implementation candidate `31e7397`: 91 passed, zero failed,
 zero skipped, and zero warnings. Tool versions, exact outputs, elapsed time,
 and any deviation must be recorded. The historical 83-test evidence is tied to
 implementation SHA `dc084417`; the external run is new evidence and must state
