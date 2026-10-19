@@ -72,10 +72,12 @@ amendment or CEO-confirmed constitutional rule.
    credential inside the transaction, then checks the project grant. Tests
    cover AGENT denial, authorized AUDITOR paths, and an AUDITOR credential
    authentication/revocation lock schedule. No HTTP exposure exists; evidence
-   verification and independent review remain open. A PostgreSQL integration
-   schedules verify both reconciliation dispositions commit before concurrent
-   auditor credential revocation; grant revocation and other orderings remain
-   open.
+   verification and independent review remain open. PostgreSQL schedules verify
+   both execution-reconciliation dispositions commit before concurrent auditor
+   credential revocation, and both orderings of `execution.reconcile` grant
+   revocation against `MARK_FAILED` reconciliation. Equivalent
+   `effect.reconcile` grant-revocation schedules, evidence-reference
+   verification, and hostile schedules remain open.
 4. Lease expiry is now computed and checked by PostgreSQL clock. Integration
    tests prove delayed completion is rejected after expiry during a queue-row
    lock wait and run three competing completion/quarantine schedules, all

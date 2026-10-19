@@ -576,3 +576,25 @@ coverage, independent review, or M2 acceptance.
   patterns consistent with the source and no concrete flaw in either ordering.
   This is not formal independent security review, exhaustive race proof, or M2
   acceptance. CI was not awaited per operator direction.
+
+## Execution reconciliation serializes with grant revocation — 2026-10-19
+
+- Code revision: `0164e4624dcf851b3cd5f0944c98c8d9ab971307` on
+  `feat/aao-m0-foundation`.
+- A disposable-PostgreSQL integration test covers both orderings for the
+  `execution.reconcile` grant and `MARK_FAILED`: with reconciliation holding
+  its grant and waiting at the journal write, grant deletion is observed
+  blocked by that transaction and reconciliation commits first; with deletion
+  queued first on the grant row, the reconciliation grant query is observed
+  blocked by the revoker, deletion commits, and reconciliation is denied.
+  The test checks the resulting execution states (`FAILED` and `UNCERTAIN`)
+  and performs no external action.
+- The focused test passed four consecutive runs before final assertions and
+  passed again with those assertions. On this exact code revision,
+  `python -m compileall -q src tests`, `python -m ruff check src tests`, the
+  full explicitly disposable PostgreSQL suite (**69 passed, 0 skipped, 0
+  warnings** under `-W error`), `python -m pip check`, and `git diff --check`
+  passed. CI was not awaited per operator direction.
+- This is bounded evidence for `execution.reconcile` grant deletion and one
+  disposition, not coverage of `effect.reconcile`, all dispositions, hostile
+  schedules, independent security review, or M2 acceptance.
