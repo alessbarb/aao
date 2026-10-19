@@ -14,8 +14,8 @@ REQUIRED_CONTRACT_FIELDS = {
 
 
 def missing_contract_fields(capability_type: str, contract: dict) -> set[str]:
-    """Return fields absent from a type's minimum contract; does not assess truth."""
+    """Return absent/empty fields from a type's contract; does not assess truth."""
     required = REQUIRED_CONTRACT_FIELDS.get(capability_type)
     if required is None:
         return {"<known capability type>"}
-    return {field for field in required if field not in contract or contract[field] is None}
+    return {field for field in required if not contract.get(field)}
