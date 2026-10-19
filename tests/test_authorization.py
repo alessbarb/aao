@@ -1,10 +1,10 @@
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 
 from aao.authorization import Grant, Principal, has_capability, may_review
 
 
 def test_grants_are_project_specific_and_expire():
-    now = datetime(2026, 10, 18, tzinfo=timezone.utc)
+    now = datetime(2026, 10, 18, tzinfo=UTC)
     worker = Principal(id="a", kind="AGENT")
     grant = Grant(principal_id="a", project_id="p1", capability="work.create",
                   expires_at=now + timedelta(minutes=1))
