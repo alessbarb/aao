@@ -1,7 +1,7 @@
 # Principal authorization matrix
 
 **Scope:** current development API and internal execution/reconciliation
-operations, updated through `39c8b23`.
+operations, updated through `edc0e42`.
 This is an engineering inventory, not a production authorization policy or
 independent security review. The PostgreSQL API and its internal helpers are
 not a claim of M2 acceptance.
@@ -92,6 +92,11 @@ register for test status.
   `work.review` grant while CEO revocation waits; after the review commits and
   revocation succeeds, subsequent authorization is denied. Other business
   writes, additional dispositions, and hostile schedules remain untested.
+- A separate stale-context test supplies the review route with a request
+  authenticated before revocation. Revoking either the AUDITOR credential or
+  its `work.review` grant before the route transaction causes the in-transaction
+  check to return 403 without inserting a review. This complements, but does
+  not replace, the selected operation-first lock schedules above.
 - The full local suite at `a2791349e6000bec56d95cfe0ede587bb631573b` has 66
   tests, including the HTTP token-rotation gap check, grant-row, auditor
   credential-lock, and completion-after-lease-expiry-during-row-lock-wait
