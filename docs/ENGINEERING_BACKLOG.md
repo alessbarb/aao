@@ -11,6 +11,25 @@ latest exact local baseline is in
 M2 remains in progress and is not accepted. Do not interpret old `[candidate]`
 or `[BLOCKED]` labels below as live issue statuses.
 
+## Decision discipline
+
+Apply Pareto and Occam's razor to AAO engineering now: choose the next
+high-leverage action that materially reduces a stated risk or advances an
+acceptance criterion; prefer the smallest adequate, reversible implementation
+over speculative generality. Do not spend another cycle polishing a solution
+that already meets the stated requirement and safety boundary. Record the
+evidence, residual risk, and next concrete checkpoint, then proceed. Stop and
+escalate only when authority is reserved, a change is materially irreversible,
+or unresolved ambiguity changes the safety or acceptance outcome.
+
+Candidate constitutional wording for a future CEO-confirmed revision:
+"AAO shall favor timely, evidence-based progress: prioritize actions with the
+greatest expected contribution to approved objectives, use the simplest
+adequate means, and revisit decisions when new evidence warrants. This
+principle does not override reserved authority, safety constraints, required
+independent review, or explicit acceptance gates." This is a proposal, not an
+amendment or CEO-confirmed constitutional rule.
+
 ## Current M2 engineering priorities
 
 1. **Implemented in candidate code:** execution authenticates only through
