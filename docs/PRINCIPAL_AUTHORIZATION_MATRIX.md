@@ -35,28 +35,29 @@ transaction. The CEO credential is still a single static bearer.
 | Operation | Identity / capability check | Transaction boundary | Known boundary |
 | --- | --- | --- | --- |
 | `execution_queue.claim()` / `complete()` | Individual AGENT credential; requires unexpired `execution.claim` project grant | Credential and grant are checked with `FOR SHARE`; queue/project rows are locked. | Migration 006 transfers legacy identities and drops the old registry. Completion captures caller-side `now` before lock acquisition; lease expiry and delayed completion races remain untested. |
-| `execution_reconciliation.reconcile()` | Caller-supplied `reviewer_id`; unexpired `execution.reconcile` grant; rejects former worker ID | Locks queue/project and grant rows, but reviewer identity is not authenticated | No HTTP endpoint. Identity-string inequality is not proof of auditor identity; evidence references are not verified. Retry-vs-effect-proposal race is not serialized. |
+| `execution_reconciliation.reconcile()` | Active AUDITOR bearer credential resolves reviewer in-transaction; unexpired `execution.reconcile` grant; AGENT credentials denied | Locks credential, queue/project and grant rows | No HTTP endpoint. Evidence references are not verified; credential-revocation race lacks dedicated coverage. Retry-vs-effect-proposal race is not serialized. |
 | `external_effect_registry.propose()` | No principal authentication or project grant check in this helper | Idempotency-key row is locked; execution existence is checked without a lock | Records proposals only; does not execute. It is not safe to treat as an authorization boundary. |
-| `external_effect_reconciliation.reject_unexecuted_proposal()` | Caller-supplied reviewer ID; unexpired `effect.reconcile` grant; rejects current worker ID | Locks effect, queue and grant rows, but not reviewer identity | No trusted reviewer binding or verified evidence; internal helper only. No external effect is executed. |
+| `external_effect_reconciliation.reject_unexecuted_proposal()` | Active AUDITOR bearer credential resolves reviewer in-transaction; unexpired `effect.reconcile` grant; AGENT credentials denied | Locks credential, effect/queue and grant rows | Evidence references are not verified; internal helper only. No external effect is executed. |
 
 ## Cross-cutting gaps and test status
 
 - API, queue and reconciliation authorization checks hold matching grant
   tuples under `FOR SHARE`; CEO grant deletion serializes behind in-flight
-  protected transactions. PostgreSQL tests cover a held-check/revocation race
-  and expiry during a blocked row-lock wait. Other lease, credential-rotation,
+  protected transactions. PostgreSQL tests cover a held-check/revocation race,
+  expiry during a blocked row-lock wait, and AUDITOR credential-authentication
+  serialization against revocation. Other lease, credential-rotation,
   effect proposal/retry, and recovery races remain untested.
 - Sequential credential revocation tests and unit mocks that assert SQL text
-  do not prove real PostgreSQL lock behavior. Required next evidence includes
-  two-connection races for credential and grant revocation against protected
-  reads/writes, claims and completion.
-- Current full local suite has 53 tests, including the two grant-row race
-  cases, but still does not cover lease expiry during lock wait,
+  do not prove real PostgreSQL lock behavior. Direct transaction-level tests
+  now verify grant deletion and auditor credential revocation lock behavior;
+  races against full business writes, claims and completion are still needed.
+- Current full local suite has 53 tests, including grant-row and auditor
+  credential-lock coverage, but still does not cover lease expiry during lock wait,
   quarantine/completion ordering, or effect-proposal/retry races.
 - GitHub CI now configures a fresh disposable PostgreSQL service and runs the
-  guarded integration suite; the workflow last passed at `4ae8742`. The 53-test
-  local run for this matrix revision is recorded in the evidence register; it
-  is not independent review or M2 acceptance.
+  guarded integration suite; run `39251540849` passed on `585b422`. Current
+  local results are recorded in the evidence register; this is not independent
+  review or M2 acceptance.
 - Grant expiry uses `clock_timestamp()` when the locked authorization query is
   evaluated, avoiding PostgreSQL transaction-start `now()` semantics. This
   does not itself prove every long-running operation stops exactly at expiry;
@@ -69,6 +70,8 @@ transaction. The CEO credential is still a single static bearer.
 
 - HTTP routes and auth helpers: `src/aao/work_management_api.py`
 - Credential resolution: `src/aao/principal_credentials.py`
+- Reconciliation credentials are verified and locked via
+  `authenticate_in_transaction()` in the operation's database transaction.
 - Execution claims/completion: `src/aao/execution_queue.py`
 - Legacy worker rows are transferred by `db/postgres/006_unified_execution_identity.sql`; no legacy runtime verifier remains.
 - Execution reconciliation: `src/aao/execution_reconciliation.py`

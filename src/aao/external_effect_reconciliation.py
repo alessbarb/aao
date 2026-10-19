@@ -13,10 +13,17 @@ class EffectReviewDenied(ValueError):
     pass
 
 
-def reject_unexecuted_proposal(effect_id: str, *, reviewer_id: str, evidence: list[str]):
-    if not reviewer_id or not evidence or not all(x.strip() for x in evidence):
-        raise EffectReviewDenied("Reviewer and meaningful evidence required")
+def reject_unexecuted_proposal(effect_id: str, *, auditor_credential: str, evidence: list[str]):
+    if not auditor_credential or not evidence or not all(x.strip() for x in evidence):
+        raise EffectReviewDenied("Active auditor credential and meaningful evidence required")
     with connect_postgres() as db:
+        from aao.principal_credentials import PrincipalDenied, authenticate_in_transaction
+        try:
+            reviewer_id = authenticate_in_transaction(
+                db, auditor_credential, kind="AUDITOR"
+            )
+        except PrincipalDenied as exc:
+            raise EffectReviewDenied("Active auditor credential required") from exc
         effect = db.execute(
             "SELECT e.status,e.execution_id,q.project_id,q.worker_id "
             "FROM external_effects e JOIN execution_queue q ON q.id=e.execution_id "

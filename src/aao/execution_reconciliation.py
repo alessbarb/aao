@@ -12,13 +12,20 @@ class ReconciliationDenied(ValueError):
     pass
 
 
-def reconcile(execution_id: str, *, reviewer_id: str, evidence: list[str],
+def reconcile(execution_id: str, *, auditor_credential: str, evidence: list[str],
               disposition: str) -> str:
     if disposition not in {"RETRY_CONFIRMED_SAFE", "MARK_FAILED"}:
         raise ReconciliationDenied("Unknown disposition")
-    if not reviewer_id or not evidence or not all(e.strip() for e in evidence):
-        raise ReconciliationDenied("Independent reviewer and evidence required")
+    if not auditor_credential or not evidence or not all(e.strip() for e in evidence):
+        raise ReconciliationDenied("Active auditor credential and independent evidence required")
     with connect_postgres() as db:
+        from aao.principal_credentials import PrincipalDenied, authenticate_in_transaction
+        try:
+            reviewer_id = authenticate_in_transaction(
+                db, auditor_credential, kind="AUDITOR"
+            )
+        except PrincipalDenied as exc:
+            raise ReconciliationDenied("Active auditor credential required") from exc
         execution = db.execute(
             "SELECT q.status,q.worker_id,q.project_id,p.state "
             "FROM execution_queue q JOIN projects p ON p.id=q.project_id "

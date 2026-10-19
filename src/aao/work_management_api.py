@@ -124,7 +124,7 @@ class PrincipalCredentialRequest(BaseModel):
 
 class GrantRequest(BaseModel):
     principal_id: str = Field(min_length=1)
-    capability: str = Field(pattern=r"^(?:work\.(?:create|admit|review|progress)|project\.read|execution\.claim)$")
+    capability: str = Field(pattern=r"^(?:work\.(?:create|admit|review|progress)|project\.read|execution\.claim|execution\.reconcile|effect\.reconcile)$")
 
 
 app = FastAPI(title="AAO PostgreSQL development core", version="0.2.0")
@@ -346,7 +346,7 @@ def require_grant(db, principal: str, project_id: str, capability: str):
             "SELECT kind,enabled FROM principal_credentials "
             "WHERE principal_id=%s FOR SHARE", (principal,),
         ).fetchone()
-        expected_kind = "AUDITOR" if capability == "work.review" else "AGENT"
+        expected_kind = "AUDITOR" if capability in {"work.review", "execution.reconcile", "effect.reconcile"} else "AGENT"
         if not row or row[0] != expected_kind or not row[1]:
             raise HTTPException(403, "Individual principal invalid or revoked")
     if not db.execute(

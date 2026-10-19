@@ -1,5 +1,7 @@
 """PostgreSQL integration tests, opt-in for explicitly disposable databases."""
 import os
+import time
+from concurrent.futures import ThreadPoolExecutor
 from hashlib import sha256
 from uuid import uuid4
 
@@ -27,6 +29,61 @@ def test_legacy_execution_identity_migration_is_applied(monkeypatch):
             assert migrated == (
                 "AGENT", sha256(b"aao-ci-legacy-migration-token").hexdigest(), True
             )
+
+
+@pytest.mark.skipif(
+    not os.getenv("AAO_TEST_POSTGRES_URL") or os.getenv("AAO_TEST_DB_DISPOSABLE") != "yes",
+    reason="Explicit disposable PostgreSQL database required",
+)
+def test_transactional_auditor_authentication_serializes_with_revocation(monkeypatch):
+    from aao.postgresql_connection import connect_postgres
+    from aao.principal_credentials import PrincipalDenied, authenticate_in_transaction
+    from aao.work_management_api import app
+
+    monkeypatch.setenv("AAO_POSTGRES_URL", os.environ["AAO_TEST_POSTGRES_URL"])
+    monkeypatch.setenv("AAO_CEO_TOKEN", "auditor-race-ceo")
+    identity = "auditor-" + str(uuid4())
+    ceo = {"X-CEO-Token": "auditor-race-ceo"}
+    with TestClient(app) as client:
+        response = client.post("/v1/principals/credentials", headers=ceo, json={
+            "principal_id": identity, "kind": "AUDITOR",
+        })
+        assert response.status_code == 201, response.text
+        token = response.json()["token"]
+
+    with ThreadPoolExecutor(max_workers=1) as pool, connect_postgres() as protected:
+        assert authenticate_in_transaction(protected, token, kind="AUDITOR") == identity
+        protected_pid = protected.execute("SELECT pg_backend_pid()").fetchone()[0]
+        pid_ready = __import__("threading").Event()
+        revoke_pid = []
+
+        def revoke():
+            with connect_postgres() as revoker:
+                revoke_pid.append(revoker.execute("SELECT pg_backend_pid()").fetchone()[0])
+                pid_ready.set()
+                revoker.execute(
+                    "UPDATE principal_credentials SET enabled=false WHERE principal_id=%s",
+                    (identity,),
+                )
+
+        pending = pool.submit(revoke)
+        assert pid_ready.wait(timeout=2)
+        deadline = time.monotonic() + 3
+        blocked = False
+        while time.monotonic() < deadline:
+            with connect_postgres() as observer:
+                blocked = observer.execute(
+                    "SELECT %s = ANY(pg_blocking_pids(%s))",
+                    (protected_pid, revoke_pid[0]),
+                ).fetchone()[0]
+            if blocked:
+                break
+            time.sleep(0.01)
+        assert blocked, "credential revocation was not blocked by the authenticated transaction"
+        assert not pending.done()
+    pending.result(timeout=2)
+    with connect_postgres() as db, pytest.raises(PrincipalDenied):
+        authenticate_in_transaction(db, token, kind="AUDITOR")
 
 
 @pytest.mark.skipif(

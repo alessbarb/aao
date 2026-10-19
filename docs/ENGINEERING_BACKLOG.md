@@ -25,8 +25,12 @@ or `[BLOCKED]` labels below as live issue statuses.
    Still required: repeated/adversarial schedules, real operation mutation and
    queue claim/completion races, credential rotation races, and review of
    long-running transaction expiry semantics.
-3. Bind execution/effect reconciliation to authenticated AUDITOR identity and
-   transactional authorization before considering any HTTP exposure.
+3. **Implemented in candidate code and locally validated:** execution/effect
+   reconciliation derives the reviewer from a locked individual AUDITOR
+   credential inside the transaction, then checks the project grant. Tests
+   cover AGENT denial, authorized AUDITOR paths and serialization between
+   credential authentication and revocation. HTTP exposure still requires
+   further design, evidence verification, and review.
 4. Verify lease expiry, credential/grant revocation, effect proposal/retry,
    quarantine/completion ordering, and cold-restart recovery with repeated
    PostgreSQL concurrency tests.

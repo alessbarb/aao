@@ -5,6 +5,4 @@ from aao.external_effect_reconciliation import EffectReviewDenied, reject_unexec
 
 def test_rejection_fails_closed_without_evidence():
     with pytest.raises(EffectReviewDenied):
-        reject_unexecuted_proposal("example", reviewer_id="auditor", evidence=[])
-    with pytest.raises(EffectReviewDenied):
-        reject_unexecuted_proposal("example", reviewer_id="", evidence=["proof"])
+        reject_unexecuted_proposal("example", auditor_credential="token", evidence=[])

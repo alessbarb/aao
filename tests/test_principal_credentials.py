@@ -14,14 +14,23 @@ def test_unauthorized_inputs_rejected_without_database(value, kind):
         authenticate(value, kind=kind)
 
 
-def test_grant_contract_accepts_execution_claim_only_as_exact_capability():
+def test_grant_contract_accepts_execution_capabilities_only_as_exact_values():
     from pydantic import ValidationError
 
     from aao.work_management_api import GrantRequest
 
     grant = GrantRequest(principal_id="agent-1", capability="execution.claim")
     assert grant.capability == "execution.claim"
-    for invalid in ("execution.claim.other", "execution.reconcile", "work.create.extra"):
+    assert GrantRequest(
+        principal_id="auditor-1", capability="execution.reconcile"
+    ).capability == "execution.reconcile"
+    assert GrantRequest(
+        principal_id="auditor-1", capability="effect.reconcile"
+    ).capability == "effect.reconcile"
+    for invalid in (
+        "execution.claim.other", "execution.reconcile.extra",
+        "effect.reconcile.extra", "work.create.extra",
+    ):
         with pytest.raises(ValidationError):
             GrantRequest(principal_id="agent-1", capability=invalid)
 

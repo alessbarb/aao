@@ -16,7 +16,6 @@ def test_reconciliation_requires_distinct_granted_reviewer(monkeypatch):
 
     from aao.execution_queue import claim, quarantine_expired, state
     from aao.execution_reconciliation import ReconciliationDenied, reconcile
-    from aao.postgresql_connection import connect_postgres
     from aao.work_management_api import app
 
     monkeypatch.setenv("AAO_POSTGRES_URL", os.environ["AAO_TEST_POSTGRES_URL"])
@@ -33,6 +32,11 @@ def test_reconciliation_requires_distinct_granted_reviewer(monkeypatch):
         })
         assert issued.status_code == 201, issued.text
         secret = issued.json()["token"]
+        auditor_issued = client.post("/v1/principals/credentials", headers=ceo, json={
+            "principal_id": auditor_id, "kind": "AUDITOR",
+        })
+        assert auditor_issued.status_code == 201, auditor_issued.text
+        auditor_secret = auditor_issued.json()["token"]
         mid = client.post("/v1/mandates", headers=ceo, json={
             "title": "Recovery " + str(uuid4()), "objective": "Development only"
         }).json()["id"]
@@ -63,19 +67,38 @@ def test_reconciliation_requires_distinct_granted_reviewer(monkeypatch):
     # Re-running quarantine must not alter this execution again.
     assert state(eid)["attempts"] == 1
     with pytest.raises(ReconciliationDenied):
-        reconcile(eid, reviewer_id=auditor_id, evidence=["operator checked"],
+        reconcile(eid, auditor_credential=auditor_secret, evidence=["operator checked"],
                   disposition="RETRY_CONFIRMED_SAFE")
-    with connect_postgres() as db:
-        db.execute(
-            "INSERT INTO project_grants(principal_id,project_id,capability) "
-            "VALUES (%s,%s,'execution.reconcile')",
-            (auditor_id, project),
-        )
+    with TestClient(app) as client:
+        granted = client.post(f"/v1/projects/{project}/grants", headers=ceo, json={
+            "principal_id": auditor_id, "capability": "execution.reconcile",
+        })
+        assert granted.status_code == 201, granted.text
     with pytest.raises(ReconciliationDenied):
-        reconcile(eid, reviewer_id=worker_id, evidence=["operator checked"],
+        reconcile(eid, auditor_credential=secret, evidence=["agent cannot review"],
                   disposition="RETRY_CONFIRMED_SAFE")
-    assert reconcile(eid, reviewer_id=auditor_id, evidence=["inert-only confirmed"],
+    assert reconcile(eid, auditor_credential=auditor_secret,
+                     evidence=["inert-only confirmed"],
                      disposition="RETRY_CONFIRMED_SAFE") == "QUEUED"
+    from aao.external_effect_reconciliation import EffectReviewDenied, reject_unexecuted_proposal
+    from aao.external_effect_registry import propose
+    proposal = propose(
+        execution_id=eid, idempotency_key="reconcile-" + str(uuid4()),
+        capability="test.inert", request={"kind": "test-only"},
+    )
+    with pytest.raises(EffectReviewDenied):
+        reject_unexecuted_proposal(
+            proposal["id"], auditor_credential=secret, evidence=["agent denied"]
+        )
+    with TestClient(app) as client:
+        granted = client.post(f"/v1/projects/{project}/grants", headers=ceo, json={
+            "principal_id": auditor_id, "capability": "effect.reconcile",
+        })
+        assert granted.status_code == 201, granted.text
+    assert reject_unexecuted_proposal(
+        proposal["id"], auditor_credential=auditor_secret,
+        evidence=["proposal not executed"],
+    ) == "REJECTED"
     with TestClient(app) as client:
         assert client.post(f"/v1/principals/{worker_id}/revoke", headers=ceo).status_code == 200
     from aao.execution_queue import ExecutionConflict
