@@ -11,6 +11,7 @@ from uuid import uuid4
 from aao.postgresql_connection import connect_postgres
 
 MAX_EVIDENCE_BYTES = 1_048_576
+MAX_EVIDENCE_REFERENCES = 32
 _REFERENCE = re.compile(r"^sha256:([0-9a-f]{64})$")
 
 
@@ -82,12 +83,7 @@ def register_evidence(
 
 def verify_evidence_references(db, project_id: str, references: list[str]) -> list[dict]:
     """Resolve and re-hash project evidence inside the caller's transaction."""
-    if not isinstance(references, list) or not references:
-        raise EvidenceDenied("Unique evidence references required")
-    if any(not isinstance(reference, str) for reference in references):
-        raise EvidenceDenied("Evidence reference must be a sha256 digest")
-    if len(set(references)) != len(references):
-        raise EvidenceDenied("Unique evidence references required")
+    _validate_references(references)
     verified = []
     for reference in references:
         match = _REFERENCE.fullmatch(reference) if isinstance(reference, str) else None
@@ -110,3 +106,62 @@ def verify_evidence_references(db, project_id: str, references: list[str]) -> li
             "media_type": row[1],
         })
     return verified
+
+
+def read_evidence(
+    project_id: str,
+    references: list[str],
+    *,
+    auditor_credential: str,
+    capability: str,
+) -> list[dict]:
+    """Read project evidence for an individually authenticated reconciler."""
+    if capability not in {"execution.reconcile", "effect.reconcile"}:
+        raise EvidenceDenied("Evidence review capability required")
+    _validate_references(references)
+    with connect_postgres() as db:
+        from aao.principal_credentials import PrincipalDenied, authenticate_in_transaction
+
+        try:
+            reviewer_id = authenticate_in_transaction(
+                db, auditor_credential, kind="AUDITOR",
+            )
+        except PrincipalDenied as exc:
+            raise EvidenceDenied("Active auditor credential required") from exc
+        grant = db.execute(
+            "SELECT 1 FROM project_grants WHERE principal_id=%s AND project_id=%s "
+            "AND capability=%s AND (expires_at IS NULL OR expires_at > clock_timestamp()) "
+            "FOR SHARE",
+            (reviewer_id, project_id, capability),
+        ).fetchone()
+        if not grant:
+            raise EvidenceDenied("Evidence review capability required")
+        verified = verify_evidence_references(db, project_id, references)
+        artifacts = []
+        for descriptor in verified:
+            digest = descriptor["reference"].removeprefix("sha256:")
+            row = db.execute(
+                "SELECT content,submitted_by,created_at FROM evidence_artifacts "
+                "WHERE project_id=%s AND digest=%s FOR SHARE",
+                (project_id, digest),
+            ).fetchone()
+            if not row or hashlib.sha256(bytes(row[0])).hexdigest() != digest:
+                raise EvidenceDenied("Evidence artifact digest mismatch")
+            artifacts.append({
+                **descriptor,
+                "content": bytes(row[0]),
+                "submitted_by": row[1],
+                "created_at": row[2],
+            })
+    return artifacts
+
+
+def _validate_references(references):
+    if not isinstance(references, list) or not references:
+        raise EvidenceDenied("Unique evidence references required")
+    if len(references) > MAX_EVIDENCE_REFERENCES:
+        raise EvidenceDenied("Too many evidence references")
+    if any(not isinstance(reference, str) for reference in references):
+        raise EvidenceDenied("Evidence reference must be a sha256 digest")
+    if len(set(references)) != len(references):
+        raise EvidenceDenied("Unique evidence references required")

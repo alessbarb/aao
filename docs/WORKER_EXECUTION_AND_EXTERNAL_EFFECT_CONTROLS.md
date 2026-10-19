@@ -1,5 +1,11 @@
 # M2 — Worker identity and external-effect ledger (candidate)
 
+> **Current-state note (2026-10-19):** early sections below record historical
+> transitions and are not a description of current authentication. Migration
+> 006 removed `worker_registrations`; queue claims/completions use individual
+> AGENT credentials. Current operation scope and evidence boundaries are in
+> [`PRINCIPAL_AUTHORIZATION_MATRIX.md`](PRINCIPAL_AUTHORIZATION_MATRIX.md).
+
 ## What exists
 Migration 004 provides an explicit worker registration record (disabled by
 default) and an external-effect ledger with unique idempotency keys.
@@ -47,4 +53,8 @@ Opt-in PostgreSQL integration tests cover invalid credentials, suspended-project
 
 ## Reconciliation candidate
 
-See [M2 reconciliation](EXECUTION_RECOVERY_AND_RECONCILIATION.md). The candidate function is intentionally not exposed via API: it currently accepts a caller-supplied reviewer identity and cannot be treated as production authorization. The `execution.reconcile` capability requires an explicit persisted project grant, and no worker is restarted automatically.
+See [M2 reconciliation](EXECUTION_RECOVERY_AND_RECONCILIATION.md). The
+reconciliation functions are intentionally not exposed via HTTP. They resolve
+the reviewer from an active individual AUDITOR credential and require an
+explicit persisted project grant inside the transaction. This does not prove
+distinct human auditor identity. No worker is restarted automatically.

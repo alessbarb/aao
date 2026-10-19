@@ -35,7 +35,9 @@ def test_verifies_project_scoped_artifact_bytes_and_returns_descriptor():
     ]
 
 
-@pytest.mark.parametrize("references", [[], ["operator checked"], [None], [["nested"]]])
+@pytest.mark.parametrize(
+    "references", [[], ["operator checked"], [None], [["nested"]], ["sha256:" + "a" * 64] * 33]
+)
 def test_rejects_missing_or_malformed_evidence_references(references):
     with pytest.raises(EvidenceDenied):
         verify_evidence_references(EvidenceDb(b"evidence bytes"), "project-1", references)

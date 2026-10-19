@@ -33,11 +33,13 @@ amendment or CEO-confirmed constitutional rule.
 ## Current M2 engineering priorities
 
 - **Implemented in the current working tree; local verification pending at the
-  recorded SHA:** migration 008 and an internal content-addressed evidence
+  recorded SHA:** migrations 008/009 and an internal content-addressed evidence
   registry let reconciliation resolve project-scoped SHA-256 references and
   re-hash stored bytes. This proves byte integrity only—not truth, authorship,
-  independent review, or protection from privileged database alteration. There
-  is no HTTP artifact interface. Keep review approval fail-closed.
+  independent review, or protection from database-owner alteration. Row-level
+  update/delete and table truncation are denied by triggers; privileged owners
+  can still disable them. There is no HTTP artifact interface. Keep review
+  approval fail-closed.
 
 - **Implemented and locally/CI verified:** migration 007 fences
   leases across project pause/resume by binding claim and validation to a

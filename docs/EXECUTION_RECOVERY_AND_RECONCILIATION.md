@@ -20,7 +20,10 @@ but principal-ID separation is not proof of distinct human identity. Evidence
 references must resolve to project-scoped, append-only artifacts whose bytes
 are re-hashed during reconciliation. This establishes stored-byte integrity,
 not the truth of the content, its authorship, or independent review. There is
-no HTTP upload/read endpoint; submission is an internal Python capability.
+no HTTP upload/read endpoint. `evidence_registry.read_evidence()` permits an
+individually authenticated auditor with an applicable project reconciliation
+grant to inspect bytes via the internal Python interface; this is not a human
+identity or production access system.
 Retry is refused when the project is paused or cancelled, or when any external
 effect exists except one explicitly rejected. That restriction errs on the
 side of refusing potentially unsafe duplicate effects.
@@ -51,8 +54,8 @@ reconciliation require an isolated PostgreSQL instance.
 - Proposal/rejection lock-order tests and effect-proposal credential/grant
   revocation schedules cover selected controlled orderings. Broader adversarial
   schedules remain open.
-- Evidence truth/authorship, reviewer access to inspect artifact bytes, and
-  database-role protection against privileged mutation/truncation; no signed
+- Evidence truth/authorship, human auditor identity, and database-owner
+  protection against disabling mutation/truncation triggers; no signed
   disposition exists yet.
 - Recovery of paused/running work and explicit in-flight effects reconciliation.
 - Repeated crash/credential rotation and concurrent-worker integration tests.

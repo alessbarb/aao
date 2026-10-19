@@ -80,6 +80,9 @@ def test_reconciliation_requires_distinct_granted_reviewer(monkeypatch):
                 "DELETE FROM evidence_artifacts WHERE project_id=%s AND digest=%s",
                 (project, digest),
             )
+        with pytest.raises(psycopg.errors.RaiseException, match="append-only"), \
+                connect_postgres() as db:
+            db.execute("TRUNCATE evidence_artifacts")
         wid = client.post(f"/v1/projects/{project}/work", headers=worker, json={
             "title": "Inert recovery", "author_id": worker_id,
             "acceptance_criteria": ["Recorded"]
@@ -119,6 +122,13 @@ def test_reconciliation_requires_distinct_granted_reviewer(monkeypatch):
             "principal_id": auditor_id, "capability": "execution.reconcile",
         })
         assert granted.status_code == 201, granted.text
+    from aao.evidence_registry import read_evidence
+    inspected = read_evidence(
+        project, [evidence_ref], auditor_credential=auditor_secret,
+        capability="execution.reconcile",
+    )
+    assert inspected[0]["content"] == b"AAO inert execution evidence for integration coverage"
+    assert inspected[0]["submitted_by"] == worker_id
     with pytest.raises(ReconciliationDenied, match="Evidence artifact not found"):
         reconcile(
             eid, auditor_credential=auditor_secret,
