@@ -363,3 +363,17 @@ controlled claim/revocation schedule; it does not prove alternate lock order,
 concurrent hostile schedules, or production behavior.
 
 CI run `39256367714` passed for code commit `20a358b71677a8a132269b89781d843f9c15a936`, including PostgreSQL integration tests, compilation, Ruff, and dependency checks.
+
+## Reconciliation versus auditor credential revocation
+
+A PostgreSQL integration test creates an expired inert execution, quarantines
+it, then blocks the actual `execution_reconciliation.reconcile()` transaction
+at its journal insert after authentication and authorization. Concurrent CEO
+revocation is observed waiting on the AUDITOR credential row. Releasing the
+journal lock allows the reconciliation to mark the execution FAILED before
+revocation commits; afterward the revoked auditor credential cannot reconcile
+again. Three consecutive local reruns passed; the full suite passed **59
+tests**, with compileall, Ruff, `pip check`, and `git diff --check` clean. CI
+has not yet run for this change. This covers one `MARK_FAILED`/credential-
+revocation schedule, not retry disposition, alternate ordering, evidence
+validity, or adversarial production scheduling.

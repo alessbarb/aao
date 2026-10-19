@@ -141,3 +141,108 @@ def test_reconciliation_requires_distinct_granted_reviewer(monkeypatch):
     from aao.execution_queue import ExecutionConflict
     with pytest.raises(ExecutionConflict):
         claim(worker_id, agent_credential=secret, project_id=project)
+
+
+@pytest.mark.skipif(
+    not os.getenv("AAO_TEST_POSTGRES_URL") or os.getenv("AAO_TEST_DB_DISPOSABLE") != "yes",
+    reason="Explicit disposable PostgreSQL database required",
+)
+def test_reconciliation_serializes_with_auditor_credential_revocation(monkeypatch):
+    from aao.execution_queue import claim, quarantine_expired, state
+    from aao.execution_reconciliation import ReconciliationDenied, reconcile
+    from aao.postgresql_connection import connect_postgres
+    from aao.work_management_api import app
+
+    monkeypatch.setenv("AAO_POSTGRES_URL", os.environ["AAO_TEST_POSTGRES_URL"])
+    monkeypatch.setenv("AAO_CEO_TOKEN", "reconcile-revoke-ceo")
+    monkeypatch.setenv("AAO_SANDBOX_QUEUE_ENABLED", "true")
+    ceo = {"X-CEO-Token": "reconcile-revoke-ceo"}
+    worker_id = "reconcile-worker-" + str(uuid4())
+    auditor_id = "reconcile-auditor-" + str(uuid4())
+    with TestClient(app) as client:
+        worker_response = client.post("/v1/principals/credentials", headers=ceo, json={
+            "principal_id": worker_id, "kind": "AGENT",
+        })
+        auditor_response = client.post("/v1/principals/credentials", headers=ceo, json={
+            "principal_id": auditor_id, "kind": "AUDITOR",
+        })
+        assert worker_response.status_code == auditor_response.status_code == 201
+        worker_token = worker_response.json()["token"]
+        auditor_token = auditor_response.json()["token"]
+        worker = {"X-Agent-Token": worker_token}
+        mandate = client.post("/v1/mandates", headers=ceo, json={
+            "title": "Reconcile credential revoke " + str(uuid4()),
+            "objective": "Serialize reconciliation and auditor revocation",
+        }).json()["id"]
+        assert client.post(f"/v1/mandates/{mandate}/confirm", headers=ceo).status_code == 200
+        project = client.post("/v1/projects", headers=ceo, json={
+            "name": "Reconcile credential revoke", "mandate_id": mandate,
+        }).json()["id"]
+        for principal, capability in (
+            (worker_id, "work.create"), (worker_id, "work.admit"),
+            (worker_id, "execution.claim"), (auditor_id, "execution.reconcile"),
+        ):
+            response = client.post(f"/v1/projects/{project}/grants", headers=ceo, json={
+                "principal_id": principal, "capability": capability,
+            })
+            assert response.status_code == 201, response.text
+        work = client.post(f"/v1/projects/{project}/work", headers=worker, json={
+            "title": "Reconcile credential race", "author_id": worker_id,
+            "acceptance_criteria": ["inert"],
+        }).json()["id"]
+        assert client.post(f"/v1/work/{work}/admit", headers=worker).status_code == 200
+        staged = client.post(f"/v1/work/{work}/stage-inert", headers=worker)
+        assert staged.status_code == 202, staged.text
+        execution_id = staged.json()["execution_id"]
+        lease = claim(worker_id, agent_credential=worker_token, project_id=project, seconds=1)
+        assert lease is not None and lease["execution_id"] == execution_id
+        time.sleep(1.05)
+        assert quarantine_expired() >= 1
+        assert state(execution_id)["status"] == "UNCERTAIN"
+
+        with ThreadPoolExecutor(max_workers=2) as pool, connect_postgres() as blocker:
+            blocker.execute("LOCK TABLE execution_journal IN ACCESS EXCLUSIVE MODE")
+            reconciliation = pool.submit(
+                reconcile, execution_id, auditor_credential=auditor_token,
+                evidence=["reviewed inert execution"], disposition="MARK_FAILED",
+            )
+            deadline = time.monotonic() + 5
+            reconciliation_waiting = False
+            while time.monotonic() < deadline:
+                with connect_postgres() as observer:
+                    reconciliation_waiting = observer.execute(
+                        "SELECT EXISTS (SELECT 1 FROM pg_stat_activity "
+                        "WHERE query LIKE 'INSERT INTO execution_journal%' "
+                        "AND wait_event_type='Lock')"
+                    ).fetchone()[0]
+                if reconciliation_waiting:
+                    break
+                time.sleep(0.01)
+            assert reconciliation_waiting, "reconciliation did not reach journal write"
+
+            revocation = pool.submit(
+                client.post, f"/v1/principals/{auditor_id}/revoke", headers=ceo,
+            )
+            deadline = time.monotonic() + 5
+            revocation_waiting = False
+            while time.monotonic() < deadline:
+                with connect_postgres() as observer:
+                    revocation_waiting = observer.execute(
+                        "SELECT EXISTS (SELECT 1 FROM pg_stat_activity "
+                        "WHERE query LIKE 'UPDATE principal_credentials SET enabled=false%' "
+                        "AND wait_event_type='Lock')"
+                    ).fetchone()[0]
+                if revocation_waiting:
+                    break
+                time.sleep(0.01)
+            assert revocation_waiting, "auditor revocation did not wait for reconciliation"
+
+        assert reconciliation.result(timeout=5) == "FAILED"
+        revoked = revocation.result(timeout=5)
+        assert revoked.status_code == 200, revoked.text
+        assert state(execution_id)["status"] == "FAILED"
+        with pytest.raises(ReconciliationDenied, match="Active auditor credential required"):
+            reconcile(
+                execution_id, auditor_credential=auditor_token,
+                evidence=["retry after revocation"], disposition="MARK_FAILED",
+            )

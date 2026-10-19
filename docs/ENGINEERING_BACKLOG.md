@@ -32,13 +32,13 @@ amendment or CEO-confirmed constitutional rule.
 
 ## Current M2 engineering priorities
 
-1. **Implemented in candidate code:** execution authenticates only through
+1. **Implemented in candidate code and CI-validated:** execution authenticates only through
    individual AGENT credentials. Migration `006_unified_execution_identity`
    transfers legacy worker identities (aborting on collisions) and removes
    `worker_registrations`. Shared worker/reviewer authentication has now been
    removed from the PostgreSQL API and its integration tests use individual
-   identities. This change still needs commit/CI verification and independent
-   review; migration/runtime operational risks remain under review.
+   identities. Migration `006` passed CI on current branch history; independent
+   review and migration/runtime operational risks remain open.
 2. **Partially implemented and locally validated:** CEO grant revocation is
    audited transactionally; API, execution and reconciliation authorization
    checks lock the matched grant row. PostgreSQL tests cover revocation waiting
@@ -47,15 +47,18 @@ amendment or CEO-confirmed constitutional rule.
    controlled PostgreSQL integration test proves project-grant deletion waits
    for an HTTP work-creation transaction that already holds that grant, and
    queue claim and completion each serialize before concurrent deletion of the
-   execution grant. Still required: repeated/adversarial schedules across the
-   remaining operations, alternative operation/revocation orderings, and
-   adversarial schedules; review long-running transaction expiry semantics.
+   execution grant. Actual queue claim and completion also serialize before
+   concurrent AGENT credential revocation. Still required: repeated/adversarial
+   schedules across remaining operations, alternate operation/revocation
+   orderings, and review of long-running transaction expiry semantics.
 3. **Implemented in candidate code and locally validated:** execution/effect
    reconciliation derives the reviewer from a locked individual AUDITOR
    credential inside the transaction, then checks the project grant. Tests
-   cover AGENT denial, authorized AUDITOR paths and serialization between
-   credential authentication and revocation. No HTTP exposure exists; evidence
-   verification and independent review remain open.
+   cover AGENT denial, authorized AUDITOR paths, and an AUDITOR credential
+   authentication/revocation lock schedule. No HTTP exposure exists; evidence
+   verification and independent review remain open. A PostgreSQL integration
+   schedule verifies a reconciliation transaction commits before concurrent
+   auditor credential revocation; other reviewer-operation races remain open.
 4. Lease expiry is now computed and checked by PostgreSQL clock. Integration
    tests prove delayed completion is rejected after expiry during a queue-row
    lock wait and run three competing completion/quarantine schedules, all
@@ -66,8 +69,9 @@ amendment or CEO-confirmed constitutional rule.
    container recovered a persisted expired lease to `UNCERTAIN`; broader
    crash/restart schedules and a repeatable automated restart harness remain
    open.
-5. Make PostgreSQL integration tests part of CI with a fresh disposable
-   database and migrations; ordinary CI currently can skip those tests.
+5. **Implemented and CI-validated:** CI provisions a fresh disposable
+   PostgreSQL database, applies migrations, and runs guarded integration tests.
+   Local execution still requires explicit disposable-database configuration.
 6. Obtain adversarial independent security/architecture review and competent
    acceptance. Codex cannot substitute for either.
 
