@@ -856,3 +856,92 @@ def test_effect_proposal_serializes_with_agent_credential_revocation(monkeypatch
         assert revoke_future.result(timeout=5).status_code == 200
         with pytest.raises(EffectConflict, match="credential required"):
             proposal_future.result(timeout=5)
+
+
+@pytest.mark.skipif(
+    not os.getenv("AAO_TEST_POSTGRES_URL") or os.getenv("AAO_TEST_DB_DISPOSABLE") != "yes",
+    reason="Explicit disposable PostgreSQL test database required",
+)
+def test_evidence_read_denied_when_grant_revocation_wins_race(monkeypatch):
+    """An evidence read queued behind grant revocation must observe the revoke."""
+    from aao.evidence_registry import EvidenceDenied, read_evidence, register_evidence
+    from aao.postgresql_connection import connect_postgres
+    from aao.work_management_api import app
+
+    monkeypatch.setenv("AAO_POSTGRES_URL", os.environ["AAO_TEST_POSTGRES_URL"])
+    monkeypatch.setenv("AAO_CEO_TOKEN", "evidence-read-race-ceo")
+    ceo = {"X-CEO-Token": "evidence-read-race-ceo"}
+
+    with TestClient(app) as client:
+        agent_id = "evidence-agent-" + str(uuid4())
+        auditor_id = "evidence-auditor-" + str(uuid4())
+        agent_issued = client.post("/v1/principals/credentials", headers=ceo, json={
+            "principal_id": agent_id, "kind": "AGENT",
+        })
+        auditor_issued = client.post("/v1/principals/credentials", headers=ceo, json={
+            "principal_id": auditor_id, "kind": "AUDITOR",
+        })
+        assert agent_issued.status_code == auditor_issued.status_code == 201
+        agent_token = agent_issued.json()["token"]
+        auditor_token = auditor_issued.json()["token"]
+
+        mandate = client.post("/v1/mandates", headers=ceo, json={
+            "title": "Evidence read race " + str(uuid4()),
+            "objective": "Serialize evidence reads with reviewer grant revocation",
+        }).json()["id"]
+        assert client.post(f"/v1/mandates/{mandate}/confirm", headers=ceo).status_code == 200
+        project = client.post("/v1/projects", headers=ceo, json={
+            "name": "Evidence read race", "mandate_id": mandate,
+        }).json()["id"]
+        for principal_id, capability in (
+            (agent_id, "evidence.submit"),
+            (auditor_id, "execution.reconcile"),
+        ):
+            response = client.post(f"/v1/projects/{project}/grants", headers=ceo, json={
+                "principal_id": principal_id, "capability": capability,
+            })
+            assert response.status_code == 201, response.text
+
+        evidence = register_evidence(
+            project, b"sensitive review artifact", agent_id=agent_id,
+            agent_credential=agent_token, media_type="text/plain",
+        )
+
+        def wait_for_blocked_query(pattern, blocker_pid):
+            deadline = time.monotonic() + 5
+            while time.monotonic() < deadline:
+                with connect_postgres() as observer:
+                    row = observer.execute(
+                        "SELECT pid FROM pg_stat_activity WHERE query LIKE %s "
+                        "AND wait_event_type='Lock' "
+                        "AND %s=ANY(pg_blocking_pids(pid)) LIMIT 1",
+                        (pattern, blocker_pid),
+                    ).fetchone()
+                    if row:
+                        return row[0]
+                time.sleep(0.01)
+            raise AssertionError(f"query did not wait on expected lock: {pattern}")
+
+        with ThreadPoolExecutor(max_workers=2) as pool, connect_postgres() as blocker:
+            blocker_pid = blocker.execute("SELECT pg_backend_pid()").fetchone()[0]
+            blocker.execute(
+                "SELECT project_id FROM project_grants WHERE principal_id=%s "
+                "AND project_id=%s AND capability='execution.reconcile' FOR UPDATE",
+                (auditor_id, project),
+            )
+            revocation = pool.submit(
+                client.delete,
+                f"/v1/projects/{project}/grants/{auditor_id}/execution.reconcile",
+                headers=ceo,
+            )
+            revoker_pid = wait_for_blocked_query("DELETE FROM project_grants%", blocker_pid)
+            read = pool.submit(
+                read_evidence, project, [evidence], auditor_credential=auditor_token,
+                capability="execution.reconcile",
+            )
+            wait_for_blocked_query("SELECT 1 FROM project_grants%", revoker_pid)
+
+        revoked = revocation.result(timeout=5)
+        assert revoked.status_code == 204, revoked.text
+        with pytest.raises(EvidenceDenied, match="Evidence review capability required"):
+            read.result(timeout=5)
