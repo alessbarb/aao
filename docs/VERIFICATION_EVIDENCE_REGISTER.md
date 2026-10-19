@@ -346,3 +346,5 @@ compileall, Ruff, `pip check`, and `git diff --check` were clean. CI has not yet
 run for this change. This checks one completion/revocation ordering only; it
 does not verify the opposite order, claim/credential-revocation schedules, or
 production adversarial concurrency.
+
+CI run `39256075817` passed for code commit `8b99abad1ae996d31284eab002ec827f066fb7a6`, including the PostgreSQL integration suite, compilation, Ruff, and dependency checks.
