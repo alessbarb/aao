@@ -43,6 +43,20 @@ def test_project_grant_inventory_rejects_non_ceo_before_database_access(monkeypa
     assert response.status_code == 403
 
 
+def test_mandate_inventory_rejects_non_ceo_before_database_access(monkeypatch):
+    from fastapi.testclient import TestClient
+
+    from aao.work_management_api import app
+
+    monkeypatch.setenv("AAO_ENV", "development")
+    monkeypatch.setenv("AAO_CEO_TOKEN", "expected-ceo-token")
+    with TestClient(app) as client:
+        response = client.get(
+            "/v1/mandates", headers={"X-CEO-Token": "not-the-ceo"},
+        )
+    assert response.status_code == 403
+
+
 @pytest.mark.parametrize("environment", [None, "", "production", "prodution"])
 @pytest.mark.parametrize("transactional", [False, True])
 def test_individual_credentials_require_explicit_known_dev_environment(
