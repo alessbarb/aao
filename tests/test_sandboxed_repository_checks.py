@@ -107,7 +107,7 @@ def test_fixed_check_runs_inside_bubblewrap_and_returns_candidate_sha(tmp_path: 
 
     assert result["kind"] == "aao.repository-check.v1"
     assert result["candidate_sha"] == _git(tmp_path, "rev-parse", "HEAD")
-    assert result["conclusion"] == "success"
+    assert result["conclusion"] == "success", (result["stdout"], result["stderr"])
     assert "6 passed" in result["stdout"]
 
 
