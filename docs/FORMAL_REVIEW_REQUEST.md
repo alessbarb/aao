@@ -89,3 +89,7 @@ The report must state that it does not constitute CEO acceptance, authorize
 PR #2 merge, production deployment, or external execution. M2-A acceptance and
 integration remain blocked until findings are dispositioned and the competent
 authority accepts the exact candidate and residual risks.
+
+## Review model change (approved 2026-10-19)
+
+GOV-REV-001 v1.1 supersedes the earlier human-reviewer requirement for ordinary technical assurance. A reviewer must be functionally independent with protected evidence and veto power. Same-process subagents without separate authority are insufficient. M2-A is not accepted.
