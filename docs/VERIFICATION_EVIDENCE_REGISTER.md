@@ -538,8 +538,8 @@ coverage, independent review, or M2 acceptance.
 
 ## Review requires completed execution and excludes recorded claimant — 2026-10-19
 
-- Candidate code change follows `b1478f53dd591a0c2bda3b300d94984566d4e35d`;
-  exact commit SHA is recorded by Git after commit.
+- Code revision: `68fe0fd12fba43ddfbaa6a1b01257fdc4dbca7a1` on
+  `feat/aao-m0-foundation`.
 - The review route locks execution rows for the work and returns 409 unless
   every associated execution is `SUCCEEDED`. It also rejects reviewer IDs
   recorded in durable `claimed` journal entries. This is principal-ID-level
