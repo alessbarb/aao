@@ -158,14 +158,16 @@ def test_project_listing_rechecks_active_reader_in_transaction(monkeypatch):
         def fetchall(self):
             return []
 
-    for record in (None, ("AGENT", False), ("AUDITOR", True)):
-        db = ReaderDb(record)
-
+    def transaction_for(selected_db):
         @contextmanager
         def fake_tx():
-            yield db
+            yield selected_db
 
-        monkeypatch.setattr(work_management_api, "tx", fake_tx)
+        return fake_tx
+
+    for record in (None, ("AGENT", False), ("AUDITOR", True)):
+        db = ReaderDb(record)
+        monkeypatch.setattr(work_management_api, "tx", transaction_for(db))
         with pytest.raises(HTTPException) as denied:
             work_management_api.projects(principal="agent-1")
         assert denied.value.status_code == 403
