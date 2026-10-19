@@ -122,15 +122,13 @@ execute tests; they are internal reviews, not independent assurance.
   `development` and `test`, including transaction-time credential checks used
   by evidence and reconciliation helpers. Production human identity is still
   not implemented or claimed.
-- **Concurrent idempotency-key collision across distinct executions — P1
-  follow-up.** The initial existence query in effect proposal handling does not
-  lock an absent global key; concurrent distinct execution proposals can race
-  into the database unique constraint. The unique constraint prevents duplicate
-  durable rows, but the losing request may receive a database error instead of
-  a stable `EffectConflict`/idempotent result. Existing sequential replay
-  coverage does not prove this interleaving. This is limited to inert proposal
-  recording; no external effect can occur. Track for a bounded follow-up and
-  include in formal review; it is not evidence of duplicate external effects.
+- **Concurrent idempotency-key collision across distinct executions — corrected
+  in candidate worktree.** Proposal insertion now uses the unique constraint as
+  the arbitration point and re-reads the winner, returning a stable conflict for
+  a key bound to a different execution. A PostgreSQL test runs two distinct
+  execution proposals concurrently with one absent key and asserts one proposal
+  plus one domain conflict, with no raw unique-constraint failure. This is
+  idempotent inert-ledger behavior only; no external effect can occur.
 
 These source changes had a worktree full-suite/static run recorded in the
 verification register; commit and exact-SHA evidence are required before the

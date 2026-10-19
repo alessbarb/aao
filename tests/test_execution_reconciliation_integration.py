@@ -1,5 +1,6 @@
 """PostgreSQL integration tests, opt-in for explicitly disposable databases."""
 import os
+import threading
 import time
 from concurrent.futures import ThreadPoolExecutor
 from uuid import uuid4
@@ -89,10 +90,57 @@ def test_reconciliation_requires_distinct_granted_reviewer(monkeypatch):
         }).json()["id"]
         client.post(f"/v1/work/{wid}/admit", headers=worker)
         eid = client.post(f"/v1/work/{wid}/stage-inert", headers=worker).json()["execution_id"]
+        other_wid = client.post(f"/v1/projects/{project}/work", headers=worker, json={
+            "title": "Concurrent proposal", "author_id": worker_id,
+            "acceptance_criteria": ["Recorded"]
+        }).json()["id"]
+        client.post(f"/v1/work/{other_wid}/admit", headers=worker)
+        other_eid = client.post(
+            f"/v1/work/{other_wid}/stage-inert", headers=worker,
+        ).json()["execution_id"]
+        race_wid = client.post(f"/v1/projects/{project}/work", headers=worker, json={
+            "title": "Concurrent proposal peer", "author_id": worker_id,
+            "acceptance_criteria": ["Recorded"]
+        }).json()["id"]
+        client.post(f"/v1/work/{race_wid}/admit", headers=worker)
+        race_eid = client.post(
+            f"/v1/work/{race_wid}/stage-inert", headers=worker,
+        ).json()["execution_id"]
     lease = claim(worker_id, agent_credential=secret, project_id=project, seconds=1)
     assert lease["execution_id"] == eid
+    other_lease = claim(worker_id, agent_credential=secret, project_id=project)
+    assert other_lease["execution_id"] == other_eid
+    race_lease = claim(worker_id, agent_credential=secret, project_id=project)
+    assert race_lease["execution_id"] == race_eid
     from aao.external_effect_registry import EffectConflict, propose
     from aao.postgresql_connection import connect_postgres
+
+    start = threading.Barrier(2)
+
+    # Both calls must use the same key; generate it outside the worker threads.
+    race_key = "cross-execution-race-" + str(uuid4())
+
+    def propose_with_shared_key(execution_id, lease_token):
+        start.wait(timeout=5)
+        try:
+            return propose(
+                execution_id=execution_id, worker_id=worker_id,
+                lease_token=lease_token, agent_credential=secret,
+                idempotency_key=race_key, capability="test.inert",
+                request={"kind": "test-only"},
+            )
+        except EffectConflict as exc:
+            return exc
+
+    with ThreadPoolExecutor(max_workers=2) as pool:
+        raced = [
+            pool.submit(propose_with_shared_key, other_eid, other_lease["token"]),
+            pool.submit(propose_with_shared_key, race_eid, race_lease["token"]),
+        ]
+        results = [future.result(timeout=10) for future in raced]
+    assert sum(isinstance(result, dict) for result in results) == 1
+    assert sum(isinstance(result, EffectConflict) for result in results) == 1
+
     with connect_postgres() as db:
         db.execute("UPDATE projects SET state='PAUSED' WHERE id=%s", (project,))
         db.execute("UPDATE projects SET state='ACTIVE' WHERE id=%s", (project,))

@@ -92,13 +92,12 @@ formal independence evidence.
   production/deployment test was run. The documentation package is a later
   revision; the review request must pin its exact checkout separately.
 - Internal follow-up identified and corrected the missing CEO-authenticated
-  PostgreSQL suspension initiation path and added a fail-closed production
-  environment guard for development credentials. A separate potential P1
-  remains: concurrent proposals using the same absent idempotency key across
-  distinct execution rows can race into a database unique-constraint error.
-  The unique constraint prevents duplicate records; no external effect is
-  possible. Assess whether this inert-ledger API behavior blocks the bounded
-  acceptance, and document the rationale.
+  PostgreSQL suspension initiation path, added a fail-closed production
+  environment guard for development credentials, and fixed concurrent absent
+  idempotency-key races across distinct execution rows. The new concurrency
+  test expects one proposal and one domain conflict. Review the correction and
+  assess whether its bounded coverage is sufficient; no external effect is
+  possible through this ledger.
 
 ## Required review output
 

@@ -77,11 +77,27 @@ def propose(*, execution_id: str, worker_id: str, lease_token: str,
                 raise EffectConflict("Effect proposal is no longer active")
             return {"id": str(row[0]), "status": "PROPOSED_OR_EXISTING"}
         effect_id = str(uuid4())
-        db.execute(
+        inserted = db.execute(
             "INSERT INTO external_effects(id,execution_id,idempotency_key,capability,status,request_digest) "
-            "VALUES (%s,%s,%s,%s,'PROPOSED',%s)",
+            "VALUES (%s,%s,%s,%s,'PROPOSED',%s) "
+            "ON CONFLICT (idempotency_key) DO NOTHING RETURNING id",
             (effect_id, execution_id, idempotency_key, capability, digest),
-        )
+        ).fetchone()
+        if not inserted:
+            # A concurrent proposal for a different execution can win the
+            # unique key after the SELECT above found no row. Under PostgreSQL
+            # READ COMMITTED, this statement sees that committed winner.
+            row = db.execute(
+                "SELECT id,execution_id,capability,request_digest,status FROM external_effects "
+                "WHERE idempotency_key=%s FOR UPDATE", (idempotency_key,),
+            ).fetchone()
+            if not row:
+                raise EffectConflict("Idempotency-key race could not be resolved")
+            if row[1] != execution_id or row[2] != capability or row[3] != digest:
+                raise EffectConflict("Idempotency key reused with different request")
+            if row[4] != "PROPOSED":
+                raise EffectConflict("Effect proposal is no longer active")
+            return {"id": str(row[0]), "status": "PROPOSED_OR_EXISTING"}
         db.execute(
             "INSERT INTO execution_journal(id,execution_id,kind,details) "
             "VALUES (%s,%s,'effect.proposed',%s::jsonb)",
