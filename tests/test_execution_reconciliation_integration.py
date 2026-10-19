@@ -1,6 +1,5 @@
 """PostgreSQL integration tests, opt-in for explicitly disposable databases."""
 import os
-import threading
 import time
 from concurrent.futures import ThreadPoolExecutor
 from uuid import uuid4
@@ -158,10 +157,7 @@ def test_reconciliation_requires_distinct_granted_reviewer(monkeypatch):
         proposal["id"], auditor_credential=auditor_secret,
         evidence=["proposal not executed"],
     ) == "REJECTED"
-    barrier = threading.Barrier(2)
-
     def racing_proposal():
-        barrier.wait(timeout=3)
         try:
             return propose(
                 execution_id=eid, worker_id=worker_id, lease_token=lease["token"],
@@ -172,17 +168,32 @@ def test_reconciliation_requires_distinct_granted_reviewer(monkeypatch):
             return exc
 
     def racing_completion():
-        barrier.wait(timeout=3)
         return complete(
             eid, lease["token"], worker_id, {"inert": True},
             agent_credential=secret,
         )
 
-    with ThreadPoolExecutor(max_workers=2) as pool:
+    with ThreadPoolExecutor(max_workers=2) as pool, connect_postgres() as blocker:
+        blocker.execute(
+            "SELECT id FROM execution_queue WHERE id=%s FOR UPDATE", (eid,),
+        )
         proposal_result = pool.submit(racing_proposal)
+        deadline = time.monotonic() + 5
+        waiting = False
+        while time.monotonic() < deadline:
+            with connect_postgres() as observer:
+                waiting = observer.execute(
+                    "SELECT EXISTS (SELECT 1 FROM pg_stat_activity "
+                    "WHERE query LIKE 'SELECT q.status,q.project_id%' "
+                    "AND wait_event_type='Lock')",
+                ).fetchone()[0]
+            if waiting:
+                break
+            time.sleep(0.01)
+        assert waiting, "effect proposal did not block on the execution row"
         completion_result = pool.submit(racing_completion)
-        raced_proposal = proposal_result.result(timeout=5)
-        completion_result.result(timeout=5)
+    raced_proposal = proposal_result.result(timeout=5)
+    completion_result.result(timeout=5)
     assert state(eid)["status"] == "SUCCEEDED"
     if isinstance(raced_proposal, EffectConflict):
         assert "lease is not active" in str(raced_proposal)
