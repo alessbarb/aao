@@ -1,0 +1,360 @@
+"""Audit local Git candidate manifests by exact SHA and resulting merge tree.
+
+A manifest only selects a candidate; the auditor re-derives every fact it
+asserts. Policy, auditor key, uid and ledger location come from a fixed trust
+anchor that the caller cannot choose (Codex review H-01 on PR #14). The gate in
+``verify_promotion`` is what an integration controller runs immediately before a
+compare-and-swap ref update. See docs/AUDIT_MANIFEST_CONTRACT.md.
+"""
+from __future__ import annotations
+
+import argparse
+import base64
+import json
+import os
+import pwd
+import stat
+import subprocess
+import tempfile
+from datetime import UTC, datetime
+from pathlib import Path
+from typing import Any
+
+from aao.independent_audit import (
+    _LIMITATIONS,
+    POLICY_VERSION,
+    AuditError,
+    _append_ledger,
+    _git,
+    _is_sha,
+    _ledger_entries,
+    _visible_in_sandbox,
+    _write_evidence,
+    adversarial_findings,
+    auditor_revision,
+    parse_policy,
+    run_sandboxed,
+)
+from aao.pr_conformity import _canonical, _sha
+
+ANCHOR_PATH = Path("/etc/aao-audit/trust-anchor.json")
+ANCHOR_SCHEMA = "aao.audit-trust-anchor.v1"
+MANIFEST_SCHEMA = "aao.candidate-manifest.v1"
+REPORT_SCHEMA = "aao.manifest-audit-report.v1"
+_MANIFEST_FIELDS = {"schema", "repository", "target_ref", "target_sha", "candidate_sha",
+                    "candidate_tree", "result_tree", "producer"}
+_GIT_ENV = {"PATH": "/usr/bin:/bin", "HOME": "/nonexistent", "GIT_CONFIG_NOSYSTEM": "1",
+            "GIT_CONFIG_GLOBAL": "/dev/null", "LANG": "C.UTF-8"}
+_ANCHOR_FIELDS = {"schema", "policy_path", "policy_sha256", "auditor_uid", "auditor_public_key", "ledger_path"}
+
+
+def read_protected(path: Path, owner_uids: tuple[int, ...]) -> bytes:
+    """Read a regular, non-symlink file owned by an allowed uid, with no group/other write on it or its parents."""
+    try:
+        descriptor = os.open(path, os.O_RDONLY | os.O_NOFOLLOW)
+    except OSError as error:
+        raise AuditError(f"{path} is missing or is a symlink") from error
+    with os.fdopen(descriptor, "rb") as handle:
+        info = os.fstat(handle.fileno())
+        if not stat.S_ISREG(info.st_mode) or info.st_uid not in owner_uids or info.st_mode & 0o022:
+            raise AuditError(f"{path} is not owned by a trusted uid or is group/other writable")
+        _check_parents(Path(path), owner_uids)
+        return handle.read()
+
+
+def _check_parents(path: Path, owner_uids: tuple[int, ...]) -> None:
+    for parent in Path(os.path.abspath(path)).parents:
+        info = os.lstat(parent)
+        if stat.S_ISLNK(info.st_mode):
+            raise AuditError(f"{parent} is a symlink")
+        writable = info.st_mode & 0o022
+        sticky_root = info.st_mode & stat.S_ISVTX and info.st_uid == 0
+        if (writable and not sticky_root) or info.st_uid not in (0, *owner_uids):
+            raise AuditError(f"{parent} allows the protected path to be replaced")
+
+
+def load_anchor(anchor_path: Path = ANCHOR_PATH, anchor_owner_uids: tuple[int, ...] = (0,)) -> dict[str, Any]:
+    """Load the fixed anchor and the policy it pins. Paths are never supplied by the caller in production."""
+    raw = read_protected(anchor_path, anchor_owner_uids)
+    try:
+        anchor = json.loads(raw)
+        if not isinstance(anchor, dict) or set(anchor) != _ANCHOR_FIELDS or anchor["schema"] != ANCHOR_SCHEMA:
+            raise ValueError("unexpected anchor fields")
+        if not isinstance(anchor["auditor_uid"], int) or not isinstance(anchor["auditor_public_key"], str):
+            raise TypeError("malformed anchor identity")
+    except (ValueError, TypeError) as error:
+        raise AuditError(f"trust anchor is invalid: {error}") from error
+    uid = anchor["auditor_uid"]
+    policy, digest = parse_policy(read_protected(Path(anchor["policy_path"]), (uid,)))
+    if digest != anchor["policy_sha256"]:
+        raise AuditError("policy digest is not the one pinned by the trust anchor")
+    return {**anchor, "policy": policy, "anchor_sha256": _sha(raw)}
+
+
+def parse_manifest(path: Path) -> tuple[dict[str, Any], str]:
+    try:
+        raw = path.read_bytes()
+        manifest = json.loads(raw)
+        if not isinstance(manifest, dict) or set(manifest) != _MANIFEST_FIELDS:
+            raise ValueError("manifest fields must be exactly " + ", ".join(sorted(_MANIFEST_FIELDS)))
+        if manifest["schema"] != MANIFEST_SCHEMA:
+            raise ValueError("unsupported manifest schema")
+        for field in ("target_sha", "candidate_sha", "candidate_tree", "result_tree"):
+            if not _is_sha(manifest[field]):
+                raise ValueError(f"{field} must be a full lowercase SHA-1")
+        if not isinstance(manifest["target_ref"], str) or not manifest["target_ref"].startswith("refs/heads/"):
+            raise ValueError("target_ref must be a full refs/heads/ name")
+        if not isinstance(manifest["repository"], str) or not os.path.isabs(manifest["repository"]):
+            raise ValueError("repository must be an absolute local path")
+        if not isinstance(manifest["producer"], str) or not manifest["producer"]:
+            raise ValueError("producer is required")
+    except (OSError, ValueError, TypeError) as error:
+        raise AuditError(f"candidate manifest is invalid: {error}") from error
+    return manifest, _sha(_canonical(manifest))
+
+
+def _derive(manifest: dict[str, Any], clone: Path) -> None:
+    """Clone the producer's repository and re-derive both trees; never write to the producer's object store."""
+    if _ref_value(manifest) != manifest["target_sha"]:
+        raise AuditError("target ref no longer points to the manifest target_sha")
+    try:
+        subprocess.run(["git", "clone", "--quiet", "--no-checkout", "--no-hardlinks", manifest["repository"],
+                        str(clone)], check=True, capture_output=True, env=_GIT_ENV)
+        for sha in (manifest["target_sha"], manifest["candidate_sha"]):
+            if _git(clone, "cat-file", "-t", sha).strip() != "commit":
+                raise AuditError(f"{sha} is not a commit")
+        if _git(clone, "rev-parse", f"{manifest['candidate_sha']}^{{tree}}").strip() != manifest["candidate_tree"]:
+            raise AuditError("candidate_tree does not match the candidate commit")
+        merged = subprocess.run(
+            ["git", "-c", "core.hooksPath=/dev/null", "-C", str(clone), "merge-tree", "--write-tree",
+             manifest["target_sha"], manifest["candidate_sha"]],
+            check=False, capture_output=True, text=True, env=_GIT_ENV,
+        )
+    except subprocess.SubprocessError as error:
+        raise AuditError("candidate commits are unavailable in the manifest repository") from error
+    if merged.returncode != 0:
+        raise AuditError("candidate does not merge cleanly into target")
+    if merged.stdout.split()[0] != manifest["result_tree"]:
+        raise AuditError("result_tree does not match the merge of candidate into target")
+
+
+def _ref_value(manifest: dict[str, Any]) -> str:
+    try:
+        return _git(Path(manifest["repository"]), "rev-parse", "--verify", f"{manifest['target_ref']}^{{commit}}").strip()
+    except subprocess.SubprocessError as error:
+        raise AuditError("target ref is unavailable") from error
+
+
+def _custody(anchor: dict[str, Any], key_path: Path | None) -> list[str]:
+    policy, uid = anchor["policy"], anchor["auditor_uid"]
+    problems = []
+    if os.geteuid() != uid:
+        problems.append("audit is not running as the anchored auditor uid")
+    if pwd.getpwuid(os.geteuid()).pw_name in policy["developer_os_users"]:
+        problems.append("running account is a developer account")
+    if auditor_revision() not in policy["trusted_auditor_revisions"]:
+        problems.append("auditor code revision is not an independently reviewed revision")
+    if key_path is None:
+        return [*problems, "no auditor signing key was provided"]
+    try:
+        read_protected(key_path, (uid,))
+        if os.stat(key_path).st_mode & 0o077:
+            problems.append("signing key is readable by other accounts")
+        public = subprocess.run(["openssl", "pkey", "-in", str(key_path), "-pubout"], check=True,
+                                capture_output=True, text=True).stdout
+        if public.strip() != anchor["auditor_public_key"].strip():
+            problems.append("signing key does not match the anchored auditor public key")
+    except (AuditError, OSError, subprocess.SubprocessError):
+        problems.append("signing key is unavailable or not private to the auditor uid")
+    return problems
+
+
+def _ledger(anchor: dict[str, Any]) -> Path:
+    ledger = Path(anchor["ledger_path"])
+    if not ledger.exists():
+        _check_parents(ledger, (anchor["auditor_uid"],))
+        os.close(os.open(ledger, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW, 0o600))
+    read_protected(ledger, (anchor["auditor_uid"],))
+    return ledger
+
+
+def audit_manifest(
+    manifest_path: Path, output: Path, key_path: Path | None, veto_reason: str | None = None, *,
+    anchor_path: Path = ANCHOR_PATH, anchor_owner_uids: tuple[int, ...] = (0,), runner=run_sandboxed,
+) -> dict[str, Any]:
+    anchor = load_anchor(anchor_path, anchor_owner_uids)
+    policy = anchor["policy"]
+    manifest, manifest_digest = parse_manifest(manifest_path)
+    for secret in (key_path, output, Path(anchor["ledger_path"]), Path(anchor["policy_path"])):
+        if secret is not None and _visible_in_sandbox(secret):
+            raise AuditError(f"{secret} would be readable by candidate code inside the sandbox")
+    ledger = _ledger(anchor)
+    with tempfile.TemporaryDirectory(prefix="aao-manifest-audit-") as temporary:
+        clone, tree = Path(temporary) / "repo", Path(temporary) / "result"
+        _derive(manifest, clone)
+        tree.mkdir()
+        index = {**_GIT_ENV, "GIT_INDEX_FILE": str(Path(temporary) / "index")}
+        subprocess.run(["git", "-C", str(clone), "read-tree", manifest["result_tree"]], check=True, env=index)
+        subprocess.run(["git", "-C", str(clone), "checkout-index", "--all", f"--prefix={tree}/"], check=True, env=index)
+        findings = adversarial_findings(clone, manifest["target_sha"], manifest["result_tree"], policy)
+        authors = _git(clone, "log", "--format=%ae", f"{manifest['target_sha']}..{manifest['candidate_sha']}")
+        implementers = sorted({manifest["producer"], *authors.split()})
+        output.mkdir(mode=0o700, exist_ok=False)
+        evidence_dir = output / "evidence"
+        evidence_dir.mkdir(mode=0o700)
+        evidence: dict[str, str] = {}
+        checks: dict[str, dict[str, Any]] = {}
+        for name, argv in sorted(policy["audit_checks"].items()):
+            code, stdout, stderr = runner(tree, argv)
+            checks[name] = {"conclusion": "success" if code == 0 else "failure", "exit_code": code}
+            digest, path = _write_evidence(evidence_dir, f"check-{name}", {
+                "result_tree": manifest["result_tree"], "check": name, "argv": argv, "exit_code": code,
+                "stdout_tail": stdout, "stderr_tail": stderr})
+            evidence[digest] = path
+        git_version = subprocess.run(["git", "--version"], check=True, capture_output=True, text=True).stdout.strip()
+    digest, path = _write_evidence(evidence_dir, "adversarial-findings", {
+        "target_sha": manifest["target_sha"], "result_tree": manifest["result_tree"], "findings": findings})
+    evidence[digest] = path
+    key = f"{manifest['candidate_sha']}:{manifest['result_tree']}"
+    blocking = [f["id"] for f in findings if f"{key}:{f['id']}" not in policy["dispositions"]]
+    blocking += [f"audit-check-failed:{n}" for n, c in checks.items() if c["conclusion"] != "success"]
+    if policy["auditor_id"] in implementers:
+        blocking.append("auditor-is-implementer")
+    custody = _custody(anchor, key_path)
+    verdict = "veto" if veto_reason else "provisional" if custody else "reject" if blocking else "approve"
+    report = {
+        "schema": REPORT_SCHEMA, "manifest_sha256": manifest_digest, "manifest": manifest,
+        "candidate_sha": manifest["candidate_sha"], "target_sha": manifest["target_sha"],
+        "result_tree": manifest["result_tree"], "git_version": git_version,
+        "policy_version": POLICY_VERSION, "policy_sha256": anchor["policy_sha256"],
+        "anchor_sha256": anchor["anchor_sha256"], "auditor_id": policy["auditor_id"],
+        "auditor_uid": anchor["auditor_uid"], "auditor_revision": auditor_revision(),
+        "implementer_ids": implementers, "verdict": verdict, "veto": bool(veto_reason),
+        "veto_reason": veto_reason or "", "blocking_findings": blocking, "findings": findings,
+        "audit_checks": checks, "custody_problems": custody, "evidence_files": evidence,
+        "assurance_level": "A", "limitations": list(_LIMITATIONS),
+        "created_at": datetime.now(UTC).isoformat(timespec="seconds"),
+    }
+    if _ref_value(manifest) != manifest["target_sha"]:
+        raise AuditError("target ref moved before the verdict was recorded")
+    report_bytes = _canonical(report)
+    (output / "report.json").write_bytes(report_bytes)
+    (output / "report.json").chmod(0o444)
+    if not custody:
+        signature = subprocess.run(["openssl", "pkeyutl", "-sign", "-inkey", str(key_path), "-rawin", "-in",
+                                    str(output / "report.json")], check=True, capture_output=True).stdout
+        (output / "report.sig").write_text(base64.b64encode(signature).decode("ascii"), encoding="ascii")
+    _append_ledger(ledger, report, _sha(report_bytes))
+    return report
+
+
+def verify_promotion(
+    manifest_path: Path, report_path: Path, signature_path: Path | None, promoted_sha: str | None = None, *,
+    anchor_path: Path = ANCHOR_PATH, anchor_owner_uids: tuple[int, ...] = (0,),
+) -> tuple[bool, tuple[str, ...]]:
+    """Fail-closed decision for the controller; run immediately before a compare-and-swap ref update."""
+    reasons: list[str] = []
+    try:
+        anchor = load_anchor(anchor_path, anchor_owner_uids)
+        manifest, manifest_digest = parse_manifest(manifest_path)
+        raw = report_path.read_bytes()
+        report = json.loads(raw)
+    except (AuditError, OSError, ValueError) as error:
+        return False, (f"cannot evaluate promotion: {error}",)
+    expected = {"schema": REPORT_SCHEMA, "manifest_sha256": manifest_digest, "target_sha": manifest["target_sha"],
+                "candidate_sha": manifest["candidate_sha"], "result_tree": manifest["result_tree"],
+                "policy_sha256": anchor["policy_sha256"], "anchor_sha256": anchor["anchor_sha256"],
+                "auditor_uid": anchor["auditor_uid"], "verdict": "approve", "veto": False, "blocking_findings": []}
+    reasons += [f"report {k} is not {v!r}" for k, v in expected.items() if report.get(k) != v]
+    if _canonical(report) != raw:
+        reasons.append("report is not in canonical signed form")
+    if signature_path is None or not signature_path.is_file():
+        reasons.append("signed audit report is absent")
+    else:
+        with tempfile.TemporaryDirectory(prefix="aao-manifest-gate-") as temporary:
+            public, signature = Path(temporary) / "auditor.pub", Path(temporary) / "report.sig"
+            public.write_text(anchor["auditor_public_key"], encoding="ascii")
+            try:
+                signature.write_bytes(base64.b64decode(signature_path.read_text(encoding="ascii").strip(), validate=True))
+            except ValueError:
+                signature.write_bytes(b"")
+            if subprocess.run(["openssl", "pkeyutl", "-verify", "-pubin", "-inkey", str(public), "-rawin", "-in",
+                               str(report_path), "-sigfile", str(signature)], check=False,
+                              capture_output=True).returncode:
+                reasons.append("report signature does not verify against the anchored auditor key")
+    for digest, path in (report.get("evidence_files") or {}).items():
+        try:
+            if _sha(read_protected(Path(path), (anchor["auditor_uid"],))) != digest:
+                reasons.append(f"evidence {path} does not match its digest")
+        except AuditError:
+            reasons.append(f"evidence {path} is unavailable or not auditor-owned")
+    if not report.get("evidence_files"):
+        reasons.append("report has no evidence")
+    try:
+        entries = [e for e in _ledger_entries(_ledger(anchor)) if e.get("candidate_sha") == manifest["candidate_sha"]]
+        if any(e.get("veto") for e in entries):
+            reasons.append("candidate has a recorded audit veto")
+        if not entries or entries[-1].get("report_sha256") != _sha(raw):
+            reasons.append("report is not the latest recorded decision for this candidate")
+    except AuditError as error:
+        reasons.append(f"audit ledger is not trustworthy: {error}")
+    with tempfile.TemporaryDirectory(prefix="aao-manifest-gate-") as temporary:
+        try:
+            clone = Path(temporary) / "repo"
+            _derive(manifest, clone)
+            if promoted_sha is not None:
+                _check_promoted(clone, manifest, promoted_sha)
+        except AuditError as error:
+            reasons.append(str(error))
+    return not reasons, tuple(dict.fromkeys(reasons))
+
+
+def _check_promoted(clone: Path, manifest: dict[str, Any], promoted_sha: str) -> None:
+    if not _is_sha(promoted_sha):
+        raise AuditError("promoted commit must be a full SHA")
+    try:
+        if _git(clone, "cat-file", "-t", promoted_sha).strip() != "commit":
+            raise AuditError("promoted object is not a commit")
+    except subprocess.SubprocessError:
+        _git(clone, "fetch", "--quiet", "--no-tags", "origin", promoted_sha)
+    tree = _git(clone, "rev-parse", f"{promoted_sha}^{{tree}}").strip()
+    parents = _git(clone, "rev-list", "--parents", "-n", "1", promoted_sha).split()[1:]
+    fast_forward = promoted_sha == manifest["candidate_sha"] and not subprocess.run(
+        ["git", "-C", str(clone), "merge-base", "--is-ancestor", manifest["target_sha"], promoted_sha],
+        check=False, capture_output=True, env=_GIT_ENV).returncode
+    if tree != manifest["result_tree"]:
+        raise AuditError("promoted commit tree is not the audited result_tree")
+    if not fast_forward and parents != [manifest["target_sha"], manifest["candidate_sha"]]:
+        raise AuditError("promoted commit parents are not [target_sha, candidate_sha]")
+
+
+def main() -> int:
+    parser = argparse.ArgumentParser(description="Audit and gate local candidate manifests (no path overrides)")
+    commands = parser.add_subparsers(dest="command", required=True)
+    audit = commands.add_parser("audit")
+    audit.add_argument("--manifest", type=Path, required=True)
+    audit.add_argument("--output", type=Path, required=True)
+    audit.add_argument("--key", type=Path)
+    audit.add_argument("--veto", metavar="REASON")
+    gate = commands.add_parser("gate")
+    gate.add_argument("--manifest", type=Path, required=True)
+    gate.add_argument("--report", type=Path, required=True)
+    gate.add_argument("--signature", type=Path)
+    gate.add_argument("--promoted-sha")
+    args = parser.parse_args()
+    if args.command == "gate":
+        conformant, reasons = verify_promotion(args.manifest, args.report, args.signature, args.promoted_sha)
+        print(json.dumps({"conformant": conformant, "reasons": reasons}, sort_keys=True))
+        return 0 if conformant else 1
+    try:
+        report = audit_manifest(args.manifest, args.output, args.key, args.veto)
+    except (AuditError, OSError, subprocess.SubprocessError) as error:
+        print(json.dumps({"error": str(error)}))
+        return 2
+    print(json.dumps({k: report[k] for k in ("candidate_sha", "result_tree", "verdict", "blocking_findings",
+                                             "custody_problems")}, sort_keys=True))
+    return 0 if report["verdict"] == "approve" else 1
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

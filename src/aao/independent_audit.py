@@ -72,8 +72,16 @@ def _git(repository: Path, *args: str) -> str:
 
 def load_policy(path: Path) -> tuple[dict[str, Any], str]:
     try:
-        policy = json.loads(path.read_text(encoding="utf-8"))
-        if policy.get("version") != POLICY_VERSION:
+        data = path.read_bytes()
+    except OSError as error:
+        raise AuditError(f"trusted policy is invalid: {error}") from error
+    return parse_policy(data)
+
+
+def parse_policy(data: bytes) -> tuple[dict[str, Any], str]:
+    try:
+        policy = json.loads(data)
+        if not isinstance(policy, dict) or policy.get("version") != POLICY_VERSION:
             raise ValueError("unsupported policy version")
         for key, kind in (("auditor_id", str), ("auditor_os_user", str), ("developer_os_users", list),
                           ("required_checks", list), ("auditors", dict), ("audit_checks", dict),
@@ -88,7 +96,7 @@ def load_policy(path: Path) -> tuple[dict[str, Any], str]:
             raise ValueError("audit_checks must map names to non-empty argv lists")
         if policy["auditor_id"] not in policy["auditors"]:
             raise ValueError("auditor_id must be a trusted auditor in the policy")
-    except (OSError, ValueError, TypeError) as error:
+    except (ValueError, TypeError) as error:
         raise AuditError(f"trusted policy is invalid: {error}") from error
     return policy, _sha(_canonical(policy))
 
