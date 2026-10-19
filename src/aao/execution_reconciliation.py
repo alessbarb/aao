@@ -16,8 +16,16 @@ def reconcile(execution_id: str, *, auditor_credential: str, evidence: list[str]
               disposition: str) -> str:
     if disposition not in {"RETRY_CONFIRMED_SAFE", "MARK_FAILED"}:
         raise ReconciliationDenied("Unknown disposition")
-    if not auditor_credential or not evidence:
+    if not auditor_credential:
         raise ReconciliationDenied("Active auditor credential and independent evidence required")
+    from aao.evidence_registry import EvidenceDenied, validate_evidence_references
+
+    try:
+        validate_evidence_references(evidence)
+    except EvidenceDenied as exc:
+        raise ReconciliationDenied(
+            "Active auditor credential and valid independent evidence required"
+        ) from exc
     with connect_postgres() as db:
         from aao.principal_credentials import PrincipalDenied, authenticate_in_transaction
         try:
@@ -44,7 +52,7 @@ def reconcile(execution_id: str, *, auditor_credential: str, evidence: list[str]
         ).fetchone()
         if not grant:
             raise ReconciliationDenied("Reconciliation capability required")
-        from aao.evidence_registry import EvidenceDenied, verify_evidence_references
+        from aao.evidence_registry import verify_evidence_references
         try:
             verified_evidence = verify_evidence_references(db, project_id, evidence)
         except EvidenceDenied as exc:
