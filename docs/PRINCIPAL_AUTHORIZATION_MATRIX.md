@@ -1,7 +1,7 @@
 # Principal authorization matrix
 
 **Scope:** current development API and internal execution/reconciliation
-operations, updated through `23b9787821a193310e6b63e6fa29964ef3f92e2b`.
+operations, updated through `5eeea36f99aa7edf7fac31148b41abc9f1626074`.
 This is an engineering inventory, not a production authorization policy or
 independent security review. The PostgreSQL API and its internal helpers are
 not a claim of M2 acceptance.
@@ -33,7 +33,10 @@ inside the protected transaction. Thus a token rotated in that gap does not
 match the credential row. This path is covered by transaction-level unit
 checks and a disposable PostgreSQL route test that captures a context, rotates
 the token before the project-list transaction, and observes denial; a fresh
-context is allowed. The static CEO bearer is development-only and is
+context is allowed. That route test also retains the fresh context, revokes its
+`project.read` grant, then observes 403 from the protected board route. This is
+a sequential revocation-before-transaction check, not a concurrent lock race.
+The static CEO bearer is development-only and is
 rejected for CEO authorization outside explicit development/test modes; this
 does not establish a production CEO identity flow. See the latest evidence
 register for test status.

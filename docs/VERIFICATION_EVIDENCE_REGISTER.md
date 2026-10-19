@@ -634,3 +634,19 @@ coverage, independent review, or M2 acceptance.
 - The review was an internal read-only specialist pass, not formal independent
   security review. Selected controlled schedules do not prove exhaustive
   race safety or M2 acceptance.
+
+## Protected board denies a revoked project reader — 2026-10-19
+
+- Code revision: `5eeea36f99aa7edf7fac31148b41abc9f1626074` on
+  `feat/aao-m0-foundation`.
+- The existing PostgreSQL request-context integration test now reuses a fresh
+  authenticated AGENT context after deleting its `project.read` grant, then
+  calls the protected board route and observes HTTP 403. This verifies that
+  the route checks current database authorization rather than trusting the
+  previously resolved dependency context.
+- On this exact code revision, the focused test passed; compileall, Ruff, the
+  full explicitly disposable PostgreSQL suite (**69 passed, 0 skipped, 0
+  warnings** under `-W error`), `pip check`, and `git diff --check` passed.
+- This is a sequential grant-revocation check, not an observed concurrent
+  lock schedule; it does not establish general read authorization correctness,
+  independent review, or M2 acceptance.
