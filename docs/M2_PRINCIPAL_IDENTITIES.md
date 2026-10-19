@@ -50,3 +50,17 @@ A PostgreSQL integration regression test exercises cross-project denial,
 non-spoofable work authorship and credential revocation. Execution leases
 are still authenticated through a separate worker registration mechanism;
 the two identity registries must be consolidated before M2 acceptance.
+
+## Shared identity across work and inert execution (candidate)
+
+The PostgreSQL queue's `claim()` and `complete()` accept
+`agent_credential` and map it to an enabled `AGENT` principal in the
+same database transaction as the lease operation. Exact `execution.claim`
+project grants are still mandatory. Revocation blocks subsequent completion.
+The one-shot inert worker forwards that credential, without invoking tools.
+
+Legacy worker registrations remain available in development when no individual
+credential is given. This is a transitional compatibility path, not accepted
+production authentication. A database-backed test has been added for invalid
+credential, authorized project claim, and revocation after claim. **It has not
+yet been executed on the operator's machine.**
