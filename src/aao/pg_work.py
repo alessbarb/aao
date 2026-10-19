@@ -4,6 +4,9 @@ This is a separate development service, not a transparent migration of the
 SQLite API. No agent execution or external side effects are enabled.
 """
 import json
+
+from aao.settings import load_local_env
+load_local_env()
 import os
 import secrets
 from pathlib import Path
