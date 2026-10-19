@@ -2,6 +2,7 @@
 
 import os
 import subprocess
+from datetime import UTC, datetime, timedelta
 from uuid import uuid4
 
 import pytest
@@ -54,11 +55,27 @@ def test_agent_patch_proposal_is_authorized_immutable_and_visible(monkeypatch, t
         project = client.post("/v1/projects", headers=ceo, json={
             "name": "Patch proposal test", "mandate_id": mandate,
         }).json()["id"]
-        for capability in ("work.create", "work.admit", "work.progress", "project.read", "code.propose"):
+        identity = client.get("/v1/principals/me", headers=agent)
+        assert identity.status_code == 200
+        assert identity.json() == {"principal_id": agent_id, "kind": "AGENT", "enabled": True}
+        for capability in ("work.create", "work.admit", "work.progress", "project.read"):
             response = client.post(f"/v1/projects/{project}/grants", headers=ceo, json={
                 "principal_id": agent_id, "capability": capability,
             })
             assert response.status_code == 201, response.text
+        code_expiry = (datetime.now(UTC) + timedelta(hours=23)).isoformat()
+        code_grant = client.post(f"/v1/projects/{project}/grants", headers=ceo, json={
+            "principal_id": agent_id, "capability": "code.propose", "expires_at": code_expiry,
+        })
+        assert code_grant.status_code == 201, code_grant.text
+        assert code_grant.json()["expires_at"] is not None
+        assert client.post(f"/v1/projects/{project}/grants", headers=ceo, json={
+            "principal_id": agent_id, "capability": "code.propose",
+        }).status_code == 422
+        assert client.post(f"/v1/projects/{project}/grants", headers=ceo, json={
+            "principal_id": agent_id, "capability": "code.propose",
+            "expires_at": (datetime.now(UTC) + timedelta(hours=25)).isoformat(),
+        }).status_code == 422
         assert client.post(f"/v1/projects/{project}/grants", headers=ceo, json={
             "principal_id": auditor_id, "capability": "work.review",
         }).status_code == 201

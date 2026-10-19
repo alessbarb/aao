@@ -8,8 +8,9 @@ import json
 import os
 import secrets
 from contextlib import contextmanager
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
+from typing import Annotated
 from uuid import uuid4
 
 from aao.environment_settings import load_local_env
@@ -18,7 +19,7 @@ load_local_env()
 
 from fastapi import Depends, FastAPI, Header, HTTPException
 from fastapi.responses import FileResponse, JSONResponse, Response
-from pydantic import BaseModel, Field, field_validator
+from pydantic import BaseModel, Field, field_validator, model_validator
 
 from aao.capability_contracts import missing_contract_fields
 from aao.capability_evaluation import recommend
@@ -125,6 +126,15 @@ class GrantRequest(BaseModel):
         if value is not None and value <= datetime.now(UTC):
             raise ValueError("Grant expiry must be in the future")
         return value
+
+    @model_validator(mode="after")
+    def bounded_code_proposal_grant(self):
+        if self.capability == "code.propose":
+            if self.expires_at is None:
+                raise ValueError("code.propose grants require an explicit expiry")
+            if self.expires_at > datetime.now(UTC) + timedelta(hours=24):
+                raise ValueError("code.propose grants may not exceed 24 hours")
+        return self
 
 
 class CapabilityRequest(BaseModel):
@@ -242,6 +252,20 @@ def issue_principal_credential(
         audit(db, str(uuid4()), "principal.credential.issued",
               {"principal_id": payload.principal_id, "kind": payload.kind})
     return {"principal_id": payload.principal_id, "kind": payload.kind, "token": token}
+
+
+@app.get("/v1/principals/me")
+def current_principal(principal: Annotated[AuthenticatedPrincipal, Depends(require_worker)]):
+    """Return the authenticated agent identity without disclosing credential material."""
+    with tx() as db:
+        row = db.execute(
+            "SELECT kind,enabled FROM principal_credentials "
+            "WHERE principal_id=%s AND token_digest=%s FOR SHARE",
+            (principal, principal.token_digest),
+        ).fetchone()
+        if not row or row[0] != "AGENT" or not row[1]:
+            raise HTTPException(403, "Individual agent credential invalid or revoked")
+    return {"principal_id": str(principal), "kind": "AGENT", "enabled": True}
 
 
 @app.post("/v1/principals/{principal_id}/revoke")
@@ -486,7 +510,8 @@ def grant(project_id: str, payload: GrantRequest, _: str = Depends(require_ceo))
         if inserted:
             audit(db, project_id, "grant.created",
                   {"principal_id": payload.principal_id, "capability": payload.capability,
-                   "expires_at": payload.expires_at.isoformat() if payload.expires_at else None})
+                   "expires_at": payload.expires_at.isoformat() if payload.expires_at else None,
+                   "authority": "ceo", "scope": {"project_id": project_id}})
     return JSONResponse(
         status_code=201 if inserted else 200,
         content={
