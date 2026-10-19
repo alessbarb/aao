@@ -1,7 +1,7 @@
 # GOV-CAP-001 — Gestión y evolución de capacidades
 
-**Versión:** 1.0
-**Estado:** Ratificada expresamente por el CEO el 2026-10-19
+**Versión:** 1.1
+**Estado:** v1.0 ratificada expresamente por el CEO el 2026-10-19; v1.1 incorpora precisión explícita sobre skills de agentes
 **Ámbito:** AAO y sus proyectos, agentes, herramientas y servicios
 **Jerarquía:** Subordinada a CONST-CAP-001 y a la Constitución. Se aplica junto a GOV-REV-001 v1.1.
 
@@ -9,7 +9,7 @@
 AAO descubrirá, evaluará, desarrollará, adquirirá, registrará, compartirá, ejecutará, mantendrá, mejorará y retirará capacidades para alcanzar mandatos aprobados, reducir duplicidades y optimizar coste total respetando autoridad y segregación.
 
 ## 2. Definición y categorías
-Una capacidad es un recurso identificado, versionado y gobernado para realizar una función. Incluye CLI/scripts, bibliotecas, API/servicios, aplicaciones/plataformas, agentes, conocimiento y workflows. Cada categoría tendrá contrato apropiado.
+Una capacidad es un recurso identificado, versionado y gobernado para realizar una función. Incluye CLI/scripts, bibliotecas, API/servicios, aplicaciones/plataformas, agentes, skills de agentes, conocimiento y workflows. Cada categoría tendrá contrato apropiado.
 
 ## 3. Descubrimiento
 Antes de construir se consulta el catálogo interno. Se investiga externamente si falta una solución adecuada, hay insuficiencia, riesgos, oportunidades justificadas o información obsoleta. La profundidad y presupuesto de búsqueda serán proporcionales y estarán sujetos a reglas de parada.
@@ -52,3 +52,16 @@ La autoridad corporativa competente podrá aprobar ajustes ordinarios auditados 
 
 ## Control de alcance
 Esta ratificación crea una norma de gobierno, no evidencia de implementación. No autoriza automáticamente herramientas, descargas, instalación, red, shell, modelos, efectos externos, producción, merge ni modificación de permisos. Todos los controles previos siguen vigentes.
+
+## 16. Skills de agentes
+Los skills son capacidades especializadas versionadas que aportan instrucciones, procedimientos, referencias, configuraciones y, opcionalmente, scripts o recursos a uno o varios agentes. Deben registrarse, descubrirse, evaluarse, actualizarse, compartirse y retirarse bajo las mismas reglas de procedencia, aislamiento, auditoría y autoridad aplicables a otras capacidades.
+
+Un skill no es por sí mismo una identidad de agente ni una concesión de permisos. Su aplicación no puede ampliar capacidades ejecutables, privilegios, acceso a datos, presupuesto o herramientas del principal que lo utiliza. Las instrucciones del skill tienen menor autoridad que la Constitución, las políticas, los mandatos y las autorizaciones del runtime.
+
+El contrato de un skill incluye identidad y versión inmutable, propósito, agentes o roles compatibles, entradas y salidas esperadas, dependencias, recursos incluidos, origen y licencia, límites de uso, evaluación de calidad, pruebas, riesgos y responsables. Los scripts incluidos también requieren autorizaciones operativas separadas.
+
+Los skills nuevos se desarrollan inicialmente en el proyecto de origen. Su promoción al catálogo común y las nuevas versiones siguen la evaluación independiente y las reglas de compatibilidad y recuperación de las secciones 7 y 10. Se examinan específicamente inyección de instrucciones, exfiltración, dependencias y escalada de privilegios.
+
+## Historial normativo
+- 2026-10-19 — v1.0 ratificada por el CEO.
+- 2026-10-19 — v1.1: precisión de skills como categoría explícita, sin nueva autoridad de ejecución ni modificación constitucional.
