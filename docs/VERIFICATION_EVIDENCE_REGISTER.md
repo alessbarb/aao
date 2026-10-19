@@ -702,3 +702,20 @@ coverage, independent review, or M2 acceptance.
   instruction.
 - This covers one protected-operation-first ordering for `REJECT`; it is not
   exhaustive auditor-revocation coverage, independent review, or M2 acceptance.
+
+## Review rejection serializes with auditor grant deletion — 2026-10-19
+
+- Code revision: `39c8b23` on `feat/aao-m0-foundation`.
+- The review-route concurrency test now exercises both an AUDITOR credential
+  revocation and project `work.review` grant deletion. In each schedule, the
+  route has completed its in-transaction authorization checks before the
+  revoker starts; PostgreSQL reports the revocation statement blocked by the
+  review transaction PID. Rejection commits, revocation commits afterward,
+  and a subsequent request is denied.
+- Both schedules passed three consecutive focused runs. The full explicitly
+  disposable PostgreSQL suite passed **71 tests, 0 skipped, 0 warnings** under
+  `-W error`; Ruff, compileall, `pip check`, and `git diff --check` passed
+  locally. CI was not awaited per operator instruction.
+- These are selected protected-operation-first schedules; they do not prove
+  exhaustive revocation ordering, human identity, independent review, or M2
+  acceptance.
