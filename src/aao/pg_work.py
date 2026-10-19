@@ -81,7 +81,7 @@ class ReviewRequest(BaseModel):
 
 class GrantRequest(BaseModel):
     principal_id: str = Field(min_length=1)
-    capability: str = Field(pattern="^(work.create|work.admit|work.review|work.progress)$")
+    capability: str = Field(pattern="^(work.create|work.admit|work.review|work.progress|project.read)$")
 
 
 app = FastAPI(title="AAO PostgreSQL development core", version="0.2.0")
@@ -140,10 +140,28 @@ def create_project(payload: ProjectRequest, _: str = Depends(require_ceo)):
     return {"id": pid, "state": "ACTIVE"}
 
 
+def read_principal(x_ceo_token: str | None = Header(None), x_work_token: str | None = Header(None)):
+    ceo = os.getenv("AAO_CEO_TOKEN")
+    worker = os.getenv("AAO_WORK_TOKEN")
+    if ceo and x_ceo_token and secrets.compare_digest(ceo, x_ceo_token):
+        return "ceo"
+    if worker and x_work_token and secrets.compare_digest(worker, x_work_token):
+        return "development-worker"
+    raise HTTPException(403, "Authenticated reader required")
+
+
 @app.get("/v1/projects")
-def projects(_: str = Depends(require_ceo)):
+def projects(principal: str = Depends(read_principal)):
     with tx() as db:
-        rows = db.execute("SELECT id,name,state FROM projects ORDER BY name,id").fetchall()
+        if principal == "ceo":
+            rows = db.execute("SELECT id,name,state FROM projects ORDER BY name,id").fetchall()
+        else:
+            rows = db.execute(
+                "SELECT p.id,p.name,p.state FROM projects p JOIN project_grants g ON g.project_id=p.id "
+                "WHERE g.principal_id=%s AND g.capability='project.read' "
+                "AND (g.expires_at IS NULL OR g.expires_at > now()) ORDER BY p.name,p.id",
+                (principal,),
+            ).fetchall()
         return [{"id": r[0], "name": r[1], "state": r[2]} for r in rows]
 
 
@@ -193,10 +211,12 @@ def create_work(project_id: str, payload: WorkRequest,
 
 
 @app.get("/v1/projects/{project_id}/board")
-def board(project_id: str, _: str = Depends(require_ceo)):
+def board(project_id: str, principal: str = Depends(read_principal)):
     with tx() as db:
         if not db.execute("SELECT 1 FROM projects WHERE id=%s", (project_id,)).fetchone():
             raise HTTPException(404, "Project not found")
+        if principal != "ceo":
+            require_grant(db, principal, project_id, "project.read")
         rows = db.execute(
             "SELECT id,title,status,acceptance_criteria,evidence FROM work_items "
             "WHERE project_id=%s ORDER BY id", (project_id,),
