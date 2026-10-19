@@ -1,7 +1,7 @@
 # Principal authorization matrix
 
 **Scope:** current development API and internal execution/reconciliation
-operations, updated through `20a358b71677a8a132269b89781d843f9c15a936`.
+operations, updated through `a198d0f78707080147c62820846ea0feae79a00d`.
 This is an engineering inventory, not a production authorization policy or
 independent security review. The PostgreSQL API and its internal helpers are
 not a claim of M2 acceptance.
@@ -50,14 +50,17 @@ inside their transaction. The CEO credential is still a single static bearer.
   schedule exercise credential row locks. These are selected controlled lock
   schedules; a queue-claim/credential-revocation schedule now also observes
   credential revocation wait until claim commits, then denies later claims.
-  They are not exhaustive or adversarial race coverage.
+  Reconciliation's `MARK_FAILED` disposition has also been observed committing
+  before an in-flight auditor credential revocation; the revoked auditor is
+  denied on a subsequent attempt. They are not exhaustive or adversarial race
+  coverage.
 - Sequential credential revocation tests and unit mocks that assert SQL text
   do not prove real PostgreSQL lock behavior. Several real lock schedules now
   cover work creation, queue claim/completion against grant deletion, and
   queue completion against credential revocation. Other business writes,
-  alternative operation/revocation orderings, and hostile schedules remain
-  untested.
-- The current full local suite has 58 tests, including grant-row, auditor
+  alternative operation/revocation orderings, retry reconciliation against
+  credential revocation, and hostile schedules remain untested.
+- The current full local suite has 59 tests, including grant-row, auditor
   credential-lock, and completion-after-lease-expiry-during-row-lock-wait
   coverage, AGENT authentication/rotation, and selected protected-operation
   revocation schedules. Three
@@ -67,8 +70,8 @@ inside their transaction. The CEO credential is still a single static bearer.
   restart has been manually verified for one expired lease; broad restart and
   crash-recovery schedules remain open.
 - GitHub CI configures a fresh disposable PostgreSQL service and runs the
-  guarded integration suite; run `39256367714` passed on code SHA
-  `20a358b71677a8a132269b89781d843f9c15a936`. Current exact local results and
+  guarded integration suite; run `39256749706` passed on code SHA
+  `a198d0f78707080147c62820846ea0feae79a00d`. Current exact local results and
   prior candidate SHA-specific CI runs are recorded in the evidence register;
   this is not independent review or M2 acceptance.
 - Grant expiry uses `clock_timestamp()` when the locked authorization query is

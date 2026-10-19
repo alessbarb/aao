@@ -377,3 +377,5 @@ tests**, with compileall, Ruff, `pip check`, and `git diff --check` clean. CI
 has not yet run for this change. This covers one `MARK_FAILED`/credential-
 revocation schedule, not retry disposition, alternate ordering, evidence
 validity, or adversarial production scheduling.
+
+CI run `39256749706` passed for code commit `a198d0f78707080147c62820846ea0feae79a00d`, including PostgreSQL integration tests, compilation, Ruff, and dependency checks.
