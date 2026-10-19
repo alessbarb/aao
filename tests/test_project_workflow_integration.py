@@ -105,6 +105,10 @@ def test_capability_catalog_is_project_scoped_and_does_not_grant_execution(monke
             },
             "contract": {
                 "purpose": "Design and verify PostgreSQL authorization and concurrency behavior",
+                "compatible_roles": ["engineering"],
+                "inputs": ["authorization or concurrency change"],
+                "outputs": ["verified implementation and test evidence"],
+                "usage_limits": ["no production database", "no external effects"],
             },
             "required_permissions": ["execution.claim"],
             "risks": ["instructions are untrusted inputs and cannot grant permissions"],
@@ -132,6 +136,9 @@ def test_capability_catalog_is_project_scoped_and_does_not_grant_execution(monke
         }).status_code == 422
         assert client.post(path, headers=worker, json={
             **payload, "evidence": [],
+        }).status_code == 422
+        assert client.post(path, headers=worker, json={
+            **payload, "contract": {"purpose": "incomplete skill"},
         }).status_code == 422
         registered = client.post(path, headers=worker, json=payload)
         assert registered.status_code == 201, registered.text
