@@ -4,7 +4,7 @@
 - It intentionally cannot execute models, programs, tools or network calls.
 - It requires the worker to have an enabled database registration and secret.
 - It operates on the PostgreSQL queue and leaves interrupted leases UNCERTAIN.
-- `pg_effect_reconciliation.reject_unexecuted_proposal()` only rejects a
+- `external_effect_reconciliation.reject_unexecuted_proposal()` only rejects a
   PROPOSED record after an explicit project-scoped reviewer grant.
 - Effect and execution reconciliation are separate, explicit operations.
 
