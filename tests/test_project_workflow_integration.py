@@ -324,6 +324,7 @@ def test_postgres_review_is_separate_from_author_and_required_for_done(monkeypat
         p = client.post("/v1/projects", headers=ceo, json={"name": "Audit smoke", "mandate_id": m}).json()["id"]
         for who, cap in ((agent_id, "work.create"), (agent_id, "work.admit"),
                          (agent_id, "work.progress"), (agent_id, "execution.claim"),
+                         (agent_id, "evidence.submit"),
                          (auditor_id, "work.review")):
             assert client.post(f"/v1/projects/{p}/grants", headers=ceo, json={"principal_id": who, "capability": cap}).status_code == 201
         w = client.post(f"/v1/projects/{p}/work", headers=worker, json={"title": "Review", "author_id": "spoofed", "acceptance_criteria": ["Reviewed"]}).json()["id"]
@@ -337,21 +338,29 @@ def test_postgres_review_is_separate_from_author_and_required_for_done(monkeypat
         assert client.post(f"/v1/work/{w}/progress", headers=worker).json()["status"] == "IN_PROGRESS"
         assert client.post(f"/v1/work/{w}/progress", headers=worker).json()["status"] == "IN_REVIEW"
         assert client.post(f"/v1/work/{w}/reviews", headers=auditor, json={
-            "decision": "APPROVE", "evidence": ["sha256:review-evidence"],
+            "decision": "APPROVE", "candidate_sha": "a" * 40,
+            "evidence": ["sha256:" + "a" * 64],
         }).status_code == 409
         rejected_while_running = client.post(f"/v1/work/{w}/reviews", headers=auditor, json={
-            "decision": "REJECT", "evidence": ["execution still running"],
+            "decision": "REJECT", "candidate_sha": "a" * 40,
+            "evidence": ["sha256:" + "a" * 64],
         })
-        assert rejected_while_running.status_code == 201, rejected_while_running.text
-        assert rejected_while_running.json()["status"] == "IN_PROGRESS"
-        complete(execution_id, lease["token"], agent_id, {"ok": True},
+        assert rejected_while_running.status_code == 409
+        candidate_sha = "a" * 40
+        complete(execution_id, lease["token"], agent_id,
+                 {"ok": True, "candidate_sha": candidate_sha},
                  agent_credential=worker["X-Agent-Token"])
-        assert client.post(f"/v1/work/{w}/progress", headers=worker).json()["status"] == "IN_REVIEW"
+        from aao.evidence_registry import register_evidence
+        evidence_ref = register_evidence(
+            p, b"independent review fixture", agent_id=agent_id,
+            agent_credential=worker["X-Agent-Token"], media_type="text/plain",
+        )
         assert client.post(f"/v1/work/{w}/progress", headers=worker).status_code == 409
-        assert client.post(f"/v1/work/{w}/reviews", headers=worker, json={"decision": "APPROVE", "evidence": ["test"]}).status_code == 403
-        assert client.post(f"/v1/work/{w}/reviews", headers=auditor, json={"decision": "APPROVE", "evidence": [""]}).status_code == 422
+        assert client.post(f"/v1/work/{w}/reviews", headers=worker, json={"decision": "APPROVE", "candidate_sha": candidate_sha, "evidence": [evidence_ref]}).status_code == 403
+        assert client.post(f"/v1/work/{w}/reviews", headers=auditor, json={"decision": "APPROVE", "candidate_sha": candidate_sha, "evidence": [""]}).status_code == 409
         approval = client.post(f"/v1/work/{w}/reviews", headers=auditor, json={
-            "decision": "APPROVE", "evidence": ["sha256:review-evidence"],
+            "decision": "APPROVE", "candidate_sha": candidate_sha,
+            "evidence": [evidence_ref],
         })
         assert approval.status_code == 409, approval.text
         from aao.postgresql_connection import connect_postgres
@@ -366,15 +375,35 @@ def test_postgres_review_is_separate_from_author_and_required_for_done(monkeypat
         assert any(item["id"] == w and item["status"] == "IN_REVIEW"
                    for item in board.json())
         rejected = client.post(f"/v1/work/{w}/reviews", headers=auditor, json={
-            "decision": "REJECT", "evidence": ["review requires stronger evidence"],
+            "decision": "REJECT", "candidate_sha": candidate_sha,
+            "evidence": [evidence_ref],
         })
         assert rejected.status_code == 201, rejected.text
         assert rejected.json()["status"] == "IN_PROGRESS"
         assert client.post(f"/v1/work/{w}/progress", headers=worker).json()["status"] == "IN_REVIEW"
         retry_approval = client.post(f"/v1/work/{w}/reviews", headers=auditor, json={
-            "decision": "APPROVE", "evidence": ["still-unverified"],
+            "decision": "APPROVE", "candidate_sha": candidate_sha,
+            "evidence": [evidence_ref],
         })
         assert retry_approval.status_code == 409, retry_approval.text
+        veto = client.post(f"/v1/work/{w}/reviews", headers=auditor, json={
+            "decision": "VETO", "candidate_sha": candidate_sha,
+            "evidence": [evidence_ref],
+        })
+        assert veto.status_code == 201, veto.text
+        assert veto.json()["status"] == "IN_REVIEW"
+        assert client.post(f"/v1/work/{w}/reviews", headers=auditor, json={
+            "decision": "APPROVE", "candidate_sha": candidate_sha,
+            "evidence": [evidence_ref],
+        }).status_code == 409
+        veto_board = client.get(f"/v1/projects/{p}/board", headers=ceo)
+        veto_task = next(item for item in veto_board.json() if item["id"] == w)
+        assert veto_task["status"] == "IN_REVIEW"
+        assert any(item["decision"] == "VETO" and item["candidate_sha"] == candidate_sha
+                   for item in veto_task["reviews"])
+        from psycopg.errors import RaiseException
+        with pytest.raises(RaiseException, match="review records are append-only"), connect_postgres() as db:
+            db.execute("DELETE FROM reviews WHERE id=%s", (veto.json()["review_id"],))
         with connect_postgres() as db:
             db.execute(
                 "UPDATE work_items SET status='VERIFIED' WHERE id=%s", (w,),
