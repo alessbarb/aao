@@ -110,16 +110,21 @@ amendment or CEO-confirmed constitutional rule.
    shortcut.
 7. Obtain adversarial independent security/architecture review and competent
    acceptance. Codex cannot substitute for either.
-8. **Implemented in candidate code and locally focused-test validated:** review
-   waits until every execution for the work is `SUCCEEDED`, then rejects the
-   author and principal IDs present in durable claim history. This narrows
-   self-review risk but cannot establish distinct human identities, validate
-   evidence references, or replace independent review. Expand only with
-   concrete identity/provenance requirements and PostgreSQL race coverage.
+8. **Approval now fails closed in candidate code:** the HTTP review paths reject
+   `APPROVE` until reviewer independence and evidence references can be
+   independently verified; no approval row is recorded and work cannot become
+   `VERIFIED`. `VERIFIED` work also cannot move to `DONE` based on legacy
+   approval rows. `REJECT` remains available to return work to `IN_PROGRESS`,
+   even while execution is incomplete. Existing ID-level author/executor
+   separation is defense in depth, not proof of independent human identity.
+   Next: design concrete identity/provenance requirements and a trustworthy
+   evidence source before restoring approval or completion transitions; cover
+   the PostgreSQL behavior in the full disposable integration suite.
 
 This document is a repository bootstrap artifact. **It is not GitHub Issues or GitHub Projects as the operational Kanban.** On M1, import the work definitions into AAO's own database and manage all status transitions there.
 
 ## M0 · Constitutional foundation
+
 - M0-01 [candidate] Policy engine for reserved/forbidden operations.
 - M0-02 [candidate] CEO mandate draft and confirmation.
 - M0-03 [candidate] Project creation gate.
@@ -128,6 +133,7 @@ This document is a repository bootstrap artifact. **It is not GitHub Issues or G
 - M0-06 [BLOCKED] Independent auditor decisions and appeals, evidence and audit integrity.
 
 ## M1 · Core work management
+
 - M1-01 PostgreSQL migrations; transactional outbox and immutable audit hashes.
 - M1-02 Project lifecycle with PAUSE and CEO-only CANCEL.
 - M1-03 Task intake, triage, READY planner gate and dependency graph.
@@ -136,6 +142,7 @@ This document is a repository bootstrap artifact. **It is not GitHub Issues or G
 - M1-06 Confirmed mandates bound to exact immutable snapshots, with expiry/revocation.
 
 ## M2 · Durable execution
+
 - M2-01 Evaluate Temporal against database-backed execution.
 - M2-02 Workers, signed leases, fencing tokens and checkpoints.
 - M2-03 External effects ledger with reconciliation and idempotency.
@@ -144,6 +151,7 @@ This document is a repository bootstrap artifact. **It is not GitHub Issues or G
 - M2-06 Crash recovery, repeated event delivery and denied-action test suite.
 
 ## M3 · First autonomous crew
+
 - M3-01 Persistent COO/planner, engineering agent and independent auditor identities.
 - M3-02 Structured agent/job/tool contracts and provider-neutral adapters.
 - M3-03 LLM/task routing with quotas and fallback.
@@ -151,12 +159,14 @@ This document is a repository bootstrap artifact. **It is not GitHub Issues or G
 - M3-05 Longitudinal test and independent safety review.
 
 ## M4+ · Growth
+
 - M4 multiproject reservations, cross-project work and shared specialists.
 - M5 knowledge isolation, publication, evaluation and agent version promotion.
 - M6 contextual executive office, conversations, voice, Kanban/3D visual states.
 - M7 24/7 reliability, autonomous rollout gates and real project onboarding.
 
 ## Hard gates
+
 1. Production effects disabled until authenticated authorizations are deployed.
 2. Review and DONE fail closed until independent evidence validation exists.
 3. Self-evolution cannot modify or deploy the constitutional kernel.

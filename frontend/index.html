@@ -15,12 +15,14 @@
     .column{background:#19222d;padding:12px;border-radius:10px;min-height:150px}
     .card{background:#263242;border:1px solid #3a4b60;padding:12px;margin-top:10px;border-radius:8px}
     .meta{font-size:.8rem;color:#aeb9c9}.error{color:#ffb4b4}
+    .safety-note{margin-top:18px;padding:12px 14px;border:1px solid #8b6c35;border-radius:8px;background:#302819;color:#f1d79e}
     @media(max-width:720px){.board{grid-template-columns:1fr}header{display:block}}
   </style>
 </head>
 <body>
   <header><div><h1>AAO · Workboard</h1><p>Vista de solo lectura · datos reales del núcleo local</p></div>
   <div><select id="project" aria-label="Proyecto"></select> <button id="reload">Actualizar</button></div></header>
+  <aside class="safety-note" role="note">Gate técnico activo: nuevas aprobaciones y finalización están bloqueadas hasta verificar la independencia del auditor y las referencias de evidencia. El tablero muestra estados almacenados; no certifica su validez.</aside>
   <div id="message" role="status"></div>
   <section id="board" class="board" aria-label="Kanban"></section>
   <script>

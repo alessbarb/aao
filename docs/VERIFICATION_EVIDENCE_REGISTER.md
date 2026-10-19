@@ -666,3 +666,23 @@ coverage, independent review, or M2 acceptance.
   `git diff --check` passed.
 - This is a selected controlled read-authorization schedule, not proof for
   every read route, hostile concurrency, independent review, or M2 acceptance.
+
+## Work approvals and completion fail closed — 2026-10-19
+
+- Code revision: `789932a` (`Fail closed on unverified work approvals`) on
+  `feat/aao-m0-foundation`.
+- `APPROVE` is rejected before persistence in both development APIs until
+  reviewer independence and evidence references can be independently
+  verified. `REJECT` remains available and returns work to `IN_PROGRESS`.
+  `VERIFIED` to `DONE` is blocked even when an older unverified approval row
+  exists. Existing terminal `DONE` records were not rewritten; their historical
+  validity is not established by this change.
+- The disposable-PostgreSQL workflow test and SQLite core test verify rejected
+  approvals create no approval row, rejection behavior, and denial of
+  completion through a legacy approval row. The full suite passed **69 tests,
+  0 skipped, 0 warnings** under `-W error`. Compileall, Ruff, `pip check`, and
+  `git diff --check` passed locally. CI was not awaited per operator
+  instruction.
+- This is a fail-closed development boundary, not proof of auditor identity,
+  evidence validity, independent review, retrospective validation of DONE
+  records, or M2 acceptance.

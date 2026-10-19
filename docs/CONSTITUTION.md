@@ -16,7 +16,9 @@
 ## First implementation boundaries
 
 - CEO proof is a shared token *only for local development*; production requires actual identity/authentication and signed approval records.
-- Review transitions fail closed until independent verification is implemented.
+- Review approvals fail closed until reviewer independence and evidence
+  references can be independently verified. A rejection may return work to
+  `IN_PROGRESS`, but it must never move work to `VERIFIED` or `DONE`.
 - Autonomous execution is disabled by default.
 - SQLite is a disposable development store; PostgreSQL is the planned persistent datastore.
 - No real project integrations, external side effects or model credentials are configured.

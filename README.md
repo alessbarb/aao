@@ -15,7 +15,10 @@ covered by current integration tests. The static CEO bearer is restricted to
 explicit development/test modes and rejected elsewhere; production CEO identity
 and constitutional approval are not implemented. Remaining gaps include HTTP
 credential-rotation races, broader grant/revocation ordering, adversarial
-lease/recovery behavior, and independent review. See the current authorization
+lease/recovery behavior, and independent review. Approval and DONE transitions
+currently fail closed because reviewer independence and evidence references
+are not independently verified; the read-only workboard labels this boundary
+and displays stored status without certifying it. See the current authorization
 matrix and verification register for exact scope and evidence.
 
 The latest exact local engineering validation is recorded in

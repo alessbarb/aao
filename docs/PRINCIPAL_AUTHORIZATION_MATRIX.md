@@ -1,7 +1,7 @@
 # Principal authorization matrix
 
 **Scope:** current development API and internal execution/reconciliation
-operations, updated through `8c5ccf38fa2d011426da20c535668b2b2af7527a`.
+operations, updated through `789932a`.
 This is an engineering inventory, not a production authorization policy or
 independent security review. The PostgreSQL API and its internal helpers are
 not a claim of M2 acceptance.
@@ -19,8 +19,8 @@ not a claim of M2 acceptance.
 | `GET /v1/projects/{id}/board` | Same read-principal resolver | CEO bypasses grant; others pass `require_grant(project.read)` inside transaction. Individual credential and grant rows are locked under `FOR SHARE`. | Project-scoped board read. No DB RLS/role isolation is established by this application check. |
 | `POST /v1/projects/{id}/work` | Individual AGENT bearer | `work.create`; individual credential and grant rows locked under `FOR SHARE` in transaction | Persists authenticated principal as author; ignores client `author_id`. |
 | `POST /v1/work/{id}/admit` | Individual AGENT bearer | `work.admit`; credential and grant recheck under `FOR SHARE` | Deterministic admission call uses simulated capacity, budget, risk and emergency-stop inputs; not real resource admission. |
-| `POST /v1/work/{id}/progress` | Individual AGENT bearer | `work.progress`; credential and grant recheck under `FOR SHARE` | Advances allowed states; VERIFIED-to-DONE checks for any approval but does not establish independent evidence validation. |
-| `POST /v1/work/{id}/reviews` | Individual AUDITOR bearer | `work.review`; individual AUDITOR credential and grant rows locked under `FOR SHARE`; locks work and its execution rows | Requires associated executions to be `SUCCEEDED`; rejects the author and any principal ID in durable execution claim history. This is only ID-level separation, not proof of independent human identity or evidence validity. |
+| `POST /v1/work/{id}/progress` | Individual AGENT bearer | `work.progress`; credential and grant recheck under `FOR SHARE` | Advances READY-to-IN_PROGRESS and IN_PROGRESS-to-IN_REVIEW. VERIFIED-to-DONE is disabled even if a legacy APPROVE row exists, until independent approval verification is available. |
+| `POST /v1/work/{id}/reviews` | Individual AUDITOR bearer | `work.review`; individual AUDITOR credential and grant rows locked under `FOR SHARE`; locks work and its execution rows | Rejects the author and any principal ID in durable execution claim history. `APPROVE` fails closed with 409 because independent human identity and evidence references are not verified; it records no review and cannot set `VERIFIED`. `REJECT` may return work to `IN_PROGRESS`, including while execution is incomplete. This is only ID-level separation, not proof of independent human identity or evidence validity. |
 | `POST /v1/work/{id}/stage-inert` | Individual AGENT bearer | Requires both `work.admit` and `execution.claim`; credential and grant rows locked under `FOR SHARE` | Feature-flagged staging of fixed inert payload only. No model/tool/external action. A negative integration case rejects an admitted agent without the execution capability. |
 
 The PostgreSQL API no longer accepts shared worker/reviewer tokens. SQLite
