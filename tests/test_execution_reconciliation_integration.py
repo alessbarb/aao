@@ -6,6 +6,7 @@ from uuid import uuid4
 import pytest
 from fastapi.testclient import TestClient
 
+
 @pytest.mark.skipif(
     not os.getenv("AAO_TEST_POSTGRES_URL") or os.getenv("AAO_TEST_DB_DISPOSABLE") != "yes",
     reason="Explicit disposable PostgreSQL database required",
