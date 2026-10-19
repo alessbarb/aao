@@ -19,6 +19,7 @@ from fastapi.responses import FileResponse, JSONResponse, Response
 from pydantic import BaseModel, Field
 
 from aao.planner import Admission, decide_admission
+from aao.review import evaluate_review
 
 
 def _ceo_bearer_enabled() -> bool:
@@ -441,9 +442,10 @@ def progress(work_id: str, principal: str = Depends(require_worker)):
         if status not in transition:
             raise HTTPException(409, "Invalid progression; independent review required")
         if status == "VERIFIED":
-            approved = db.execute("SELECT 1 FROM reviews WHERE work_id=%s AND decision='APPROVE' ORDER BY created_at DESC LIMIT 1", (work_id,)).fetchone()
-            if not approved:
-                raise HTTPException(409, "Independent approval missing")
+            raise HTTPException(
+                409,
+                "Completion disabled until independent approval verification exists",
+            )
         next_state = transition[status]
         db.execute("UPDATE work_items SET status=%s WHERE id=%s", (next_state, work_id))
         audit(db, work_id, "work.progressed", {"from": status, "to": next_state})
@@ -469,7 +471,10 @@ def review(work_id: str, payload: ReviewRequest, principal: str = Depends(requir
             "SELECT id,status FROM execution_queue WHERE work_id=%s FOR UPDATE",
             (work_id,),
         ).fetchall()
-        if any(execution_status != "SUCCEEDED" for _, execution_status in executions):
+        if payload.decision == "APPROVE" and any(
+            execution_status != "SUCCEEDED"
+            for _, execution_status in executions
+        ):
             raise HTTPException(409, "Execution must succeed before work review")
         if db.execute(
             "SELECT 1 FROM execution_journal j "
@@ -479,6 +484,15 @@ def review(work_id: str, payload: ReviewRequest, principal: str = Depends(requir
             (work_id, principal),
         ).fetchone():
             raise HTTPException(403, "Execution worker cannot review own work")
+        review_decision = evaluate_review(
+            author_id=author,
+            reviewer_id=principal,
+            evidence=payload.evidence,
+            decision=payload.decision,
+            project_active=active[0] == "ACTIVE",
+        )
+        if not review_decision.allowed:
+            raise HTTPException(409, review_decision.reason)
         rid = str(uuid4())
         db.execute("INSERT INTO reviews(id,work_id,reviewer_id,decision,evidence) VALUES (%s,%s,%s,%s,%s::jsonb)", (rid, work_id, principal, payload.decision, json.dumps(payload.evidence)))
         next_state = "VERIFIED" if payload.decision == "APPROVE" else "IN_PROGRESS"

@@ -1,4 +1,4 @@
-"""Independent evidence review, development-only implementation."""
+"""Fail-closed review policy shared by development APIs."""
 from dataclasses import dataclass
 
 
@@ -18,4 +18,9 @@ def evaluate_review(*, author_id: str, reviewer_id: str, evidence: list[str],
         return ReviewDecision(False, "Evidence references required")
     if decision not in {"APPROVE", "REJECT"}:
         return ReviewDecision(False, "Unknown review decision")
+    if decision == "APPROVE":
+        return ReviewDecision(
+            False,
+            "Approval disabled until independent identity and evidence verification exist",
+        )
     return ReviewDecision(True, "Independent review recorded")

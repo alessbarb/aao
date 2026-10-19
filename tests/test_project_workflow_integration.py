@@ -179,13 +179,56 @@ def test_postgres_review_is_separate_from_author_and_required_for_done(monkeypat
         assert client.post(f"/v1/work/{w}/reviews", headers=auditor, json={
             "decision": "APPROVE", "evidence": ["sha256:review-evidence"],
         }).status_code == 409
+        rejected_while_running = client.post(f"/v1/work/{w}/reviews", headers=auditor, json={
+            "decision": "REJECT", "evidence": ["execution still running"],
+        })
+        assert rejected_while_running.status_code == 201, rejected_while_running.text
+        assert rejected_while_running.json()["status"] == "IN_PROGRESS"
         complete(execution_id, lease["token"], agent_id, {"ok": True},
                  agent_credential=worker["X-Agent-Token"])
+        assert client.post(f"/v1/work/{w}/progress", headers=worker).json()["status"] == "IN_REVIEW"
         assert client.post(f"/v1/work/{w}/progress", headers=worker).status_code == 409
         assert client.post(f"/v1/work/{w}/reviews", headers=worker, json={"decision": "APPROVE", "evidence": ["test"]}).status_code == 403
         assert client.post(f"/v1/work/{w}/reviews", headers=auditor, json={"decision": "APPROVE", "evidence": [""]}).status_code == 422
-        assert client.post(f"/v1/work/{w}/reviews", headers=auditor, json={"decision": "APPROVE", "evidence": ["sha256:review-evidence"]}).json()["status"] == "VERIFIED"
-        assert client.post(f"/v1/work/{w}/progress", headers=worker).json()["status"] == "DONE"
+        approval = client.post(f"/v1/work/{w}/reviews", headers=auditor, json={
+            "decision": "APPROVE", "evidence": ["sha256:review-evidence"],
+        })
+        assert approval.status_code == 409, approval.text
+        from aao.postgresql_connection import connect_postgres
+        with connect_postgres() as db:
+            approval_rows = db.execute(
+                "SELECT count(*) FROM reviews WHERE work_id=%s AND decision='APPROVE'",
+                (w,),
+            ).fetchone()[0]
+        assert approval_rows == 0
+        board = client.get(f"/v1/projects/{p}/board", headers=ceo)
+        assert board.status_code == 200, board.text
+        assert any(item["id"] == w and item["status"] == "IN_REVIEW"
+                   for item in board.json())
+        rejected = client.post(f"/v1/work/{w}/reviews", headers=auditor, json={
+            "decision": "REJECT", "evidence": ["review requires stronger evidence"],
+        })
+        assert rejected.status_code == 201, rejected.text
+        assert rejected.json()["status"] == "IN_PROGRESS"
+        assert client.post(f"/v1/work/{w}/progress", headers=worker).json()["status"] == "IN_REVIEW"
+        retry_approval = client.post(f"/v1/work/{w}/reviews", headers=auditor, json={
+            "decision": "APPROVE", "evidence": ["still-unverified"],
+        })
+        assert retry_approval.status_code == 409, retry_approval.text
+        with connect_postgres() as db:
+            db.execute(
+                "UPDATE work_items SET status='VERIFIED' WHERE id=%s", (w,),
+            )
+            db.execute(
+                "INSERT INTO reviews(id,work_id,reviewer_id,decision,evidence) "
+                "VALUES (%s,%s,%s,'APPROVE',%s::jsonb)",
+                (str(uuid4()), w, auditor_id, '["legacy unverified approval"]'),
+            )
+        legacy_completion = client.post(f"/v1/work/{w}/progress", headers=worker)
+        assert legacy_completion.status_code == 409, legacy_completion.text
+        legacy_board = client.get(f"/v1/projects/{p}/board", headers=ceo)
+        assert any(item["id"] == w and item["status"] == "VERIFIED"
+                   for item in legacy_board.json())
 
 
 @pytest.mark.skipif(

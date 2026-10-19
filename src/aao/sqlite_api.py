@@ -211,12 +211,14 @@ def transition(work_id: str, payload: TransitionIn, _: bool = Depends(require_wo
         evidence += payload.evidence
         if payload.status in {"VERIFIED", "DONE"} and not evidence:
             raise HTTPException(409, "Evidence required")
-        # Independent-review enforcement is not implemented. Review states are
-        # workflow placeholders and MUST NOT be treated as an audit approval.
+        # Review states remain workflow placeholders, not verified approval.
         if payload.status == "VERIFIED":
             raise HTTPException(409, "Reviewer must verify")
-        if payload.status == "DONE" and not db.execute("SELECT id FROM reviews WHERE work_id=? AND decision='APPROVE'", (work_id,)).fetchone():
-            raise HTTPException(409, "Approved review required")
+        if payload.status == "DONE":
+            raise HTTPException(
+                409,
+                "Completion disabled until independent approval verification exists",
+            )
         db.execute("UPDATE work_items SET status=?, evidence=? WHERE id=?",
                    (payload.status, json.dumps(evidence), work_id))
         event(db, work_id, "work.transitioned", {"from": row["status"], "to": payload.status})

@@ -203,17 +203,22 @@ def test_individual_auditor_credential_is_bound_to_review(monkeypatch):
         assert client.post(f"/v1/work/{work}/admit", headers=worker).status_code == 200
         assert client.post(f"/v1/work/{work}/progress", headers=worker).status_code == 200
         assert client.post(f"/v1/work/{work}/progress", headers=worker).status_code == 200
-        payload = {"decision": "APPROVE", "evidence": ["isolated local proof"]}
+        approval_payload = {"decision": "APPROVE", "evidence": ["isolated local proof"]}
         denied = client.post(f"/v1/work/{work}/reviews",
-                             headers={"X-Auditor-Token": "incorrect"}, json=payload)
+                             headers={"X-Auditor-Token": "incorrect"}, json=approval_payload)
         assert denied.status_code == 403
-        allowed = client.post(f"/v1/work/{work}/reviews",
-                              headers={"X-Auditor-Token": secret}, json=payload)
-        assert allowed.status_code == 201, allowed.text
+        approval = client.post(f"/v1/work/{work}/reviews",
+                               headers={"X-Auditor-Token": secret}, json=approval_payload)
+        assert approval.status_code == 409, approval.text
+        rejection = client.post(f"/v1/work/{work}/reviews",
+                                headers={"X-Auditor-Token": secret}, json={
+                                    "decision": "REJECT", "evidence": ["requires stronger evidence"],
+                                })
+        assert rejection.status_code == 201, rejection.text
         with connect_postgres() as db:
             actual = db.execute(
                 "SELECT reviewer_id FROM reviews WHERE id=%s",
-                (allowed.json()["review_id"],),
+                (rejection.json()["review_id"],),
             ).fetchone()
             assert actual[0] == auditor_id
 

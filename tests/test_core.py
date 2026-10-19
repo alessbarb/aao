@@ -43,9 +43,24 @@ def test_mandate_and_kanban_gates():
             assert client.post(f"/v1/work/{work}/transition", json={"status": "VERIFIED", "evidence":["example"]}, headers=worker_headers).status_code == 409
             reviewer = {"X-Review-Token": "test-review-secret"}
             assert client.post(f"/v1/work/{work}/reviews", json={"reviewer_id":"engineer-1","decision":"APPROVE","evidence":["proof"]},headers=reviewer).status_code == 409
-            assert client.post(f"/v1/work/{work}/reviews", json={"reviewer_id":"development-auditor","decision":"APPROVE","evidence":["proof"]},headers=reviewer).status_code == 201
-            assert client.post(f"/v1/work/{work}/transition", json={"status":"DONE"}, headers=worker_headers).status_code == 200
-            assert client.get(f"/v1/projects/{project}/board").json()[0]["status"] == "DONE"
+            approval = client.post(f"/v1/work/{work}/reviews", json={"reviewer_id":"development-auditor","decision":"APPROVE","evidence":["proof"]},headers=reviewer)
+            assert approval.status_code == 409
+            with main.connect(main.DB_PATH) as db:
+                assert db.execute(
+                    "SELECT count(*) FROM reviews WHERE work_id=? AND decision='APPROVE'",
+                    (work,),
+                ).fetchone()[0] == 0
+            assert client.post(f"/v1/work/{work}/transition", json={"status":"DONE","evidence":["done"]}, headers=worker_headers).status_code == 409
+            assert client.get(f"/v1/projects/{project}/board").json()[0]["status"] == "IN_REVIEW"
+            with main.transaction(main.DB_PATH) as db:
+                db.execute("UPDATE work_items SET status='VERIFIED' WHERE id=?", (work,))
+                db.execute(
+                    "INSERT INTO reviews(id,work_id,reviewer_id,decision,evidence) "
+                    "VALUES ('legacy-review',?,'legacy-auditor','APPROVE','[\"unverified\"]')",
+                    (work,),
+                )
+            assert client.post(f"/v1/work/{work}/transition", json={"status":"DONE","evidence":["done"]}, headers=worker_headers).status_code == 409
+            assert client.get(f"/v1/projects/{project}/board").json()[0]["status"] == "VERIFIED"
             assert client.post(f"/v1/projects/{project}/cancel", headers=worker_headers).status_code == 403
             assert client.post(f"/v1/projects/{project}/pause", headers=worker_headers).json()["state"] == "PAUSED"
             assert client.post(f"/v1/projects/{project}/work", json={"title":"Blocked","author_id":"e2","acceptance_criteria":["x"]}, headers=worker_headers).status_code == 409
