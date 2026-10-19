@@ -555,22 +555,24 @@ coverage, independent review, or M2 acceptance.
 
 ## Effect proposal serializes with authorization revocation — 2026-10-19
 
-- Code revision: `2bc60f51729d2013bcb88d547beac928367a6b35` on
+- Code revision: `b804f6a7a307e144cfb4e72d880850de98bfaffe` on
   `feat/aao-m0-foundation`.
 - A disposable-PostgreSQL integration test demonstrates both protected-write
   first orderings with separate connections and observed blocker PIDs: an
   effect proposal holds the `effect.propose` grant while grant deletion waits;
   and a proposal holds the AGENT credential while credential revocation waits.
   In both cases proposal commits, revocation succeeds, and subsequent proposal
-  is denied. No external effect is executed.
-- The schedule was run four times total (one initial focused run and three
-  reruns), each passing. The exact candidate tree passed the full suite:
+  is denied. Inverse schedules queue grant deletion and credential revocation
+  before the competing authorization query; each revocation is observed ahead
+  of that query, commits, and causes the proposal to be denied. Observer SQL
+  filters for the expected blocking PID to avoid unrelated-waiter selection.
+  No external effect is executed.
+- The proposal-first and revocation-first schedules each passed four focused
+  runs. The exact candidate tree passed the full suite:
   **68 passed, 0 skipped, 0 warnings** under `-W error`; compileall, Ruff,
   `pip check`, and `git diff --check` passed. `pip check` reported no broken
   requirements.
-- A focused read-only IAM review of this test found the asserted lock chains
-  and query patterns consistent with the source. The inverse concurrent
-  ordering (revocation commits first while proposal is contending) is not
-  covered; sequential post-revocation denial is covered. This is not formal
-  independent security review, exhaustive race proof, or M2 acceptance. CI was
-  not awaited per operator direction.
+- A focused read-only IAM review found the asserted lock chains and query
+  patterns consistent with the source and no concrete flaw in either ordering.
+  This is not formal independent security review, exhaustive race proof, or M2
+  acceptance. CI was not awaited per operator direction.
