@@ -526,5 +526,15 @@ def test_http_request_context_rejects_token_rotated_before_protected_transaction
             allowed = client.get("/v1/projects")
             assert allowed.status_code == 200, allowed.text
             assert any(row["id"] == project for row in allowed.json())
+
+            # Keep the already-authenticated request context, revoke its
+            # project capability, then exercise the protected board route.
+            revoked = client.delete(
+                f"/v1/projects/{project}/grants/{identity}/project.read",
+                headers=ceo,
+            )
+            assert revoked.status_code == 204, revoked.text
+            denied = client.get(f"/v1/projects/{project}/board")
+            assert denied.status_code == 403, denied.text
         finally:
             app.dependency_overrides.pop(read_principal, None)
