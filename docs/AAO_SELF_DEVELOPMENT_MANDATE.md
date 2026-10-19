@@ -1,10 +1,10 @@
 # AAO Self Development Mandate
 
-**Mandate ID:** `AAO-MANDATE-20261019-SELFDEV`  
-**Version:** 1.0  
-**Authority:** CEO  
-**Confirmed:** 2026-10-19  
-**Status:** CONFIRMED  
+**Mandate ID:** `AAO-MANDATE-20261019-SELFDEV`
+**Version:** 1.0
+**Authority:** CEO
+**Confirmed:** 2026-10-19
+**Status:** CONFIRMED
 **Project:** AAO — Self Development
 
 ## Decision source
