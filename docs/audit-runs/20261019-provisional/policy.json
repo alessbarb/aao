@@ -1,0 +1,57 @@
+{
+  "version": "GOV-REV-001/v1.1",
+  "auditor_id": "aao-auditor",
+  "auditor_os_user": "aao-auditor",
+  "developer_os_users": [
+    "alessbarb"
+  ],
+  "auditors": {
+    "aao-auditor": "/var/lib/aao-auditor/keys/auditor-ed25519.pub"
+  },
+  "required_checks": [
+    "test"
+  ],
+  "audit_checks": {
+    "ruff": [
+      "-m",
+      "ruff",
+      "check",
+      "--no-cache",
+      "src",
+      "tests"
+    ],
+    "pytest": [
+      "-m",
+      "pytest",
+      "-q",
+      "-p",
+      "no:cacheprovider",
+      "-W",
+      "error",
+      "-rs"
+    ]
+  },
+  "protected_paths": [
+    ".github/workflows/",
+    "docs/CONSTITUTION",
+    "docs/CONST-",
+    "docs/GOV-",
+    "docs/CEO_",
+    "docs/AUTONOMOUS_AUDIT_POLICY.md",
+    "src/aao/pr_conformity.py",
+    "src/aao/review.py",
+    "src/aao/policy.py",
+    "src/aao/independent_audit.py",
+    "db/postgres/011_sha_bound_reviews_and_veto.sql",
+    "pyproject.toml",
+    "setup.cfg",
+    "tox.ini",
+    "pytest.ini",
+    "ruff.toml",
+    ".ruff.toml",
+    "conftest.py",
+    "tests/conftest.py"
+  ],
+  "dispositions": {},
+  "trusted_auditor_revisions": []
+}

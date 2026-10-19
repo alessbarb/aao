@@ -24,6 +24,13 @@ unchanged; the emitter produces exactly the signed report it checks.
 | 9. Block absent/invalid/stale/vetoed verdicts | `promotion_decision` = `pr_conformity.evaluate` + ledger: chain must verify, any veto for the SHA is sticky, and only the latest decision for that SHA counts. |
 | 10. Independent merge authority | Not implemented by design: the gate only decides. Merging must be done by a separate identity (see dependencies). |
 
+The emitter refuses to run if the key, policy, output or ledger is under a
+path the sandbox mounts (`/usr`, `/bin`, `/lib`, `/lib64`, `/etc`, the Python
+runtime), so candidate code cannot read auditor secrets. Protected paths should
+include test/lint configuration (`pyproject.toml`, `conftest.py`, `pytest.ini`,
+`setup.cfg`, `tox.ini`, `ruff.toml`), because the candidate's own configuration
+governs how its checks run.
+
 Every finding blocks unless the trusted policy holds a disposition keyed by
 `"<candidate_sha>:<finding_id>"`, so a disposition never carries over to a new
 revision.
@@ -33,7 +40,7 @@ revision.
 ```bash
 # Audit (read-only against GitHub); run as the auditor account.
 python -m aao.independent_audit audit --github-pr alessbarb/aao 10 \
-  --policy /etc/aao-auditor/policy.json --key /etc/aao-auditor/auditor-ed25519.pem \
+  --policy /var/lib/aao-auditor/policy.json --key /var/lib/aao-auditor/keys/auditor-ed25519.pem \
   --output /var/lib/aao-auditor/runs/pr10-<sha> --ledger /var/lib/aao-auditor/ledger.jsonl \
   [--source <local mirror>] [--veto "<reason>"]
 
@@ -51,23 +58,30 @@ Policy fields: `version`, `auditor_id`, `auditor_os_user`, `developer_os_users`,
 ## First run against PR #10 and PR #11 (provisional)
 
 Run on 2026-10-19 as OS user `alessbarb` with a policy that designates
-`aao-auditor` as auditor and `alessbarb` as developer, so the emitter refused to
-sign. Auditor code revision `0d46fc50549484d9bbbd4cdb0cfbca68fc18d8e2` (not
-yet independently reviewed); policy digest file SHA-256 `52971349…c118`. These
-are adversarial evidence inputs, **not** audit verdicts. Report file SHA-256:
-PR #10 `834635405a510e91e74eb9f89504593d842e23bba278cd22c7706b401273a443`,
-PR #11 `47d5006ce4168219536612f9581ebd1a92677bbf17fc57f6a158d7d18a57a0d4`;
-reports, evidence and ledger are held outside the repository in the auditing
-session's scratch directory, pending a custody-controlled location.
+`aao-auditor` as auditor and `alessbarb` as developer, and lists no reviewed
+auditor revision, so the emitter refused to sign. These are adversarial
+evidence inputs, **not** audit verdicts.
+
+- Auditor code revision: `18f1d6b1d4313b3a9b331f24514ccceb46d25b55` (not independently reviewed).
+- Canonical policy digest (`policy_sha256`): `64d3f18a61efa6a639b084a775dc2ab39b3c7bb586fffd45107719b846241c6b`.
+- Copies of policy, reports, evidence and ledger: `docs/audit-runs/20261019-provisional/`.
+  The absolute paths inside `evidence_files` point to the original session
+  scratch directory and are stale; verify each copy by its digest key.
+  Report file SHA-256: PR #10 `f2115419fa246fbfd2926dcd87d117f90584d77b4a9e3cb9dc8b31af239c4d82`,
+  PR #11 `9665bdd7258ddb9aa4c5094b265094eb6b61c06e0d3072fa43de6de047e4f5a1`.
+  Ledger entries 0–5 are earlier provisional runs made while the auditor was
+  being developed; entries 6–7 are the runs above.
 
 | PR | Candidate SHA | Base SHA | Sandbox ruff / pytest | Blocking findings | Verdict |
 | --- | --- | --- | --- | --- | --- |
-| #10 | `523a5986d4ae22b466aaabe59821dc7acecfaef5` | `b1ce576` (main) | pass / 76 passed, 34 skipped | `.github/workflows/ci.yml` changed; new PostgreSQL `skipif` in `tests/test_project_workflow_integration.py` | provisional |
-| #11 | `c3d1df912912974deef5fb1684738f226e62167f` | `523a5986` (PR #10) | pass / 114 passed, 38 skipped | changes to `ci.yml`, `pr_conformity.py`, `review.py`, migration 011 and `docs/CEO_MANDATE_…`; new PostgreSQL `skipif` gates in three integration test files | provisional |
+| #10 | `523a5986d4ae22b466aaabe59821dc7acecfaef5` | `b1ce576` (main) | pass / 76 passed, 34 skipped | `.github/workflows/ci.yml` changed; new PostgreSQL `skipif` at `tests/test_project_workflow_integration.py:76` | provisional |
+| #11 | `677f83d2a96e976d9665abdd49f9ec8d6b327bf0` | `523a5986` (PR #10) | pass / 114 passed, 39 skipped | changes to `ci.yml`, `pr_conformity.py`, `review.py`, migration 011 and `docs/CEO_MANDATE_…`; five new PostgreSQL `skipif` gates; CI `test` not yet successful at audit time | provisional |
 
-PR #11's head moved from `f929827` to `c3d1df9` during the session; the first
-audit attempt bound to the new head. The gate run on PR #10 returned
-`conformant: false` (`signed audit report is absent`).
+PR #11's head moved twice during the session (`f929827` → `c3d1df9` →
+`677f83d`); every report binds the head read at audit time, and any later push
+needs a new audit. A gate run on PR #10 returned `conformant: false`
+(`signed audit report is absent`). Neither PR changes `pyproject.toml` or
+`conftest.py`.
 
 Disposition guidance for an independent auditor: the `skipif` findings are
 PostgreSQL environment gates (the sandbox has no database, so those tests are
@@ -103,7 +117,7 @@ channel outside the repository.
 
 - Heuristic adversarial rules, not a semantic security review.
 - PostgreSQL integration tests do not run inside the auditor sandbox.
-- Ledger tail truncation is detectable only through file custody (no external anchor yet).
+- The ledger hash chain is unkeyed: it detects corruption, not a writer who recomputes it; protection against dropping a veto comes only from file custody.
 - `gate --implementer` is trusted input from the merge authority.
 - A root/sudo-capable developer on the same host defeats the custody checks; the
   checks make the custody explicit, they do not create it.
