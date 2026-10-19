@@ -183,6 +183,25 @@ def test_worker_claim_complete_respects_identity_and_project_state(monkeypatch):
         with pytest.raises(ExecutionConflict):
             complete(eid, lease["token"], worker_id, {"ok": True}, agent_credential="wrong")
         assert state(eid)["status"] == "RUNNING"
+
+    # Exercise the CEO API transition against this exact live lease, not only
+    # the state-generation trigger through direct SQL in the race below.
+    with TestClient(app) as client:
+        paused = client.post(
+            f"/v1/projects/{project_id}/state", headers=ceo,
+            json={"action": "pause"},
+        )
+        assert paused.status_code == 200, paused.text
+        with pytest.raises(ExecutionConflict, match="Project is not active"):
+            complete(eid, lease["token"], worker_id, {"ok": True}, agent_credential=token)
+        resumed = client.post(
+            f"/v1/projects/{project_id}/state", headers=ceo,
+            json={"action": "resume"},
+        )
+        assert resumed.status_code == 200, resumed.text
+        with pytest.raises(ExecutionConflict):
+            complete(eid, lease["token"], worker_id, {"ok": True}, agent_credential=token)
+
         with ThreadPoolExecutor(max_workers=1) as pool, connect_postgres() as blocker:
             blocker.execute("SELECT id FROM projects WHERE id=%s FOR UPDATE", (project_id,))
             paused_completion = pool.submit(
@@ -209,7 +228,7 @@ def test_worker_claim_complete_respects_identity_and_project_state(monkeypatch):
             paused_generation = db.execute(
                 "SELECT state_generation FROM projects WHERE id=%s", (project_id,),
             ).fetchone()[0]
-            assert paused_generation == 1
+            assert paused_generation == 3
             db.execute(
                 "UPDATE projects SET state_generation=999 WHERE id=%s", (project_id,),
             )
@@ -221,7 +240,7 @@ def test_worker_claim_complete_respects_identity_and_project_state(monkeypatch):
             db.execute("UPDATE projects SET state='ACTIVE' WHERE id=%s", (project_id,))
             assert db.execute(
                 "SELECT state_generation FROM projects WHERE id=%s", (project_id,),
-            ).fetchone()[0] == 2
+            ).fetchone()[0] == 4
         with pytest.raises(ExecutionConflict, match="Project state changed"):
             complete(eid, lease["token"], worker_id, {"ok": True}, agent_credential=token)
         assert state(eid)["status"] == "RUNNING"

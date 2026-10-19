@@ -93,7 +93,7 @@ def propose(*, execution_id: str, worker_id: str, lease_token: str,
             ).fetchone()
             if not row:
                 raise EffectConflict("Idempotency-key race could not be resolved")
-            if row[1] != execution_id or row[2] != capability or row[3] != digest:
+            if str(row[1]) != execution_id or row[2] != capability or row[3] != digest:
                 raise EffectConflict("Idempotency key reused with different request")
             if row[4] != "PROPOSED":
                 raise EffectConflict("Effect proposal is no longer active")

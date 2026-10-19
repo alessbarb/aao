@@ -48,13 +48,16 @@ and acceptance.
 
 Suspension, credential-boundary, and inert proposal idempotency follow-ups are
 implemented at `9fa503c334f17e3a7b6ef962a5df3a6428b280e8`; their exact local
-evidence is in the verification register. The current package/documentation
-revision is `8b8c03616110e0fca74c103f60891add83f51cde`. The local checkout and
-both pushed branch refs match this SHA, but GitHub's REST representation of PR
-#2 still reports head `8720366260426c18bb53f3271c1690a603b03947`. Therefore PR
-#2 does **not** currently contain the exact candidate, despite its source branch
-being advanced. Do not treat PR #2 as an exact-head review vehicle until this
-discrepancy is repaired and verified; do not rewrite validated code to mask it.
+evidence is in the verification register. At the earlier `8b8c036` checkpoint,
+PR #2's reported head lagged the branch. That historical mismatch was
+subsequently corrected and rechecked. At the current package checkpoint, local
+`HEAD`, `origin/feat/aao-m0-foundation`, `origin/review/m2-inert-candidate`,
+and live PR #2 head all equal
+`4e8fa48e91c1e8ee5b6a375dc61ecf2cf3f457b8`. PR #2 remains OPEN and DRAFT.
+The implementation source candidate remains
+`9fa503c334f17e3a7b6ef962a5df3a6428b280e8`; commits after it are
+documentation-only. Reviewers must pin and report both package and
+implementation SHAs; no validated code history was rewritten.
 
 ## M2-A measurable acceptance criteria
 
@@ -70,7 +73,7 @@ formal independent review or competent acceptance.
 | A-04 | Execution remains inert: the worker produces only a deterministic marker and cannot invoke models, shell, network, tools, providers, or real external effects. | `inert_execution_worker.py`, default-off staging gate, and route/test coverage; no provider adapter is enabled. | **SATISFECHO** within the reviewed code boundary. |
 | A-05 | Expired work is quarantined as `UNCERTAIN`; no automatic retry or external action occurs. A manual retry/failure disposition requires an active individual AUDITOR credential, project grant, current uncertain state, and applicable evidence/effect checks. | Queue/reconciliation code and selected PostgreSQL integration schedules. Restart/scheduler automation is explicitly M2-B/C, not claimed here. | **SATISFECHO** for explicit/manual paths; repeatable operational recovery is not part of A. |
 | A-06 | Evidence references are project-scoped and content-addressed; bytes are rehashed on use; unauthorized or concurrently revoked evidence access fails closed; app-level writes are append-only. | Migrations 008/009, evidence registry, denial and grant-revocation race tests. | **SATISFECHO** for application paths; database-owner tampering and truth/authorship are residual risks. |
-| A-07 | CEO-authenticated API can pause, resume, or cancel an inert project; transitions are audited, pause/cancel fence stale claims/completions, and resume does not revive an old generation. | CEO-only PostgreSQL project-state endpoint, audited transitions, generation trigger, and integration coverage for authorization, transitions, event records and generation increments. | **SATISFECHO** for the M2-A inert project control; not an independent runtime stop controller. |
+| A-07 | CEO-authenticated API can pause, resume, or cancel an inert project; transitions are audited and advance generation, which fences stale claims/completions. | CEO-only PostgreSQL project-state endpoint, audited transition/generation integration test, and a live-lease integration test that pauses/resumes through the API and denies completion of the old lease. | **SATISFECHO** for the M2-A inert project control; not an independent runtime stop controller. |
 | A-08 | Positive review approval and transition to DONE remain fail-closed unless reviewer independence and evidence sufficiency are verifiable. | Review route and transition tests. | **SATISFECHO** as a denial control; no positive independent approval is supported. |
 | A-09 | Full local PostgreSQL suite has zero failures, skips, and warnings with warnings as errors; compilation, Ruff, dependency consistency, and diff checks pass at an exact candidate revision. | Exact local run recorded in `VERIFICATION_EVIDENCE_REGISTER.md`; clean-replay full suite also passed. | **SATISFECHO** for local verification only; CI is not asserted. |
 | A-10 | A qualified independent reviewer examines the exact PR head, code candidate, migrations, evidence, residual risks, and this scope disposition; findings are resolved or explicitly dispositioned. | No qualified reviewer is currently assigned or available through repository collaborators. | **PENDIENTE** |
@@ -101,13 +104,15 @@ local candidate and which remain gates.
 - **M2-01:** PostgreSQL-vs-Temporal evaluation is complete for the current
   inert candidate; no second runtime is introduced without measured need.
 - **M2-02:** PostgreSQL persistence, leases, expiry fencing, and quarantine are
-  M2-A. Signed leases/checkpoints and runtime-governed execution remain
-  unsatisfied and map provisionally to M2-B; full continuous recovery belongs
-  to M2-C.
+  the demonstrated M2-A subset. Signed leases/checkpoints remain unsatisfied
+  and are provisionally mapped to M2-B (the CEO scope decision did not name
+  these explicitly); full continuous recovery belongs to M2-C. The original
+  requirement remains **PARCIAL**, not completed by transfer.
 - **M2-03:** Inert proposals/rejections and their database records are within
-  M2-A only as containment. Provider-side effects and provider idempotency are
-  not implemented or authorized by this decision; their stage must be
-  dispositioned before any such work, and no real effects may be activated.
+  M2-A only as containment. Provider-side effects, provider idempotency, and
+  real-provider reconciliation remain unsatisfied and unauthorized; the
+  original requirement is **PARCIAL** and its future stage must be formalized
+  before any such work.
 - **M2-04:** Operation-scoped sandboxing is M2-B. The SQLite prototype's
   `sandbox-queue` route is not a sandbox and does not satisfy this requirement.
 - **M2-05:** Project pause/cancel generation fencing applicable to the inert

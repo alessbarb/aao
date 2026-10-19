@@ -55,9 +55,12 @@ acceptance.
    explicitly disposable PostgreSQL database using the CI legacy-row upgrade
    path; the full suite passed against it and the scratch database was dropped.
    Exact local evidence is recorded in the verification register.
-2. **Repeat required:** run the complete suite and static checks against the
-   committed fixes; then obtain a qualified independent security/architecture review of the exact
-   PR head and code candidate. The reviewer must be different from the
+2. **Engineering checks:** full suite and static checks are recorded at the
+   exact implementation source SHA `9fa503c`; the subsequent package commits
+   through `4e8fa48` contain documentation only. Re-run only if code changes or
+   the formal reviewer cannot reproduce the recorded environment. Obtain a
+   qualified independent security/architecture review of exact package SHA
+   `4e8fa48` and code SHA `9fa503c`. The reviewer must be different from the
    implementer and provide an attributable report with methods and findings.
 3. Resolve or explicitly disposition review findings within the M2-A boundary.
 4. Present exact-SHA evidence and the residual-risk list below for competent
