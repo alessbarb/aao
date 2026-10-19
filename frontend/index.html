@@ -622,7 +622,7 @@
       <div style="margin-bottom:14px;">
         <h2 style="font-size:1.05rem;margin:0 0 4px 0;">Propuestas de Código (Patch Proposals)</h2>
         <p style="margin:0;font-size:0.82rem;color:var(--text-muted);">
-          Parches propuestos por agentes autorizados con grant <code>code.propose</code>. Las validaciones ocurren en clones y árboles candidatos aislados; no se aplican al repositorio canónico.
+          Parches propuestos por agentes autorizados con grant <code>code.propose</code>. Las validaciones ocurren en clones y árboles candidatos aislados; la inspección del diff completo está reservada a credenciales AUDITOR en revisión (HTTP 403 para agentes) y ningún parche se aplica al repositorio canónico.
         </p>
       </div>
       <div class="data-table-wrapper">
@@ -1345,6 +1345,7 @@
           } else {
             card.append(node("div", "Validación aislada pendiente", "meta-line"));
           }
+          card.append(node("div", "Contenido del diff: reservado a credencial AUDITOR en revisión (HTTP 403 para agentes)", "meta-line"));
           card.append(node("div", "Aplicación al repositorio: no disponible", "meta-line disclaimer"));
           drawerProposals.append(card);
         }

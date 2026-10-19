@@ -185,3 +185,14 @@ def test_control_center_governance_does_not_treat_in_review_tasks_as_approved():
     # Approval reviews are noted as stored auditor reviews, not task completion or certified state
     assert 'else if (rev.decision === "APPROVE") meta.append(node("span", "Aprobación registrada", "pill approve"));' in html
     assert 'rev.decision === "APPROVE" ? "Aprobación registrada"' in html
+
+
+def test_patch_proposal_diff_inspection_requires_auditor_token():
+    with TestClient(app) as client:
+        # Calls with X-Agent-Token (or missing auditor token) must be rejected with 403
+        response = client.get(
+            "/v1/work/work-sample/patch-proposals/proposal-sample",
+            headers={"X-Agent-Token": "sample-agent-token"},
+        )
+        assert response.status_code == 403
+        assert "Individual auditor credential rejected" in response.json()["detail"]
