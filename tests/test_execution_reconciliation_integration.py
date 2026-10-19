@@ -235,6 +235,66 @@ def test_reconciliation_requires_distinct_granted_reviewer(monkeypatch):
                 agent_credential=secret, idempotency_key=replay_key,
                 capability="test.inert", request={"kind": "test-only"},
             )
+
+    # Effect rejection uses the same in-transaction grant lock. Exercise both
+    # grant-deletion orderings without invoking any external effect.
+    def create_effect_proposal(key):
+        return propose(
+            execution_id=eid, worker_id=worker_id, lease_token=lease["token"],
+            agent_credential=secret, idempotency_key=key,
+            capability="test.inert", request={"kind": "grant-race-test"},
+        )
+
+    effect = create_effect_proposal("effect-reconcile-first-" + str(uuid4()))
+    with ThreadPoolExecutor(max_workers=2) as pool, connect_postgres() as blocker:
+        blocker.execute("LOCK TABLE execution_journal IN ACCESS EXCLUSIVE MODE")
+        blocker_pid = blocker.execute("SELECT pg_backend_pid()").fetchone()[0]
+        rejecting = pool.submit(
+            reject_unexecuted_proposal, effect["id"],
+            auditor_credential=auditor_secret, evidence=["reject inert proposal"],
+        )
+        rejecting_pid = wait_until_blocked("INSERT INTO execution_journal%", blocker_pid)
+        revoking = pool.submit(
+            client.delete,
+            f"/v1/projects/{project}/grants/{auditor_id}/effect.reconcile",
+            headers=ceo,
+        )
+        wait_until_blocked("DELETE FROM project_grants%", rejecting_pid)
+    assert rejecting.result(timeout=5) == "REJECTED"
+    assert revoking.result(timeout=5).status_code == 204
+
+    regrant = client.post(f"/v1/projects/{project}/grants", headers=ceo, json={
+        "principal_id": auditor_id, "capability": "effect.reconcile",
+    })
+    assert regrant.status_code == 201, regrant.text
+    effect = create_effect_proposal("effect-revocation-first-" + str(uuid4()))
+    with ThreadPoolExecutor(max_workers=2) as pool, connect_postgres() as blocker:
+        blocker_pid = blocker.execute("SELECT pg_backend_pid()").fetchone()[0]
+        blocker.execute(
+            "SELECT project_id FROM project_grants WHERE principal_id=%s "
+            "AND project_id=%s AND capability='effect.reconcile' FOR UPDATE",
+            (auditor_id, project),
+        )
+        revoking = pool.submit(
+            client.delete,
+            f"/v1/projects/{project}/grants/{auditor_id}/effect.reconcile",
+            headers=ceo,
+        )
+        revoker_pid = wait_until_blocked("DELETE FROM project_grants%", blocker_pid)
+        rejecting = pool.submit(
+            reject_unexecuted_proposal, effect["id"],
+            auditor_credential=auditor_secret,
+            evidence=["must be denied after grant revocation"],
+        )
+        wait_until_blocked("SELECT 1 FROM project_grants%", revoker_pid)
+    assert revoking.result(timeout=5).status_code == 204
+    with pytest.raises(EffectReviewDenied, match="Independent effect capability missing"):
+        rejecting.result(timeout=5)
+    with connect_postgres() as db:
+        assert db.execute(
+            "SELECT status FROM external_effects WHERE id=%s", (effect["id"],),
+        ).fetchone()[0] == "PROPOSED"
+
     def racing_proposal():
         try:
             return propose(
