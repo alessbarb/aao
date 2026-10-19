@@ -7,6 +7,7 @@ from pathlib import Path
 
 import pytest
 
+from aao import local_candidate_controller, sandboxed_repository_checks
 from aao.local_candidate_controller import (
     CandidateControllerError,
     register_candidate,
@@ -97,11 +98,19 @@ def test_register_and_check_disposable_integration_without_mutating_checkout(
     monkeypatch.setattr("aao.local_candidate_controller.run_repository_check", fake_check)
     evidence = run_integration_check(root, record["candidate_id"], state)
 
-    assert evidence["schema"] == "aao.local-integration-evidence.v2"
+    assert evidence["schema"] == "aao.local-integration-evidence.v3"
     assert evidence["conclusion"] == "success"
     assert evidence["candidate_sha"] == candidate
     assert evidence["target_sha"] == target
     assert evidence["manifest_sha256"] == record["manifest_sha256"]
+    assert evidence["verifier_sources_sha256"] == {
+        "candidate_controller_sha256": hashlib.sha256(
+            Path(local_candidate_controller.__file__).read_bytes()
+        ).hexdigest(),
+        "sandbox_check_runner_sha256": hashlib.sha256(
+            Path(sandboxed_repository_checks.__file__).read_bytes()
+        ).hexdigest(),
+    }
     assert evidence["result_tree"] == manifest["result_tree"]
     assert evidence["integration_sha"] == seen["sha"]
     assert len(seen["parent_count"].split()) == 3

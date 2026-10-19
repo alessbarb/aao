@@ -203,11 +203,14 @@ audit service, not a verdict. The controller does not move refs, modify the
 canonical checkout, push, merge, or authorize promotion. Promotion is
 intentionally disabled.
 
-The local candidate record and integration evidence use schema version 2.
-Their candidate identifier includes the target ref, target SHA, and candidate
-SHA; this avoids reusing a prior pair's evidence under a different target ref.
-Records from the prior local-only schema remain untouched and are not treated
-as conformant v2 candidates.
+The local candidate record uses schema version 2; integration evidence uses
+`aao.local-integration-evidence.v3` and includes SHA-256 digests of the exact
+controller and sandbox-check runner source files. These identify the local
+verifier implementation, not its operator or an independent auditor. The
+candidate identifier includes the target ref, target SHA, and candidate SHA;
+this avoids reusing a prior pair's evidence under a different target ref.
+Records from prior local-only schemas remain untouched and are not treated as
+conformant v2 candidates.
 
 Reproduction from the repository root (using a new private state directory):
 

@@ -19,12 +19,13 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
+from aao import sandboxed_repository_checks
 from aao.sandboxed_repository_checks import RepositoryCheckError, run_repository_check
 
 _SHA = re.compile(r"^[0-9a-f]{40}$")
 _SCHEMA = "aao.local-candidate.v2"
 _MANIFEST_SCHEMA = "aao.candidate-manifest.v1"
-_EVIDENCE_SCHEMA = "aao.local-integration-evidence.v2"
+_EVIDENCE_SCHEMA = "aao.local-integration-evidence.v3"
 PROMOTION_ENABLED = False
 
 
@@ -128,6 +129,13 @@ def _write_json(path: Path, value: dict[str, Any]) -> str:
 def _record_digest(value: dict[str, Any]) -> str:
     payload = json.dumps(value, sort_keys=True, separators=(",", ":"), ensure_ascii=False).encode()
     return hashlib.sha256(payload).hexdigest()
+
+
+def _source_digest(source: str | Path) -> str:
+    try:
+        return hashlib.sha256(Path(source).read_bytes()).hexdigest()
+    except OSError as exc:
+        raise CandidateControllerError("candidate controller source evidence unavailable") from exc
 
 
 def _candidate_identifier(target_ref: str, target_sha: str, candidate_sha: str) -> str:
@@ -285,6 +293,10 @@ def run_integration_check(
         raise CandidateControllerError("could not create isolated integration commit")
 
     result: dict[str, Any]
+    verifier_sources = {
+        "candidate_controller_sha256": _source_digest(__file__),
+        "sandbox_check_runner_sha256": _source_digest(sandboxed_repository_checks.__file__),
+    }
     worktree_added = False
     with tempfile.TemporaryDirectory(prefix="aao-integration-") as temporary:
         checkout = Path(temporary) / "worktree"
@@ -302,6 +314,7 @@ def run_integration_check(
                 "manifest_sha256": record["manifest_sha256"],
                 "integration_sha": integrated_sha,
                 "check_id": check_id,
+                "verifier_sources_sha256": verifier_sources,
                 "check": check,
                 "conclusion": check["conclusion"],
                 "promotion": "disabled",
@@ -319,6 +332,7 @@ def run_integration_check(
                 "manifest_sha256": record["manifest_sha256"],
                 "integration_sha": integrated_sha,
                 "check_id": check_id,
+                "verifier_sources_sha256": verifier_sources,
                 "conclusion": "unavailable",
                 "reason": str(exc),
                 "promotion": "disabled",
