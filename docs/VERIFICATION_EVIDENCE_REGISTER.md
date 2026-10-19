@@ -330,3 +330,5 @@ reruns passed; the full suite passed **56 tests**, and compileall, Ruff,
 change. This is one controlled claim-completion/revocation ordering and does
 not prove credential revocation races, all queue operations, or hostile
 production schedules.
+
+CI run `39255841351` passed for code commit `773a5270cd25ec812db6272a4a26026d50f7d598`, including PostgreSQL integration tests, compilation, Ruff, and dependency checks.
