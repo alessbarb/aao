@@ -616,3 +616,21 @@ coverage, independent review, or M2 acceptance.
 - This proves selected controlled schedules for both reconciliation grants,
   not hostile/exhaustive scheduling, evidence-reference validation, formal
   independent review, or M2 acceptance.
+
+## Reconciliation race observers verify expected blocker — 2026-10-19
+
+- Code revision: `23b9787821a193310e6b63e6fa29964ef3f92e2b` on
+  `feat/aao-m0-foundation`.
+- A read-only review identified that one PostgreSQL race-test helper accepted
+  any lock blocker despite receiving an expected PID. The helper now requires
+  that PID in `pg_blocking_pids()`, including effect rejection behind an
+  already-queued proposal. This strengthens the observation of the claimed
+  orderings; it does not alter runtime behavior.
+- The execution- and effect-reconciliation grant-race tests passed three
+  consecutive runs each after the correction. On this exact code revision,
+  compileall, Ruff, the full explicitly disposable PostgreSQL suite (**69
+  passed, 0 skipped, 0 warnings** under `-W error`), `pip check`, and
+  `git diff --check` passed. CI was not awaited per operator direction.
+- The review was an internal read-only specialist pass, not formal independent
+  security review. Selected controlled schedules do not prove exhaustive
+  race safety or M2 acceptance.
