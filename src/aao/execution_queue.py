@@ -3,14 +3,14 @@
 No tool adapter or language model execution is provided. A failed lease is
 UNCERTAIN and must be reconciled by a separate authorized procedure.
 """
+import hmac
 import json
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 from uuid import uuid4
 
-from aao.postgresql_connection import connect_postgres
 from aao.legacy_worker_authentication import verify_registered_worker
+from aao.postgresql_connection import connect_postgres
 from aao.principal_credentials import digest_token
-import hmac
 
 
 class ExecutionConflict(ValueError):
@@ -48,7 +48,7 @@ def verify_execution_principal(db, worker_id, credential, agent_credential):
 def claim(worker_id: str, *, credential: str | None = None, project_id: str, seconds: int = 60, now: datetime | None = None, agent_credential: str | None = None):
     if not worker_id or not project_id or seconds < 1:
         raise ExecutionConflict("Worker and positive lease duration required")
-    instant = now or datetime.now(timezone.utc)
+    instant = now or datetime.now(UTC)
     with connect_postgres() as db:
         verify_execution_principal(db, worker_id, credential, agent_credential)
         grant = db.execute(
@@ -90,7 +90,7 @@ def claim(worker_id: str, *, credential: str | None = None, project_id: str, sec
 
 def complete(execution_id: str, token: str, worker_id: str, result: dict,
              *, credential: str | None = None, now: datetime | None = None, agent_credential: str | None = None):
-    instant = now or datetime.now(timezone.utc)
+    instant = now or datetime.now(UTC)
     with connect_postgres() as db:
         verify_execution_principal(db, worker_id, credential, agent_credential)
         execution = db.execute(
@@ -124,7 +124,7 @@ def complete(execution_id: str, token: str, worker_id: str, result: dict,
 
 
 def quarantine_expired(*, now: datetime | None = None) -> int:
-    instant = now or datetime.now(timezone.utc)
+    instant = now or datetime.now(UTC)
     with connect_postgres() as db:
         rows = db.execute(
             "UPDATE execution_queue SET status='UNCERTAIN' "
