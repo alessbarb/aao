@@ -203,6 +203,32 @@ def test_capability_catalog_is_project_scoped_and_does_not_grant_execution(monke
         promotion = {**payload, "capability_id": "forbidden.promotion", "status": "candidate_for_promotion"}
         assert client.post(path, headers=worker, json=promotion).status_code == 422
 
+        isolated_agent = "cap-isolated-reader-" + str(uuid4())
+        isolated_token = client.post("/v1/principals/credentials", headers=ceo, json={
+            "principal_id": isolated_agent, "kind": "AGENT",
+        }).json()["token"]
+        isolated_reader = {"X-Agent-Token": isolated_token}
+        isolated_mandate = client.post("/v1/mandates", headers=ceo, json={
+            "title": "Isolated capability mandate " + str(uuid4()),
+            "objective": "Check capability project isolation",
+        }).json()["id"]
+        assert client.post(f"/v1/mandates/{isolated_mandate}/confirm", headers=ceo).status_code == 200
+        isolated_project = client.post("/v1/projects", headers=ceo, json={
+            "name": "Isolated capability project " + str(uuid4()), "mandate_id": isolated_mandate,
+        }).json()["id"]
+        assert client.post(f"/v1/projects/{isolated_project}/grants", headers=ceo, json={
+            "principal_id": isolated_agent, "capability": "project.read",
+        }).status_code == 201
+        isolated_capabilities = f"/v1/projects/{isolated_project}/capabilities"
+        isolated_evaluations = f"/v1/projects/{isolated_project}/capability-evaluations"
+        assert client.get(isolated_capabilities, headers=isolated_reader).json() == []
+        assert client.get(isolated_evaluations, headers=isolated_reader).json() == []
+        assert client.post(f"/v1/projects/{isolated_project}/grants", headers=ceo, json={
+            "principal_id": isolated_agent, "capability": "work.create",
+        }).status_code == 201
+        assert client.post(isolated_evaluations, headers=isolated_reader,
+                           json=evaluation_payload).status_code == 404
+
 
 @pytest.mark.skipif(
     not os.getenv("AAO_TEST_POSTGRES_URL") or os.getenv("AAO_TEST_DB_DISPOSABLE") != "yes",
