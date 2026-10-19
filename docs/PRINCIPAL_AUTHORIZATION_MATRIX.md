@@ -51,8 +51,9 @@ inside their transaction. The CEO credential is still a single static bearer.
   races against full business writes, claims and completion are still needed.
 - The current full local suite has 52 tests, including grant-row, auditor
   credential-lock, and completion-after-lease-expiry-during-row-lock-wait
-  coverage. Quarantine/completion ordering, repeated adversarial schedules,
-  and effect-proposal/retry races remain untested.
+  coverage. Three controlled races between completion and quarantine after
+  expiry also finish in `UNCERTAIN`; this is not a broad adversarial schedule
+  proof. Effect-proposal/retry races and cold-restart recovery remain untested.
 - GitHub CI now configures a fresh disposable PostgreSQL service and runs the
   guarded integration suite; run `39251540849` passed on `585b422`. Current
   local results are recorded in the evidence register; this is not independent

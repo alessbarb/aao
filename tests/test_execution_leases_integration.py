@@ -1,5 +1,6 @@
 """PostgreSQL integration tests, opt-in for explicitly disposable databases."""
 import os
+import threading
 import time
 from concurrent.futures import ThreadPoolExecutor
 from uuid import uuid4
@@ -54,7 +55,13 @@ def test_postgres_inert_staging_is_default_off_and_idempotent(monkeypatch):
     reason="Explicit disposable PostgreSQL database required",
 )
 def test_worker_claim_complete_respects_identity_and_project_state(monkeypatch):
-    from aao.execution_queue import ExecutionConflict, claim, complete, state
+    from aao.execution_queue import (
+        ExecutionConflict,
+        claim,
+        complete,
+        quarantine_expired,
+        state,
+    )
     from aao.postgresql_connection import connect_postgres
     from aao.work_management_api import app
 
@@ -147,6 +154,47 @@ def test_worker_claim_complete_respects_identity_and_project_state(monkeypatch):
         with pytest.raises(ExecutionConflict, match="Lease stale"):
             delayed_completion.result(timeout=5)
         assert state(delayed_execution)["status"] == "RUNNING"
+
+        # Completion and quarantine contend on the same queue row. Once expiry
+        # has passed, all schedules must end UNCERTAIN, never SUCCEEDED.
+        for attempt in range(3):
+            racing_work = client.post(f"/v1/projects/{project_id}/work", headers=worker, json={
+                "title": f"Quarantine race {attempt}", "author_id": worker_id,
+                "acceptance_criteria": ["expiry wins"],
+            }).json()["id"]
+            client.post(f"/v1/work/{racing_work}/admit", headers=worker)
+            racing_execution = client.post(
+                f"/v1/work/{racing_work}/stage-inert", headers=worker,
+            ).json()["execution_id"]
+            racing_lease = claim(
+                worker_id, agent_credential=token, project_id=project_id, seconds=1,
+            )
+            assert racing_lease and racing_lease["execution_id"] == racing_execution
+            time.sleep(1.05)
+            start = threading.Barrier(2)
+
+            def finish_expired(
+                barrier=start, execution_id=racing_execution,
+                lease_token=racing_lease["token"], selected_worker=worker_id,
+                credential=token,
+            ):
+                barrier.wait(timeout=3)
+                complete(
+                    execution_id, lease_token, selected_worker,
+                    {"ok": True}, agent_credential=credential,
+                )
+
+            def quarantine_work(barrier=start):
+                barrier.wait(timeout=3)
+                return quarantine_expired()
+
+            with ThreadPoolExecutor(max_workers=2) as pool:
+                completion = pool.submit(finish_expired)
+                quarantining = pool.submit(quarantine_work)
+                with pytest.raises(ExecutionConflict, match="Lease stale"):
+                    completion.result(timeout=5)
+                assert quarantining.result(timeout=5) >= 1
+            assert state(racing_execution)["status"] == "UNCERTAIN"
 
 
 @pytest.mark.skipif(

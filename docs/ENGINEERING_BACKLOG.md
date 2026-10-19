@@ -33,11 +33,11 @@ or `[BLOCKED]` labels below as live issue statuses.
    cover AGENT denial, authorized AUDITOR paths and serialization between
    credential authentication and revocation. No HTTP exposure exists; evidence
    verification and independent review remain open.
-4. Lease expiry is now computed and checked by PostgreSQL clock, with an
-   integration test proving completion is rejected after waiting past lease
-   expiry on a locked queue row. Still verify repeated revocation schedules,
-   effect proposal/retry, quarantine/completion ordering and cold-restart
-   recovery with repeated PostgreSQL concurrency tests.
+4. Lease expiry is now computed and checked by PostgreSQL clock. Integration
+   tests prove delayed completion is rejected after expiry during a queue-row
+   lock wait and run three competing completion/quarantine schedules, all
+   ending `UNCERTAIN`. Still verify repeated revocation schedules, effect
+   proposal/retry and cold-restart recovery with PostgreSQL concurrency tests.
 5. Make PostgreSQL integration tests part of CI with a fresh disposable
    database and migrations; ordinary CI currently can skip those tests.
 6. Obtain adversarial independent security/architecture review and competent
