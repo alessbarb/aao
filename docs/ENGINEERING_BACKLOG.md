@@ -4,24 +4,22 @@
 authoritative issue tracker. The PostgreSQL API, individual development
 credentials, project-scoped API grants, durable inert queue, lease quarantine
 and effect proposal/reconciliation helpers have since been implemented in
-part. The implementation source checkpoint is
-`99760c7339323600368e5dbb145b088d83ad0715`; the candidate now also contains
-documented security-boundary fixes, including production denial for individual
-development credentials and an audited CEO suspension API. At the last pinned
-candidate checkpoint `b15dea4f69823bcb894cb58eda54dcffdb48d602`, the local
-PostgreSQL suite passed 80 tests with warnings as errors, and compileall, Ruff,
-`pip check`, and diff checks passed. CI was not awaited. The current working
-changes require fresh validation before pinning a new candidate. Exact evidence
-and limits are recorded in
+part. The implementation baseline is
+`99760c7339323600368e5dbb145b088d83ad0715`; the current code candidate is
+`9fa503c334f17e3a7b6ef962a5df3a6428b280e8`, including production denial for
+individual development credentials, audited CEO suspension, and race-safe
+inert proposal idempotency. Its disposable local PostgreSQL suite passed 83
+tests with warnings as errors; compileall, Ruff, `pip check`, and diff checks
+passed. CI was not awaited. Exact evidence and limits are recorded in
 [`VERIFICATION_EVIDENCE_REGISTER.md`](VERIFICATION_EVIDENCE_REGISTER.md).
 The current authorization inventory is
 [`PRINCIPAL_AUTHORIZATION_MATRIX.md`](PRINCIPAL_AUTHORIZATION_MATRIX.md); the
 M2 compliance matrix is
 [`COMPLIANCE_MATRIX.md`](COMPLIANCE_MATRIX.md). The CEO has now established
 M2-A/M2-B/M2-C stage scope in [`SCOPE_DISPOSITION.md`](SCOPE_DISPOSITION.md).
-M2-A is the current durable/inert candidate; clean migration replay is recorded.
-The candidate remains unaccepted pending fresh validation of current fixes,
-formal independent review, and competent acceptance.
+M2-A is the current durable/inert candidate; clean migration replay is recorded
+for the unchanged schema. The candidate remains unaccepted pending formal
+independent review and competent acceptance.
 Do not interpret old `[candidate]` or `[BLOCKED]` labels below as live issue
 statuses.
 
