@@ -476,11 +476,16 @@ def project_activity(project_id: str, principal: str = Depends(read_principal)):
         if not db.execute("SELECT 1 FROM projects WHERE id=%s", (project_id,)).fetchone():
             raise HTTPException(404, "Project not found")
         rows = db.execute(
+            "SELECT id,subject_id,kind,details,created_at FROM ("
             "SELECT e.id,e.subject_id,e.kind,e.details,e.created_at "
             "FROM events e WHERE e.subject_id=%s OR e.subject_id IN "
             "(SELECT w.id FROM work_items w WHERE w.project_id=%s) "
-            "ORDER BY e.created_at DESC,e.id DESC LIMIT 100",
-            (project_id, project_id),
+            "UNION ALL "
+            "SELECT j.id,j.execution_id,'execution.'||j.kind,j.details,j.occurred_at "
+            "FROM execution_journal j JOIN execution_queue q ON q.id=j.execution_id "
+            "WHERE q.project_id=%s) project_activity "
+            "ORDER BY created_at DESC,id DESC LIMIT 100",
+            (project_id, project_id, project_id),
         ).fetchall()
         return [{"id": r[0], "subject_id": r[1], "kind": r[2],
                  "details": r[3], "created_at": r[4]} for r in rows]

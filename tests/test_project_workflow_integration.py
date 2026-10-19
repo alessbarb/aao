@@ -326,6 +326,13 @@ def test_repository_check_approval_requires_successful_result(
             "candidate_sha": "a" * 40, "conclusion": conclusion,
             "exit_code": 0 if conclusion == "success" else 1,
         }, agent_credential=agent_token)
+        activity = client.get(f"/v1/projects/{project}/activity", headers=ceo)
+        assert activity.status_code == 200, activity.text
+        execution_events = [event for event in activity.json()
+                            if event["subject_id"] == lease["execution_id"]]
+        assert {event["kind"] for event in execution_events} >= {
+            "execution.claimed", "execution.completed",
+        }
         if tamper_result:
             # Simulate corruption/bypass of the worker completion boundary;
             # review must classify from immutable queued input, not result marker.

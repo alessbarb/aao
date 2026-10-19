@@ -130,7 +130,7 @@
       box.append(el("p","La coincidencia local solo compara registros almacenados; no certifica que el SHA siga siendo el HEAD remoto, ni sustituye CI, auditoría independiente o aceptación.","banner"));content.append(box);
     }
     function renderActivity(){
-      content.append(el("span","Perspectiva técnica","eyebrow"),el("h2","Actividad auditada"),el("p","Eventos persistidos del proyecto y sus tareas. Lista limitada a los 100 más recientes.","muted"));
+      content.append(el("span","Perspectiva técnica","eyebrow"),el("h2","Actividad auditada"),el("p","Eventos del proyecto y journal de ejecuciones persistidos. Lista limitada a los 100 más recientes.","muted"));
       if(!activity.length){content.append(empty("No hay eventos registrados para este proyecto."));return}
       const list=el("ol",undefined,"list");for(const event of activity){const item=el("li"),row=el("div",undefined,"row");row.append(el("strong",event.kind),el("time",displayDate(event.created_at),"meta"));item.append(row,el("p","Sujeto: "+event.subject_id,"refs"));list.append(item)}content.append(list);
     }
