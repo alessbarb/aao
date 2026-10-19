@@ -83,32 +83,41 @@ class _GrantQuery:
 def test_grant_rechecks_principal_inside_transaction(monkeypatch):
     from fastapi import HTTPException
 
-    from aao.work_management_api import require_grant
+    from aao.work_management_api import AuthenticatedPrincipal, require_grant
 
+    principal = AuthenticatedPrincipal("agent-1", "agent-digest", "AGENT")
     for record in (None, ("AGENT", False), ("AUDITOR", True)):
         db = _GrantQuery(record)
         with pytest.raises(HTTPException) as exc:
-            require_grant(db, "agent-1", "project-1", "work.create")
+            require_grant(db, principal, "project-1", "work.create")
         assert exc.value.status_code == 403
         assert len(db.queries) == 1
         assert "FOR SHARE" in db.queries[0][0]
 
     active = _GrantQuery(("AGENT", True))
-    require_grant(active, "agent-1", "project-1", "work.create")
+    require_grant(active, principal, "project-1", "work.create")
     assert len(active.queries) == 2
+    assert active.queries[0][1] == ("agent-1", "agent-digest")
     assert active.queries[1][1] == ("agent-1", "project-1", "work.create")
 
 
 def test_reviewer_grant_requires_individual_auditor_kind():
     from fastapi import HTTPException
 
-    from aao.work_management_api import require_grant
+    from aao.work_management_api import AuthenticatedPrincipal, require_grant
 
     with pytest.raises(HTTPException) as exc:
-        require_grant(_GrantQuery(("AGENT", True)), "agent-1", "project-1", "work.review")
+        require_grant(
+            _GrantQuery(("AGENT", True)),
+            AuthenticatedPrincipal("agent-1", "agent-digest", "AGENT"),
+            "project-1", "work.review",
+        )
     assert exc.value.status_code == 403
     db = _GrantQuery(("AUDITOR", True))
-    require_grant(db, "auditor-1", "project-1", "work.review")
+    require_grant(
+        db, AuthenticatedPrincipal("auditor-1", "auditor-digest", "AUDITOR"),
+        "project-1", "work.review",
+    )
     assert len(db.queries) == 2
 
 
@@ -155,7 +164,9 @@ def test_project_listing_rechecks_active_reader_in_transaction(monkeypatch):
         db = ReaderDb(record)
         monkeypatch.setattr(work_management_api, "tx", transaction_for(db))
         with pytest.raises(HTTPException) as denied:
-            work_management_api.projects(principal="agent-1")
+            work_management_api.projects(principal=work_management_api.AuthenticatedPrincipal(
+                "agent-1", "agent-digest", "AGENT",
+            ))
         assert denied.value.status_code == 403
         assert len(db.queries) == 1
         assert "FOR SHARE" in db.queries[0][0]
@@ -167,8 +178,12 @@ def test_project_listing_rechecks_active_reader_in_transaction(monkeypatch):
         yield active
 
     monkeypatch.setattr(work_management_api, "tx", active_tx)
-    assert work_management_api.projects(principal="agent-1") == []
+    principal = work_management_api.AuthenticatedPrincipal(
+        "agent-1", "agent-digest", "AGENT",
+    )
+    assert work_management_api.projects(principal=principal) == []
     assert len(active.queries) == 2
+    assert active.queries[0][1] == ("agent-1", "agent-digest")
     assert active.queries[1][1] == ("agent-1",)
 
 
@@ -203,3 +218,36 @@ def test_static_ceo_bearer_is_unavailable_outside_development(monkeypatch, envir
             "/v1/projects", headers={"X-CEO-Token": "development-ceo-token"},
         )
     assert response.status_code == 403
+
+
+def test_agent_named_ceo_is_not_treated_as_ceo_reader(monkeypatch):
+    from contextlib import contextmanager
+
+    from aao import work_management_api
+
+    class ReaderDb:
+        def __init__(self):
+            self.queries = []
+
+        def execute(self, query, args=None):
+            self.queries.append((query, args))
+            return self
+
+        def fetchone(self):
+            return ("AGENT", True)
+
+        def fetchall(self):
+            return []
+
+    db = ReaderDb()
+
+    @contextmanager
+    def fake_tx():
+        yield db
+
+    monkeypatch.setattr(work_management_api, "tx", fake_tx)
+    principal = work_management_api.AuthenticatedPrincipal("ceo", "ceo-digest", "AGENT")
+    assert work_management_api.projects(principal=principal) == []
+    assert len(db.queries) == 2
+    assert "principal_credentials" in db.queries[0][0]
+    assert "project_grants" in db.queries[1][0]

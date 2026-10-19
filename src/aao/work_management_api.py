@@ -40,9 +40,9 @@ def require_ceo(x_ceo_token: str | None = Header(None)):
 def require_reviewer(
     x_auditor_token: str | None = Header(None),
 ):
-    from aao.principal_credentials import PrincipalDenied, authenticate
+    from aao.principal_credentials import PrincipalDenied
     try:
-        return authenticate(x_auditor_token, kind="AUDITOR")
+        return _authenticate_request_principal(x_auditor_token, "AUDITOR")
     except PrincipalDenied as exc:
         raise HTTPException(403, "Individual auditor credential rejected") from exc
 
@@ -50,9 +50,9 @@ def require_reviewer(
 def require_worker(
     x_agent_token: str | None = Header(None),
 ):
-    from aao.principal_credentials import PrincipalDenied, authenticate
+    from aao.principal_credentials import PrincipalDenied
     try:
-        return authenticate(x_agent_token, kind="AGENT")
+        return _authenticate_request_principal(x_agent_token, "AGENT")
     except PrincipalDenied as exc:
         raise HTTPException(403, "Individual agent credential rejected") from exc
 
@@ -103,6 +103,24 @@ class GrantRequest(BaseModel):
 
 
 app = FastAPI(title="AAO PostgreSQL development core", version="0.2.0")
+_CEO_PRINCIPAL = object()
+
+class AuthenticatedPrincipal(str):
+    """Principal ID plus the exact bearer digest for transaction-time recheck."""
+
+    def __new__(cls, principal_id: str, token_digest: str, kind: str):
+        value = super().__new__(cls, principal_id)
+        value.token_digest = token_digest
+        value.kind = kind
+        return value
+
+
+def _authenticate_request_principal(token: str | None, kind: str):
+    from aao.principal_credentials import authenticate, digest_token
+
+    principal_id = authenticate(token, kind=kind)
+    return AuthenticatedPrincipal(principal_id, digest_token(token), kind)
+
 
 
 @app.get("/", include_in_schema=False)
@@ -224,11 +242,11 @@ def read_principal(
     ceo = os.getenv("AAO_CEO_TOKEN")
     if (_ceo_bearer_enabled() and ceo and x_ceo_token
             and secrets.compare_digest(ceo, x_ceo_token)):
-        return "ceo"
+        return _CEO_PRINCIPAL
     if x_agent_token is not None:
-        from aao.principal_credentials import PrincipalDenied, authenticate
+        from aao.principal_credentials import PrincipalDenied
         try:
-            return authenticate(x_agent_token, kind="AGENT")
+            return _authenticate_request_principal(x_agent_token, "AGENT")
         except PrincipalDenied as exc:
             raise HTTPException(403, "Individual reader credential rejected") from exc
     raise HTTPException(403, "Authenticated reader required")
@@ -237,12 +255,15 @@ def read_principal(
 @app.get("/v1/projects")
 def projects(principal: str = Depends(read_principal)):
     with tx() as db:
-        if principal == "ceo":
+        if principal is _CEO_PRINCIPAL:
             rows = db.execute("SELECT id,name,state FROM projects ORDER BY name,id").fetchall()
         else:
+            if not isinstance(principal, AuthenticatedPrincipal):
+                raise HTTPException(403, "Individual reader credential required")
             credential = db.execute(
                 "SELECT kind,enabled FROM principal_credentials "
-                "WHERE principal_id=%s FOR SHARE", (principal,),
+                "WHERE principal_id=%s AND token_digest=%s FOR SHARE",
+                (principal, principal.token_digest),
             ).fetchone()
             if not credential or credential[0] != "AGENT" or not credential[1]:
                 raise HTTPException(403, "Individual reader invalid or revoked")
@@ -312,13 +333,16 @@ def revoke_grant(
 
 
 def require_grant(db, principal: str, project_id: str, capability: str):
-    """Recheck identity and hold its grant row through the protected transaction."""
+    """Recheck the presented credential and grant through the protected transaction."""
+    if not isinstance(principal, AuthenticatedPrincipal):
+        raise HTTPException(403, "Individual principal credential required")
     row = db.execute(
         "SELECT kind,enabled FROM principal_credentials "
-        "WHERE principal_id=%s FOR SHARE", (principal,),
+        "WHERE principal_id=%s AND token_digest=%s FOR SHARE",
+        (principal, principal.token_digest),
     ).fetchone()
     expected_kind = "AUDITOR" if capability in {"work.review", "execution.reconcile", "effect.reconcile"} else "AGENT"
-    if not row or row[0] != expected_kind or not row[1]:
+    if not row or row[0] != expected_kind or row[0] != principal.kind or not row[1]:
         raise HTTPException(403, "Individual principal invalid or revoked")
     if not db.execute(
         "SELECT 1 FROM project_grants WHERE principal_id=%s AND project_id=%s "
@@ -355,7 +379,7 @@ def board(project_id: str, principal: str = Depends(read_principal)):
     with tx() as db:
         if not db.execute("SELECT 1 FROM projects WHERE id=%s", (project_id,)).fetchone():
             raise HTTPException(404, "Project not found")
-        if principal != "ceo":
+        if principal is not _CEO_PRINCIPAL:
             require_grant(db, principal, project_id, "project.read")
         rows = db.execute(
             "SELECT id,title,status,acceptance_criteria,evidence FROM work_items "

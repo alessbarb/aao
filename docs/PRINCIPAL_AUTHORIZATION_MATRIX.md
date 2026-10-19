@@ -27,9 +27,12 @@ The PostgreSQL API no longer accepts shared worker/reviewer tokens. SQLite
 prototype tokens are a separate path. Individual bearer authentication first
 resolves identity and protected API operations recheck the credential row
 inside their transaction. HTTP dependencies currently resolve the bearer
-before the protected operation transaction; a token rotated in that gap may
-still be accepted because the later check verifies principal status, not the
-presented token digest. The static CEO bearer is development-only and is
+before the protected operation transaction; the authenticated request context
+retains the presented token digest, which is matched again under `FOR SHARE`
+inside the protected transaction. Thus a token rotated in that gap does not
+match the credential row. This path is covered by unit-level transaction
+checks; a dedicated end-to-end rotation-gap PostgreSQL schedule remains
+desirable. The static CEO bearer is development-only and is
 rejected for CEO authorization outside explicit development/test modes; this
 does not establish a production CEO identity flow. See the latest evidence
 register for test status.

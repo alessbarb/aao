@@ -229,7 +229,8 @@ def test_project_reads_are_scoped_to_granted_worker(monkeypatch):
 def test_grant_revocation_serializes_after_authorized_transaction(monkeypatch):
     """An in-flight grant-checked transaction completes before CEO revocation."""
     from aao.postgresql_connection import connect_postgres
-    from aao.work_management_api import app, require_grant
+    from aao.principal_credentials import digest_token
+    from aao.work_management_api import AuthenticatedPrincipal, app, require_grant
 
     monkeypatch.setenv("AAO_POSTGRES_URL", os.environ["AAO_TEST_POSTGRES_URL"])
     monkeypatch.setenv("AAO_CEO_TOKEN", "grant-race-ceo")
@@ -249,7 +250,12 @@ def test_grant_revocation_serializes_after_authorized_transaction(monkeypatch):
         }).status_code == 201
 
         with ThreadPoolExecutor(max_workers=1) as pool, connect_postgres() as protected_db:
-            require_grant(protected_db, agent_id, project, "work.create")
+            require_grant(
+                protected_db,
+                AuthenticatedPrincipal(agent_id, digest_token(worker["X-Agent-Token"]), "AGENT"),
+                project,
+                "work.create",
+            )
             revoke = pool.submit(client.delete,
                 f"/v1/projects/{project}/grants/{agent_id}/work.create",
                 headers=ceo,
@@ -285,14 +291,15 @@ def test_grant_expiring_while_lock_waiting_is_denied(monkeypatch):
     from fastapi import HTTPException
 
     from aao.postgresql_connection import connect_postgres
-    from aao.work_management_api import app, require_grant
+    from aao.principal_credentials import digest_token
+    from aao.work_management_api import AuthenticatedPrincipal, app, require_grant
 
     monkeypatch.setenv("AAO_POSTGRES_URL", os.environ["AAO_TEST_POSTGRES_URL"])
     monkeypatch.setenv("AAO_CEO_TOKEN", "grant-expiry-ceo")
     ceo = {"X-CEO-Token": "grant-expiry-ceo"}
     with TestClient(app) as client:
         agent_id = "agent-" + str(uuid4())
-        client.post("/v1/principals/credentials", headers=ceo, json={"principal_id": agent_id, "kind": "AGENT"})
+        agent_token = client.post("/v1/principals/credentials", headers=ceo, json={"principal_id": agent_id, "kind": "AGENT"}).json()["token"]
         mandate = client.post("/v1/mandates", headers=ceo, json={
             "title": f"Grant expiry {uuid4()}", "objective": "Test expiry after lock wait",
         }).json()["id"]
@@ -312,7 +319,12 @@ def test_grant_expiring_while_lock_waiting_is_denied(monkeypatch):
         def check_grant():
             try:
                 with connect_postgres() as db:
-                    require_grant(db, agent_id, project, "work.create")
+                    require_grant(
+                        db,
+                        AuthenticatedPrincipal(agent_id, digest_token(agent_token), "AGENT"),
+                        project,
+                        "work.create",
+                    )
                 return "allowed"
             except HTTPException:
                 return "denied"
