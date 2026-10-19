@@ -42,6 +42,17 @@ def current_commit(repository: Path) -> str:
     return result.stdout.strip()
 
 
+def repository_is_clean(repository: Path) -> bool:
+    """Require the audited checkout to contain only the exact committed tree."""
+    result = subprocess.run(
+        ["git", "-C", str(repository), "status", "--porcelain", "--untracked-files=all"],
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+    return not result.stdout.strip()
+
+
 def aggregate_github_check_runs(candidate_sha: str, check_runs: list[dict[str, Any]]) -> dict[str, dict[str, str]]:
     """Aggregate GitHub check-runs; duplicate names pass only if every run passes this SHA."""
     grouped: dict[str, list[dict[str, Any]]] = {}
@@ -96,6 +107,11 @@ def evaluate(
     """Evaluate trusted policy, mandatory checks and a signed audit report."""
     sha = current_commit(repository)
     reasons: list[str] = []
+    try:
+        if not repository_is_clean(repository):
+            reasons.append("candidate checkout is dirty; audit must target the exact committed tree")
+    except (OSError, subprocess.SubprocessError):
+        reasons.append("could not verify candidate checkout cleanliness")
     repository_root = repository.resolve()
     if policy_path.resolve().is_relative_to(repository_root):
         return GateResult(False, ("trusted policy must be outside the candidate checkout",), sha)
