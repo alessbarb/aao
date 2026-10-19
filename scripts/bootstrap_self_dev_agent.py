@@ -102,6 +102,30 @@ def bootstrap(base_url: str) -> tuple[str, str, datetime, Path]:
     if len(matches) != 1 or matches[0].get("state") != "ACTIVE":
         raise BootstrapError("exactly one active AAO Self Development project is required")
     project = matches[0]
+    # Inspect the currently authorized inventory before creating any new identity.
+    # The endpoint is CEO-only and returns metadata only, never credential material.
+    existing_grants = request_json(
+        base_url, f"/v1/projects/{project['id']}/grants", ceo_token=ceo_token,
+    )
+    if not isinstance(existing_grants, list):
+        raise BootstrapError("project grant inventory response is invalid")
+    now = datetime.now(UTC)
+    active_agents = {
+        row.get("principal_id")
+        for row in existing_grants
+        if isinstance(row, dict)
+        and row.get("kind") == "AGENT"
+        and row.get("credential_enabled") is True
+        and isinstance(row.get("principal_id"), str)
+        and (
+            row.get("expires_at") is None
+            or datetime.fromisoformat(row["expires_at"]) > now
+        )
+    }
+    if active_agents:
+        raise BootstrapError(
+            "an active AGENT grant already exists for this project; refusing to provision a duplicate"
+        )
     principal_id = f"aao-selfdev-{secrets.token_hex(6)}"
     credential = request_json(
         base_url,

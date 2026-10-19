@@ -712,3 +712,48 @@ def test_http_request_context_rejects_token_rotated_before_protected_transaction
             assert board_read.result(timeout=5).status_code == 403
         finally:
             app.dependency_overrides.pop(read_principal, None)
+
+
+@pytest.mark.skipif(
+    not os.getenv("AAO_TEST_POSTGRES_URL") or os.getenv("AAO_TEST_DB_DISPOSABLE") != "yes",
+    reason="Explicit disposable PostgreSQL database required",
+)
+def test_ceo_project_grant_inventory_returns_metadata_only(monkeypatch):
+    from aao.work_management_api import app
+
+    monkeypatch.setenv("AAO_POSTGRES_URL", os.environ["AAO_TEST_POSTGRES_URL"])
+    monkeypatch.setenv("AAO_CEO_TOKEN", "grant-inventory-ceo")
+    ceo = {"X-CEO-Token": "grant-inventory-ceo"}
+    identity = "inventory-agent-" + str(uuid4())
+    with TestClient(app) as client:
+        mandate = client.post("/v1/mandates", headers=ceo, json={
+            "title": "Grant inventory " + str(uuid4()),
+            "objective": "Inspect grants through the authorized API",
+        }).json()["id"]
+        assert client.post(f"/v1/mandates/{mandate}/confirm", headers=ceo).status_code == 200
+        project = client.post("/v1/projects", headers=ceo, json={
+            "name": "Grant inventory " + str(uuid4()), "mandate_id": mandate,
+        }).json()["id"]
+        credential = client.post("/v1/principals/credentials", headers=ceo, json={
+            "principal_id": identity, "kind": "AGENT",
+        })
+        assert credential.status_code == 201, credential.text
+        grant = client.post(f"/v1/projects/{project}/grants", headers=ceo, json={
+            "principal_id": identity, "capability": "project.read",
+        })
+        assert grant.status_code == 201, grant.text
+
+        inventory = client.get(f"/v1/projects/{project}/grants", headers=ceo)
+        assert inventory.status_code == 200, inventory.text
+        assert inventory.json() == [{
+            "principal_id": identity,
+            "kind": "AGENT",
+            "credential_enabled": True,
+            "capability": "project.read",
+            "expires_at": None,
+        }]
+        assert "token" not in inventory.text
+        assert "token_digest" not in inventory.text
+        assert client.get(
+            f"/v1/projects/{project}/grants", headers={"X-CEO-Token": "wrong"},
+        ).status_code == 403

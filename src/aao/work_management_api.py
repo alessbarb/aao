@@ -387,6 +387,31 @@ def projects(principal: str = Depends(read_principal)):
         return [{"id": r[0], "name": r[1], "state": r[2]} for r in rows]
 
 
+@app.get("/v1/projects/{project_id}/grants")
+def project_grants(project_id: str, _: str = Depends(require_ceo)):
+    """CEO-only inventory of project-scoped grants; never returns credential material."""
+    with tx() as db:
+        if not db.execute("SELECT 1 FROM projects WHERE id=%s", (project_id,)).fetchone():
+            raise HTTPException(404, "Project not found")
+        rows = db.execute(
+            "SELECT g.principal_id,c.kind,c.enabled,g.capability,g.expires_at "
+            "FROM project_grants g JOIN principal_credentials c "
+            "ON c.principal_id=g.principal_id WHERE g.project_id=%s "
+            "ORDER BY g.principal_id,g.capability",
+            (project_id,),
+        ).fetchall()
+    return [
+        {
+            "principal_id": row[0],
+            "kind": row[1],
+            "credential_enabled": row[2],
+            "capability": row[3],
+            "expires_at": row[4].isoformat() if row[4] else None,
+        }
+        for row in rows
+    ]
+
+
 @app.post("/v1/projects/{project_id}/grants")
 def grant(project_id: str, payload: GrantRequest, _: str = Depends(require_ceo)):
     with tx() as db:

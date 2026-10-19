@@ -28,6 +28,21 @@ def test_transactional_development_credentials_fail_closed_in_production(monkeyp
         authenticate_in_transaction(object(), "not-a-real-token", kind="AUDITOR")
 
 
+def test_project_grant_inventory_rejects_non_ceo_before_database_access(monkeypatch):
+    from fastapi.testclient import TestClient
+
+    from aao.work_management_api import app
+
+    monkeypatch.setenv("AAO_ENV", "development")
+    monkeypatch.setenv("AAO_CEO_TOKEN", "expected-ceo-token")
+    with TestClient(app) as client:
+        response = client.get(
+            "/v1/projects/example/grants",
+            headers={"X-CEO-Token": "not-the-ceo"},
+        )
+    assert response.status_code == 403
+
+
 @pytest.mark.parametrize("environment", [None, "", "production", "prodution"])
 @pytest.mark.parametrize("transactional", [False, True])
 def test_individual_credentials_require_explicit_known_dev_environment(
