@@ -7,6 +7,7 @@ import json
 import os
 import secrets
 from contextlib import contextmanager
+from datetime import UTC, datetime
 from pathlib import Path
 from uuid import uuid4
 
@@ -16,7 +17,7 @@ load_local_env()
 
 from fastapi import Depends, FastAPI, Header, HTTPException
 from fastapi.responses import FileResponse, JSONResponse, Response
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 
 from aao.capability_contracts import missing_contract_fields
 from aao.capability_evaluation import recommend
@@ -107,6 +108,16 @@ class PrincipalCredentialRequest(BaseModel):
 class GrantRequest(BaseModel):
     principal_id: str = Field(min_length=1)
     capability: str = Field(pattern=r"^(?:work\.(?:create|admit|review|progress)|project\.read|execution\.claim|execution\.reconcile|effect\.(?:propose|reconcile)|evidence\.submit)$")
+    expires_at: datetime | None = None
+
+    @field_validator("expires_at")
+    @classmethod
+    def future_timezone_aware_expiry(cls, value: datetime | None) -> datetime | None:
+        if value is not None and (value.tzinfo is None or value.utcoffset() is None):
+            raise ValueError("Grant expiry must include a timezone")
+        if value is not None and value <= datetime.now(UTC):
+            raise ValueError("Grant expiry must be in the future")
+        return value
 
 
 class CapabilityRequest(BaseModel):
@@ -378,19 +389,22 @@ def grant(project_id: str, payload: GrantRequest, _: str = Depends(require_ceo))
                 422, f"Capability requires a {required_kind} principal",
             )
         inserted = db.execute(
-            "INSERT INTO project_grants(principal_id,project_id,capability) VALUES (%s,%s,%s) "
+            "INSERT INTO project_grants(principal_id,project_id,capability,expires_at) "
+            "VALUES (%s,%s,%s,%s) "
             "ON CONFLICT DO NOTHING RETURNING project_id",
-            (payload.principal_id, project_id, payload.capability),
+            (payload.principal_id, project_id, payload.capability, payload.expires_at),
         ).fetchone()
         if inserted:
             audit(db, project_id, "grant.created",
-                  {"principal_id": payload.principal_id, "capability": payload.capability})
+                  {"principal_id": payload.principal_id, "capability": payload.capability,
+                   "expires_at": payload.expires_at.isoformat() if payload.expires_at else None})
     return JSONResponse(
         status_code=201 if inserted else 200,
         content={
             "project_id": project_id,
             "capability": payload.capability,
             "created": bool(inserted),
+            "expires_at": payload.expires_at.isoformat() if payload.expires_at else None,
         },
     )
 

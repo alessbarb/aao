@@ -282,6 +282,7 @@ def test_grant_creation_requires_active_principal_with_matching_kind(monkeypatch
         assert duplicate.status_code == 200, duplicate.text
         assert duplicate.json() == {
             "project_id": project, "capability": "work.create", "created": False,
+            "expires_at": None,
         }
         with connect_postgres() as db:
             event_count = db.execute(
@@ -519,6 +520,8 @@ def test_grant_revocation_serializes_after_authorized_transaction(monkeypatch):
 )
 def test_grant_expiring_while_lock_waiting_is_denied(monkeypatch):
     """A grant is checked against wall-clock time after waiting for its row lock."""
+    from datetime import UTC, datetime, timedelta
+
     from fastapi import HTTPException
 
     from aao.postgresql_connection import connect_postgres
@@ -538,14 +541,14 @@ def test_grant_expiring_while_lock_waiting_is_denied(monkeypatch):
         project = client.post("/v1/projects", headers=ceo, json={
             "name": f"Grant expiry {uuid4()}", "mandate_id": mandate,
         }).json()["id"]
-        assert client.post(f"/v1/projects/{project}/grants", headers=ceo, json={
-            "principal_id": agent_id, "capability": "work.create",
-        }).status_code == 201
-        with connect_postgres() as setup:
-            setup.execute(
-                "UPDATE project_grants SET expires_at=clock_timestamp()+interval '1 second' "
-                "WHERE project_id=%s AND principal_id=%s AND capability='work.create'", (project, agent_id),
-            )
+        expiry = datetime.now(UTC) + timedelta(seconds=1)
+        grant_response = client.post(f"/v1/projects/{project}/grants", headers=ceo, json={
+            "principal_id": agent_id,
+            "capability": "work.create",
+            "expires_at": expiry.isoformat(),
+        })
+        assert grant_response.status_code == 201
+        assert grant_response.json()["expires_at"] == expiry.isoformat()
 
         def check_grant():
             try:

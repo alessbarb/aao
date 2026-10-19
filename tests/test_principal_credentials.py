@@ -54,12 +54,30 @@ def test_individual_credentials_require_explicit_known_dev_environment(
 
 
 def test_grant_contract_accepts_execution_capabilities_only_as_exact_values():
+    from datetime import UTC, datetime, timedelta
+
     from pydantic import ValidationError
 
     from aao.work_management_api import GrantRequest
 
     grant = GrantRequest(principal_id="agent-1", capability="execution.claim")
     assert grant.capability == "execution.claim"
+    expiry = datetime.now(UTC) + timedelta(hours=4)
+    assert GrantRequest(
+        principal_id="agent-1", capability="execution.claim", expires_at=expiry,
+    ).expires_at == expiry
+    with pytest.raises(ValidationError, match="timezone"):
+        GrantRequest(
+            principal_id="agent-1",
+            capability="execution.claim",
+            expires_at=datetime.now(),
+        )
+    with pytest.raises(ValidationError, match="future"):
+        GrantRequest(
+            principal_id="agent-1",
+            capability="execution.claim",
+            expires_at=datetime.now(UTC) - timedelta(seconds=1),
+        )
     assert GrantRequest(
         principal_id="auditor-1", capability="execution.reconcile"
     ).capability == "execution.reconcile"
