@@ -38,3 +38,18 @@ def test_control_center_has_explicit_ephemeral_development_authentication():
     assert "window.prompt" not in page
     assert "localStorage" not in page
     assert "sessionStorage" not in page
+
+
+def test_reader_session_denial_clears_sensitive_views_and_prevents_stale_login():
+    with TestClient(app) as client:
+        response = client.get("/")
+    assert response.status_code == 200
+    page = response.text
+    assert "function clearReaderSession()" in page
+    assert 'projects=[];selectedProject=null;board=[];detail=null;activity=[];selectedTask=null' in page
+    assert 'readerToken=null;readerIdentity="AGENT"' in page
+    assert 'if(response.status===401||response.status===403){\n        clearReaderSession();' in page
+    assert 'content.replaceChildren(empty("La sesión perdió autorización.' in page
+    assert 'if(readerToken!==token)throw new Error(' in page
+    assert 'catch(err=>{clearReaderSession();setMessage(' in page
+    assert 'disconnectButton.addEventListener("click",()=>{clearReaderSession();render();' in page
