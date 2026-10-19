@@ -28,7 +28,20 @@
     const labels={INBOX:"Entrada",READY:"Preparado",IN_PROGRESS:"En curso",IN_REVIEW:"Revisión",VERIFIED:"Verificado",DONE:"Completado"};
     const project=document.querySelector("#project"),board=document.querySelector("#board"),message=document.querySelector("#message");
     function node(tag,text,cls){const e=document.createElement(tag);e.textContent=text;if(cls)e.className=cls;return e}
-    async function json(url){const r=await fetch(url,{credentials:"same-origin"});if(!r.ok)throw new Error("HTTP "+r.status);return r.json()}
+    // Development-only: CEO token stays in tab memory (never URL or localStorage).
+    let ceoToken=null;
+    async function json(url){
+      let headers=ceoToken?{"X-CEO-Token":ceoToken}:{};
+      let r=await fetch(url,{credentials:"same-origin",headers});
+      if(r.status===403 && !ceoToken){
+        const supplied=window.prompt("Token CEO de desarrollo para consultar PostgreSQL:");
+        if(!supplied)throw new Error("Se requiere token CEO para consultar proyectos");
+        ceoToken=supplied;
+        r=await fetch(url,{credentials:"same-origin",headers:{"X-CEO-Token":ceoToken}});
+      }
+      if(!r.ok)throw new Error("HTTP "+r.status);
+      return r.json()
+    }
     async function loadProjects(){
       const projects=await json("/v1/projects"); const previous=project.value;
       project.replaceChildren();
