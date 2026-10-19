@@ -4,7 +4,7 @@ Authentication must derive principal identity from a trusted verifier, never
 from user-supplied headers or agent-generated text.
 """
 from dataclasses import dataclass
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 
 @dataclass(frozen=True)
@@ -27,7 +27,7 @@ def has_capability(principal: Principal, project_id: str,
                    *, now: datetime | None = None) -> bool:
     if not principal.active or not project_id or not capability:
         return False
-    at = now or datetime.now(timezone.utc)
+    at = now or datetime.now(UTC)
     if at.tzinfo is None:
         raise ValueError("Authorization time must be timezone-aware")
     for grant in grants:
