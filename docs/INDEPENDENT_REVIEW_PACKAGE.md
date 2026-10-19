@@ -8,6 +8,9 @@ were added after the implementation candidate.
 
 This is a prepared package for a qualified independent reviewer. It is not
 itself the requested independent review and does not claim formal acceptance.
+The current review vehicle is the [draft GitHub PR #2](https://github.com/alessbarb/aao/pull/2);
+the PR head binds the exact code and package checkout for each review revision.
+No formal reviewer has been assigned yet.
 
 ## Review questions
 
