@@ -14,3 +14,21 @@ Before adoption: add trusted credential provisioning, per-principal grants,
 request-level principal binding, project isolation tests, revocation and
 independence proofs, and migration integration validation. Do not enable
 external-effect execution.
+
+## First API adoption
+
+`POST /v1/work/{id}/reviews` now additionally accepts an individually
+provisioned `X-Auditor-Token` and resolves the reviewer identity from the
+database, never from a client-provided reviewer ID. The project-specific
+`work.review` grant is still required. An invalid individual token is denied;
+the shared `X-Review-Token` remains supported **only as a transitional
+development compatibility route**, and must be removed before production.
+
+To validate locally, apply migration `005_principal_credentials.sql` to
+the isolated `aao_test` database (and `aao_dev` when ready), then run:
+`AAO_ENV=test AAO_ENV_FILE=.env.test python -m pytest -q`.
+
+Credentials must be generated locally and never copied into source, logs,
+messages or documentation. Provisioning and rotation need a governed
+administrative workflow; do not manually insert production credentials.
+No execution authority is granted by authentication alone.
