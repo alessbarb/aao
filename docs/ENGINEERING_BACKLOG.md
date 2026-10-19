@@ -75,9 +75,10 @@ amendment or CEO-confirmed constitutional rule.
    verification and independent review remain open. PostgreSQL schedules verify
    both execution-reconciliation dispositions commit before concurrent auditor
    credential revocation, and both orderings of `execution.reconcile` grant
-   revocation against `MARK_FAILED` reconciliation. Equivalent
-   `effect.reconcile` grant-revocation schedules, evidence-reference
-   verification, and hostile schedules remain open.
+   revocation against `MARK_FAILED` reconciliation. Both orderings of
+   `effect.reconcile` grant deletion against proposal rejection are also
+   covered. Evidence-reference verification and hostile schedules remain
+   open.
 4. Lease expiry is now computed and checked by PostgreSQL clock. Integration
    tests prove delayed completion is rejected after expiry during a queue-row
    lock wait and run three competing completion/quarantine schedules, all

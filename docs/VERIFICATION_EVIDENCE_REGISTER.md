@@ -598,3 +598,21 @@ coverage, independent review, or M2 acceptance.
 - This is bounded evidence for `execution.reconcile` grant deletion and one
   disposition, not coverage of `effect.reconcile`, all dispositions, hostile
   schedules, independent security review, or M2 acceptance.
+
+## Effect reconciliation serializes with grant revocation — 2026-10-19
+
+- Code revision: `03bf547e6db60de7b3dd60ec392862dd4faa68d6` on
+  `feat/aao-m0-foundation`.
+- The disposable-PostgreSQL effect workflow now observes both
+  `effect.reconcile` grant-deletion orderings. With rejection at its journal
+  write, deletion is observed waiting on that operation and the rejection
+  commits first. With deletion queued first on the grant row, the auditor's
+  grant lookup is observed waiting on the revoker; deletion commits, rejection
+  is denied, and the effect remains `PROPOSED`. No external effect is invoked.
+- The focused workflow test passed four consecutive runs. On this exact code
+  revision, compileall, Ruff, the full explicitly disposable PostgreSQL suite
+  (**69 passed, 0 skipped, 0 warnings** under `-W error`), `pip check`, and
+  `git diff --check` passed. CI was not awaited per operator direction.
+- This proves selected controlled schedules for both reconciliation grants,
+  not hostile/exhaustive scheduling, evidence-reference validation, formal
+  independent review, or M2 acceptance.
