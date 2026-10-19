@@ -287,6 +287,97 @@ def test_individual_agent_scoped_creation_and_revocation(monkeypatch):
     not os.getenv("AAO_TEST_POSTGRES_URL") or os.getenv("AAO_TEST_DB_DISPOSABLE") != "yes",
     reason="Explicit disposable PostgreSQL database required",
 )
+def test_work_creation_serializes_with_project_grant_revocation(monkeypatch):
+    """An admitted write holds its grant until its work row commits."""
+    from aao.postgresql_connection import connect_postgres
+    from aao.work_management_api import app
+
+    monkeypatch.setenv("AAO_POSTGRES_URL", os.environ["AAO_TEST_POSTGRES_URL"])
+    monkeypatch.setenv("AAO_CEO_TOKEN", "work-grant-race-ceo")
+    ceo = {"X-CEO-Token": "work-grant-race-ceo"}
+    identity = "agent-grant-race-" + str(uuid4())
+    with TestClient(app) as client:
+        issued = client.post("/v1/principals/credentials", headers=ceo, json={
+            "principal_id": identity, "kind": "AGENT",
+        })
+        assert issued.status_code == 201, issued.text
+        worker = {"X-Agent-Token": issued.json()["token"]}
+        mid = client.post("/v1/mandates", headers=ceo, json={
+            "title": "Grant race " + str(uuid4()), "objective": "Protected write ordering",
+        }).json()["id"]
+        assert client.post(f"/v1/mandates/{mid}/confirm", headers=ceo).status_code == 200
+        project = client.post("/v1/projects", headers=ceo, json={
+            "name": "Grant race", "mandate_id": mid,
+        }).json()["id"]
+        grant_url = f"/v1/projects/{project}/grants/{identity}/work.create"
+        assert client.post(f"/v1/projects/{project}/grants", headers=ceo, json={
+            "principal_id": identity, "capability": "work.create",
+        }).status_code == 201
+
+        payload = {"title": "Serialized work", "author_id": "ignored",
+                   "acceptance_criteria": ["write completes before revocation"]}
+        with ThreadPoolExecutor(max_workers=2) as pool, connect_postgres() as blocker:
+            blocker.execute("LOCK TABLE work_items IN ACCESS EXCLUSIVE MODE")
+            creating = pool.submit(
+                client.post, f"/v1/projects/{project}/work",
+                headers=worker, json=payload,
+            )
+            deadline = time.monotonic() + 3
+            protected_pid = None
+            while time.monotonic() < deadline:
+                with connect_postgres() as observer:
+                    row = observer.execute(
+                        "SELECT pid FROM pg_stat_activity "
+                        "WHERE query LIKE 'INSERT INTO work_items%' "
+                        "AND wait_event_type='Lock' LIMIT 1",
+                    ).fetchone()
+                    protected_pid = row[0] if row else None
+                if protected_pid:
+                    break
+                time.sleep(0.01)
+            assert protected_pid, "work insertion did not reach the controlled table-lock wait"
+
+            revoking = pool.submit(client.delete, grant_url, headers=ceo)
+            deadline = time.monotonic() + 3
+            serialized = False
+            while time.monotonic() < deadline:
+                with connect_postgres() as observer:
+                    row = observer.execute(
+                        "SELECT pid FROM pg_stat_activity "
+                        "WHERE query LIKE 'DELETE FROM project_grants%' "
+                        "AND wait_event_type='Lock' LIMIT 1",
+                    ).fetchone()
+                    if row:
+                        serialized = observer.execute(
+                            "SELECT %s = ANY(pg_blocking_pids(%s))",
+                            (protected_pid, row[0]),
+                        ).fetchone()[0]
+                if serialized:
+                    break
+                time.sleep(0.01)
+            assert serialized, "grant revocation was not blocked by the protected write"
+            assert not creating.done()
+            assert not revoking.done()
+
+        created = creating.result(timeout=3)
+        revoked = revoking.result(timeout=3)
+        assert created.status_code == 201, created.text
+        assert revoked.status_code == 204, revoked.text
+        with connect_postgres() as db:
+            assert db.execute(
+                "SELECT 1 FROM work_items WHERE id=%s", (created.json()["id"],)
+            ).fetchone()
+            assert not db.execute(
+                "SELECT 1 FROM project_grants WHERE project_id=%s "
+                "AND principal_id=%s AND capability='work.create'",
+                (project, identity),
+            ).fetchone()
+
+
+@pytest.mark.skipif(
+    not os.getenv("AAO_TEST_POSTGRES_URL") or os.getenv("AAO_TEST_DB_DISPOSABLE") != "yes",
+    reason="Explicit disposable PostgreSQL database required",
+)
 def test_individual_agent_claim_and_revocation(monkeypatch):
     from aao.execution_queue import ExecutionConflict, claim, complete, state
     from aao.postgresql_connection import connect_postgres
