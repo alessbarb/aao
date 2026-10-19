@@ -26,10 +26,10 @@ or `[BLOCKED]` labels below as live issue statuses.
    behind a protected authorization transaction and expiry during lock wait;
    an AGENT authentication lock also serializes with token rotation. A
    controlled PostgreSQL integration test proves project-grant deletion waits
-   for an HTTP work-creation transaction that already holds that grant. Still
-   required: repeated/adversarial schedules, other business mutation and queue
-   claim versus grant-revocation serialization. Still required: completion
-   races against revocation/rotation, repeated/adversarial schedules, and
+   for an HTTP work-creation transaction that already holds that grant, and
+   queue claim and completion each serialize before concurrent deletion of the
+   execution grant. Still required: repeated/adversarial schedules across the
+   remaining operations, credential-revocation races, and
    review of long-running transaction expiry semantics.
 3. **Implemented in candidate code and locally validated:** execution/effect
    reconciliation derives the reviewer from a locked individual AUDITOR

@@ -315,3 +315,18 @@ compileall, Ruff, `pip check`, and `git diff --check` clean. GitHub Actions run
 `39255590963` passed on the same code SHA. This validates one claim/revocation schedule only; it does
 not establish behavior for every queue operation, credential revocation, or
 hostile production concurrency.
+
+## Execution completion versus grant revocation
+
+The new integration schedule claims an inert execution, then holds an
+`ACCESS EXCLUSIVE` lock on `execution_journal` so completion pauses at its
+journal insert after locking the execution, active project, AGENT credential,
+and `execution.claim` grant. The actual CEO grant-revocation route is observed
+waiting on that transaction. Releasing the lock allows completion to commit
+before revocation; afterward, the test confirms `SUCCEEDED` and verifies another
+completion attempt is denied for the missing grant. Five consecutive local
+reruns passed; the full suite passed **56 tests**, and compileall, Ruff,
+`pip check`, and `git diff --check` were clean. CI has not yet run for this
+change. This is one controlled claim-completion/revocation ordering and does
+not prove credential revocation races, all queue operations, or hostile
+production schedules.

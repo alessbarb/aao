@@ -331,3 +331,93 @@ def test_execution_claim_serializes_with_grant_revocation(monkeypatch):
         assert state(execution_id)["status"] == "RUNNING"
         with pytest.raises(ExecutionConflict, match="execution claim grant required"):
             claim(identity, agent_credential=token, project_id=project)
+
+
+@pytest.mark.skipif(
+    not os.getenv("AAO_TEST_POSTGRES_URL") or os.getenv("AAO_TEST_DB_DISPOSABLE") != "yes",
+    reason="Explicit disposable PostgreSQL database required",
+)
+def test_execution_completion_serializes_with_grant_revocation(monkeypatch):
+    from aao.execution_queue import ExecutionConflict, claim, complete, state
+    from aao.postgresql_connection import connect_postgres
+    from aao.work_management_api import app
+
+    monkeypatch.setenv("AAO_POSTGRES_URL", os.environ["AAO_TEST_POSTGRES_URL"])
+    monkeypatch.setenv("AAO_CEO_TOKEN", "complete-revoke-ceo")
+    monkeypatch.setenv("AAO_SANDBOX_QUEUE_ENABLED", "true")
+    ceo = {"X-CEO-Token": "complete-revoke-ceo"}
+    identity = "complete-revoke-" + str(uuid4())
+    with TestClient(app) as client:
+        issued = client.post("/v1/principals/credentials", headers=ceo, json={
+            "principal_id": identity, "kind": "AGENT",
+        })
+        assert issued.status_code == 201, issued.text
+        token = issued.json()["token"]
+        worker = {"X-Agent-Token": token}
+        mandate = client.post("/v1/mandates", headers=ceo, json={
+            "title": "Complete revoke " + str(uuid4()), "objective": "Serialize completion and revocation",
+        }).json()["id"]
+        assert client.post(f"/v1/mandates/{mandate}/confirm", headers=ceo).status_code == 200
+        project = client.post("/v1/projects", headers=ceo, json={
+            "name": "Complete revoke", "mandate_id": mandate,
+        }).json()["id"]
+        for capability in ("work.create", "work.admit", "execution.claim"):
+            response = client.post(f"/v1/projects/{project}/grants", headers=ceo, json={
+                "principal_id": identity, "capability": capability,
+            })
+            assert response.status_code == 201, response.text
+        work = client.post(f"/v1/projects/{project}/work", headers=worker, json={
+            "title": "Completion race", "author_id": identity, "acceptance_criteria": ["inert"],
+        }).json()["id"]
+        assert client.post(f"/v1/work/{work}/admit", headers=worker).status_code == 200
+        staged = client.post(f"/v1/work/{work}/stage-inert", headers=worker)
+        assert staged.status_code == 202, staged.text
+        execution_id = staged.json()["execution_id"]
+        lease = claim(identity, agent_credential=token, project_id=project)
+        assert lease is not None and lease["execution_id"] == execution_id
+
+        with ThreadPoolExecutor(max_workers=2) as pool, connect_postgres() as blocker:
+            blocker.execute("LOCK TABLE execution_journal IN ACCESS EXCLUSIVE MODE")
+            completion_future = pool.submit(
+                complete, execution_id, lease["token"], identity,
+                {"ok": True}, agent_credential=token,
+            )
+            deadline = time.monotonic() + 5
+            completion_waiting = False
+            while time.monotonic() < deadline:
+                with connect_postgres() as observer:
+                    completion_waiting = observer.execute(
+                        "SELECT EXISTS (SELECT 1 FROM pg_stat_activity "
+                        "WHERE query LIKE 'INSERT INTO execution_journal%' "
+                        "AND wait_event_type='Lock')"
+                    ).fetchone()[0]
+                if completion_waiting:
+                    break
+                time.sleep(0.01)
+            assert completion_waiting, "completion did not reach its journal write after authorization"
+
+            revoke_future = pool.submit(
+                client.delete,
+                f"/v1/projects/{project}/grants/{identity}/execution.claim",
+                headers=ceo,
+            )
+            deadline = time.monotonic() + 5
+            revoke_waiting = False
+            while time.monotonic() < deadline:
+                with connect_postgres() as observer:
+                    revoke_waiting = observer.execute(
+                        "SELECT EXISTS (SELECT 1 FROM pg_stat_activity "
+                        "WHERE query LIKE 'DELETE FROM project_grants%' "
+                        "AND wait_event_type='Lock')"
+                    ).fetchone()[0]
+                if revoke_waiting:
+                    break
+                time.sleep(0.01)
+            assert revoke_waiting, "grant revocation did not wait for in-flight completion"
+
+        assert completion_future.result(timeout=5) is None
+        revoked = revoke_future.result(timeout=5)
+        assert revoked.status_code == 204, revoked.text
+        assert state(execution_id)["status"] == "SUCCEEDED"
+        with pytest.raises(ExecutionConflict, match="Project execution claim grant revoked"):
+            complete(execution_id, lease["token"], identity, {"ok": True}, agent_credential=token)
