@@ -338,6 +338,17 @@ def test_repository_check_approval_requires_successful_result(
                 )
         assert client.post(f"/v1/work/{work}/progress", headers=agent).json()["status"] == "IN_REVIEW"
 
+        publication = client.post(f"/v1/work/{work}/publish-pull-request", headers=agent, json={
+            "url": "https://github.com/alessbarb/aao/pull/6",
+            "candidate_sha": "a" * 40,
+        })
+        if conclusion == "success" and not tamper_result:
+            assert publication.status_code == 201, publication.text
+            assert publication.json()["candidate_sha"] == "a" * 40
+            assert publication.json()["remote_status_verified"] is False
+        else:
+            assert publication.status_code == 409, publication.text
+
         approval = client.post(f"/v1/work/{work}/reviews", headers=auditor, json={
             "decision": "APPROVE", "evidence": ["sha256:failed-check-result"],
         })

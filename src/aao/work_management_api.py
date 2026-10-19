@@ -729,11 +729,20 @@ def publish_pull_request(work_id: str, payload: PullRequestPublicationRequest,
         require_grant(db, principal, project_id, "work.progress")
         if status != "IN_REVIEW":
             raise HTTPException(409, "Work must be in review before PR publication")
-        result = db.execute("SELECT result_json FROM execution_queue WHERE work_id=%s "
+        result = db.execute("SELECT input_json,result_json FROM execution_queue WHERE work_id=%s "
                             "AND status='SUCCEEDED' ORDER BY created_at DESC LIMIT 1",
                             (work_id,)).fetchone()
-        if not result or result[0].get("conclusion") != "success" \
-                or result[0].get("candidate_sha") != payload.candidate_sha:
+        if not result:
+            raise HTTPException(409, "Successful repository check for the exact candidate SHA required")
+        input_data, check_result = result
+        if (not isinstance(input_data, dict)
+                or input_data.get("type") != "aao.repository-check.v1"
+                or input_data.get("check_id") != "core-unit"
+                or not isinstance(check_result, dict)
+                or check_result.get("kind") != "aao.repository-check.v1"
+                or check_result.get("check_id") != input_data.get("check_id")
+                or check_result.get("conclusion") != "success"
+                or check_result.get("candidate_sha") != payload.candidate_sha):
             raise HTTPException(409, "Successful check for the exact candidate SHA required")
         existing = db.execute("SELECT id FROM events WHERE subject_id=%s "
                               "AND kind='work.pull_request_published'", (work_id,)).fetchone()
