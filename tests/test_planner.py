@@ -1,11 +1,15 @@
 from aao.planner import Admission, decide_admission
 
-
-BASE = dict(
-    project_active=True, mandate_confirmed=True, authorized=True,
-    dependencies_satisfied=True, capacity_available=True, within_budget=True,
-    residual_risk="low", emergency_stop=False,
-)
+BASE = {
+    "project_active": True,
+    "mandate_confirmed": True,
+    "authorized": True,
+    "dependencies_satisfied": True,
+    "capacity_available": True,
+    "within_budget": True,
+    "residual_risk": "low",
+    "emergency_stop": False,
+}
 
 
 def test_admission_permits_only_fully_authorized_work():
