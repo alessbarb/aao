@@ -18,6 +18,7 @@ from fastapi import Depends, FastAPI, Header, HTTPException
 from fastapi.responses import FileResponse, JSONResponse, Response
 from pydantic import BaseModel, Field
 
+from aao.capability_contracts import missing_contract_fields
 from aao.capability_evaluation import recommend
 from aao.planner import Admission, decide_admission
 from aao.review import evaluate_review
@@ -515,6 +516,11 @@ def register_capability(
     """Record project-owned capability metadata, not an executable authorization."""
     if not payload.provenance or not payload.contract:
         raise HTTPException(422, "Capability provenance and contract are required")
+    missing_fields = missing_contract_fields(payload.capability_type, payload.contract)
+    if missing_fields:
+        raise HTTPException(
+            422, "Capability contract is incomplete: " + ", ".join(sorted(missing_fields)),
+        )
     if not payload.tests or not payload.evidence:
         raise HTTPException(422, "At least one test reference and evidence reference are required")
     with tx() as db:
