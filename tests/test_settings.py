@@ -7,7 +7,7 @@ from aao import environment_settings
 
 
 def test_selected_env_file_does_not_override_process_secrets(tmp_path, monkeypatch):
-    monkeypatch.setattr(settings, "ROOT", tmp_path)
+    monkeypatch.setattr(environment_settings, "ROOT", tmp_path)
     (tmp_path / ".env.local").write_text("AAO_CEO_TOKEN=from-file\n")
     monkeypatch.setenv("AAO_ENV", "development")
     monkeypatch.setenv("AAO_CEO_TOKEN", "from-process")
@@ -17,7 +17,7 @@ def test_selected_env_file_does_not_override_process_secrets(tmp_path, monkeypat
 
 
 def test_explicit_test_file(tmp_path, monkeypatch):
-    monkeypatch.setattr(settings, "ROOT", tmp_path)
+    monkeypatch.setattr(environment_settings, "ROOT", tmp_path)
     (tmp_path / ".env.test").write_text("AAO_TEST_DB_DISPOSABLE=no\n")
     monkeypatch.setenv("AAO_ENV_FILE", ".env.test")
     monkeypatch.setenv("AAO_ENV", "test")
@@ -25,7 +25,7 @@ def test_explicit_test_file(tmp_path, monkeypatch):
 
 
 def test_arbitrary_file_is_refused(tmp_path, monkeypatch):
-    monkeypatch.setattr(settings, "ROOT", tmp_path)
+    monkeypatch.setattr(environment_settings, "ROOT", tmp_path)
     monkeypatch.setenv("AAO_ENV", "development")
     monkeypatch.setenv("AAO_ENV_FILE", "../private.env")
     with pytest.raises(RuntimeError, match="AAO_ENV_FILE"):
@@ -33,7 +33,7 @@ def test_arbitrary_file_is_refused(tmp_path, monkeypatch):
 
 
 def test_production_never_loads_dotenv(tmp_path, monkeypatch):
-    monkeypatch.setattr(settings, "ROOT", tmp_path)
+    monkeypatch.setattr(environment_settings, "ROOT", tmp_path)
     (tmp_path / ".env.local").write_text("AAO_WORK_TOKEN=from-file\n")
     monkeypatch.delenv("AAO_WORK_TOKEN", raising=False)
     monkeypatch.setenv("AAO_ENV", "production")
