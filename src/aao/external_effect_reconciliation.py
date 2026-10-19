@@ -29,7 +29,7 @@ def reject_unexecuted_proposal(effect_id: str, *, reviewer_id: str, evidence: li
         grant = db.execute(
             "SELECT 1 FROM project_grants WHERE principal_id=%s AND project_id=%s "
             "AND capability='effect.reconcile' "
-            "AND (expires_at IS NULL OR expires_at > now())",
+            "AND (expires_at IS NULL OR expires_at > clock_timestamp()) FOR SHARE",
             (reviewer_id, effect[2]),
         ).fetchone()
         if not grant:

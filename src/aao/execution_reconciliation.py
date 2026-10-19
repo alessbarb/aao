@@ -32,7 +32,7 @@ def reconcile(execution_id: str, *, reviewer_id: str, evidence: list[str],
         grant = db.execute(
             "SELECT 1 FROM project_grants WHERE principal_id=%s AND project_id=%s "
             "AND capability='execution.reconcile' "
-            "AND (expires_at IS NULL OR expires_at > now())",
+            "AND (expires_at IS NULL OR expires_at > clock_timestamp()) FOR SHARE",
             (reviewer_id, project_id),
         ).fetchone()
         if not grant:

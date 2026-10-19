@@ -54,7 +54,7 @@ def claim(worker_id: str, *, credential: str | None = None, project_id: str, sec
         grant = db.execute(
             "SELECT 1 FROM project_grants WHERE principal_id=%s AND project_id=%s "
             "AND capability='execution.claim' "
-            "AND (expires_at IS NULL OR expires_at > now())",
+            "AND (expires_at IS NULL OR expires_at > clock_timestamp()) FOR SHARE",
             (worker_id, project_id),
         ).fetchone()
         if not grant:
@@ -107,7 +107,7 @@ def complete(execution_id: str, token: str, worker_id: str, result: dict,
         grant = db.execute(
             "SELECT 1 FROM project_grants WHERE principal_id=%s AND project_id=%s "
             "AND capability='execution.claim' "
-            "AND (expires_at IS NULL OR expires_at > now())",
+            "AND (expires_at IS NULL OR expires_at > clock_timestamp()) FOR SHARE",
             (worker_id, str(execution[0])),
         ).fetchone()
         if not grant:

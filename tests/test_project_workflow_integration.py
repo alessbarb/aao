@@ -1,5 +1,7 @@
 """PostgreSQL integration tests, opt-in for explicitly disposable databases."""
 import os
+import time
+from concurrent.futures import ThreadPoolExecutor
 from uuid import uuid4
 
 import pytest
@@ -160,3 +162,120 @@ def test_project_reads_are_scoped_to_granted_worker(monkeypatch):
         assert client.get(f"/v1/projects/{allow}/board", headers=worker).status_code == 200
         assert client.get(f"/v1/projects/{deny}/board", headers=worker).status_code == 403
         assert client.get(f"/v1/projects/{deny}/board", headers=ceo).status_code == 200
+
+
+@pytest.mark.skipif(
+    not os.getenv("AAO_TEST_POSTGRES_URL") or os.getenv("AAO_TEST_DB_DISPOSABLE") != "yes",
+    reason="Explicit disposable PostgreSQL database required",
+)
+def test_grant_revocation_serializes_after_authorized_transaction(monkeypatch):
+    """An in-flight grant-checked transaction completes before CEO revocation."""
+    from aao.postgresql_connection import connect_postgres
+    from aao.work_management_api import app, require_grant
+
+    monkeypatch.setenv("AAO_POSTGRES_URL", os.environ["AAO_TEST_POSTGRES_URL"])
+    monkeypatch.setenv("AAO_CEO_TOKEN", "grant-race-ceo")
+    monkeypatch.setenv("AAO_WORK_TOKEN", "grant-race-worker")
+    ceo = {"X-CEO-Token": "grant-race-ceo"}
+    with TestClient(app) as client:
+        mandate = client.post("/v1/mandates", headers=ceo, json={
+            "title": f"Grant race {uuid4()}", "objective": "Test grant serialization",
+        }).json()["id"]
+        assert client.post(f"/v1/mandates/{mandate}/confirm", headers=ceo).status_code == 200
+        project = client.post("/v1/projects", headers=ceo, json={
+            "name": f"Grant race {uuid4()}", "mandate_id": mandate,
+        }).json()["id"]
+        assert client.post(f"/v1/projects/{project}/grants", headers=ceo, json={
+            "principal_id": "development-worker", "capability": "work.create",
+        }).status_code == 201
+
+        with ThreadPoolExecutor(max_workers=1) as pool, connect_postgres() as protected_db:
+            require_grant(protected_db, "development-worker", project, "work.create")
+            revoke = pool.submit(client.delete,
+                f"/v1/projects/{project}/grants/development-worker/work.create",
+                headers=ceo,
+            )
+            deadline = time.monotonic() + 5
+            waiting = False
+            while time.monotonic() < deadline:
+                with connect_postgres() as observer:
+                    waiting = observer.execute(
+                        "SELECT EXISTS (SELECT 1 FROM pg_stat_activity "
+                        "WHERE query LIKE 'DELETE FROM project_grants%' "
+                        "AND wait_event_type='Lock')"
+                    ).fetchone()[0]
+                if waiting:
+                    break
+                time.sleep(0.01)
+            assert waiting, "grant revocation did not wait for the protected transaction"
+
+        response = revoke.result(timeout=5)
+        assert response.status_code == 204, response.text
+        assert client.post(f"/v1/projects/{project}/work", headers={
+            "X-Work-Token": "grant-race-worker",
+        }, json={"title": "Must be denied", "author_id": "ignored",
+                "acceptance_criteria": ["denial"]}).status_code == 403
+
+
+@pytest.mark.skipif(
+    not os.getenv("AAO_TEST_POSTGRES_URL") or os.getenv("AAO_TEST_DB_DISPOSABLE") != "yes",
+    reason="Explicit disposable PostgreSQL database required",
+)
+def test_grant_expiring_while_lock_waiting_is_denied(monkeypatch):
+    """A grant is checked against wall-clock time after waiting for its row lock."""
+    from fastapi import HTTPException
+
+    from aao.postgresql_connection import connect_postgres
+    from aao.work_management_api import app, require_grant
+
+    monkeypatch.setenv("AAO_POSTGRES_URL", os.environ["AAO_TEST_POSTGRES_URL"])
+    monkeypatch.setenv("AAO_CEO_TOKEN", "grant-expiry-ceo")
+    ceo = {"X-CEO-Token": "grant-expiry-ceo"}
+    with TestClient(app) as client:
+        mandate = client.post("/v1/mandates", headers=ceo, json={
+            "title": f"Grant expiry {uuid4()}", "objective": "Test expiry after lock wait",
+        }).json()["id"]
+        assert client.post(f"/v1/mandates/{mandate}/confirm", headers=ceo).status_code == 200
+        project = client.post("/v1/projects", headers=ceo, json={
+            "name": f"Grant expiry {uuid4()}", "mandate_id": mandate,
+        }).json()["id"]
+        assert client.post(f"/v1/projects/{project}/grants", headers=ceo, json={
+            "principal_id": "development-worker", "capability": "work.create",
+        }).status_code == 201
+        with connect_postgres() as setup:
+            setup.execute(
+                "UPDATE project_grants SET expires_at=clock_timestamp()+interval '1 second' "
+                "WHERE project_id=%s AND principal_id='development-worker' "
+                "AND capability='work.create'", (project,),
+            )
+
+        def check_grant():
+            try:
+                with connect_postgres() as db:
+                    require_grant(db, "development-worker", project, "work.create")
+                return "allowed"
+            except HTTPException:
+                return "denied"
+
+        with ThreadPoolExecutor(max_workers=1) as pool, connect_postgres() as blocker:
+            blocker.execute(
+                "UPDATE project_grants SET expires_at=expires_at WHERE project_id=%s "
+                "AND principal_id='development-worker' AND capability='work.create'",
+                (project,),
+            )
+            check = pool.submit(check_grant)
+            deadline = time.monotonic() + 5
+            waiting = False
+            while time.monotonic() < deadline:
+                with connect_postgres() as observer:
+                    waiting = observer.execute(
+                        "SELECT EXISTS (SELECT 1 FROM pg_stat_activity "
+                        "WHERE query LIKE 'SELECT 1 FROM project_grants%' "
+                        "AND wait_event_type='Lock')"
+                    ).fetchone()[0]
+                if waiting:
+                    break
+                time.sleep(0.01)
+            assert waiting, "grant check did not wait for the held row lock"
+            time.sleep(1.1)
+        assert check.result(timeout=5) == "denied"

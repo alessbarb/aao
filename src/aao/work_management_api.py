@@ -15,7 +15,7 @@ from aao.environment_settings import load_local_env
 load_local_env()
 
 from fastapi import Depends, FastAPI, Header, HTTPException
-from fastapi.responses import FileResponse
+from fastapi.responses import FileResponse, Response
 from pydantic import BaseModel, Field
 
 from aao.planner import Admission, decide_admission
@@ -281,7 +281,8 @@ def projects(principal: str = Depends(read_principal)):
             rows = db.execute(
                 "SELECT p.id,p.name,p.state FROM projects p JOIN project_grants g ON g.project_id=p.id "
                 "WHERE g.principal_id=%s AND g.capability='project.read' "
-                "AND (g.expires_at IS NULL OR g.expires_at > now()) ORDER BY p.name,p.id",
+                "AND (g.expires_at IS NULL OR g.expires_at > clock_timestamp()) ORDER BY p.name,p.id "
+                "FOR SHARE OF g",
                 (principal,),
             ).fetchall()
         return [{"id": r[0], "name": r[1], "state": r[2]} for r in rows]
@@ -302,11 +303,35 @@ def grant(project_id: str, payload: GrantRequest, _: str = Depends(require_ceo))
     return {"project_id": project_id, "capability": payload.capability}
 
 
-def require_grant(db, principal: str, project_id: str, capability: str):
-    """Recheck individual identity under a row lock within the write transaction.
+@app.delete("/v1/projects/{project_id}/grants/{principal_id}/{capability}", status_code=204)
+def revoke_grant(
+    project_id: str,
+    principal_id: str,
+    capability: str,
+    _: str = Depends(require_ceo),
+):
+    """Revoke one project grant; row-locking protected operations serialize with this."""
+    with tx() as db:
+        if not db.execute("SELECT 1 FROM projects WHERE id=%s", (project_id,)).fetchone():
+            raise HTTPException(404, "Project not found")
+        deleted = db.execute(
+            "DELETE FROM project_grants WHERE project_id=%s AND principal_id=%s "
+            "AND capability=%s RETURNING principal_id",
+            (project_id, principal_id, capability),
+        ).fetchone()
+        if not deleted:
+            raise HTTPException(404, "Project grant not found")
+        audit(db, project_id, "grant.revoked",
+              {"principal_id": principal_id, "capability": capability})
+    return Response(status_code=204)
 
-    Revocation/rotation cannot commit between this check and transaction end.
-    Transitional development principals remain confined to the explicit dev gate.
+
+def require_grant(db, principal: str, project_id: str, capability: str):
+    """Recheck identity and hold its grant row through the protected transaction.
+
+    Credential and grant revocations cannot commit between these checks and
+    transaction end. Transitional development principals remain confined to
+    the explicit dev gate.
     """
     shared = {
         "development-worker": ("AGENT", {"work.create", "work.admit", "work.progress", "project.read"}),
@@ -326,7 +351,8 @@ def require_grant(db, principal: str, project_id: str, capability: str):
             raise HTTPException(403, "Individual principal invalid or revoked")
     if not db.execute(
         "SELECT 1 FROM project_grants WHERE principal_id=%s AND project_id=%s "
-        "AND capability=%s AND (expires_at IS NULL OR expires_at > now())", (principal, project_id, capability),
+        "AND capability=%s AND (expires_at IS NULL OR expires_at > clock_timestamp()) FOR SHARE",
+        (principal, project_id, capability),
     ).fetchone():
         raise HTTPException(403, "Project grant required")
 
