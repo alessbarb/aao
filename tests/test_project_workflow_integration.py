@@ -264,14 +264,15 @@ def test_postgres_review_is_separate_from_author_and_required_for_done(monkeypat
     reason="Explicit disposable PostgreSQL database required",
 )
 @pytest.mark.parametrize(
-    ("conclusion", "expected_detail"),
+    ("conclusion", "expected_detail", "tamper_result"),
     [
-        ("failure", "Repository check must succeed with a full candidate SHA before approval"),
-        ("success", "Approval disabled until independent identity and evidence verification exist"),
+        ("failure", "Repository check must succeed with a full candidate SHA before approval", False),
+        ("success", "Approval disabled until independent identity and evidence verification exist", False),
+        ("success", "Repository check must succeed with a full candidate SHA before approval", True),
     ],
 )
 def test_repository_check_approval_requires_successful_result(
-    monkeypatch, conclusion, expected_detail,
+    monkeypatch, conclusion, expected_detail, tamper_result,
 ):
     """Only a completed successful repository check can support approval."""
     from aao.execution_queue import claim, complete
@@ -325,6 +326,16 @@ def test_repository_check_approval_requires_successful_result(
             "candidate_sha": "a" * 40, "conclusion": conclusion,
             "exit_code": 0 if conclusion == "success" else 1,
         }, agent_credential=agent_token)
+        if tamper_result:
+            # Simulate corruption/bypass of the worker completion boundary;
+            # review must classify from immutable queued input, not result marker.
+            from aao.postgresql_connection import connect_postgres
+
+            with connect_postgres() as db:
+                db.execute(
+                    "UPDATE execution_queue SET result_json='{}'::jsonb WHERE id=%s",
+                    (lease["execution_id"],),
+                )
         assert client.post(f"/v1/work/{work}/progress", headers=agent).json()["status"] == "IN_REVIEW"
 
         approval = client.post(f"/v1/work/{work}/reviews", headers=auditor, json={
