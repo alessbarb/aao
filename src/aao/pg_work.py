@@ -188,12 +188,12 @@ def rotate_principal(principal_id: str, _: str = Depends(require_ceo)):
     token = secrets.token_urlsafe(32)
     with tx() as db:
         row = db.execute(
-            "UPDATE principal_credentials SET token_digest=%s,enabled=true "
-            "WHERE principal_id=%s RETURNING kind",
+            "UPDATE principal_credentials SET token_digest=%s "
+            "WHERE principal_id=%s AND enabled=true RETURNING kind",
             (digest_token(token), principal_id),
         ).fetchone()
         if not row:
-            raise HTTPException(404, "Principal credential not found")
+            raise HTTPException(404, "Active principal credential not found")
         audit(db, str(uuid4()), "principal.credential.rotated",
               {"principal_id": principal_id, "kind": row[0]})
     return {"principal_id": principal_id, "kind": row[0], "token": token}
