@@ -5,13 +5,13 @@
 Project-list and board reads revalidate the individual credential and lock
 the matching project grant under `FOR SHARE`. CEO grant deletion is audited in
 the same transaction and waits for protected transactions holding the grant
-row lock. Integration tests demonstrate both revocation serialization and
-expiry while blocked behind a row update at revision
-`78fd000e65388dbee9fc0aefaa58391ba9541d7c`; see
-`VERIFICATION_EVIDENCE_REGISTER.md`. This is bounded engineering evidence,
-not a complete concurrency proof. Legacy worker registration, provisional CEO
-bearer, untrusted reconciliation reviewer identity and absent independent
-security review remain open. M2 is not accepted.
+row lock. Integration tests demonstrate revocation serialization, expiry
+while blocked behind a row update, and auditor credential locking. Shared
+worker/reviewer authentication is no longer accepted by the PostgreSQL API;
+execution migration 006 removed the legacy worker registration table. These
+are bounded engineering results, not a complete concurrency proof. Provisional
+CEO bearer, absent independent security review and recovery/concurrency gates
+remain open. M2 is not accepted.
 
 ## Implemented behavior (not accepted as M2)
 
@@ -23,9 +23,9 @@ inside the protected transaction. Execution claim/completion and internal
 reconciliation checks also lock their grant rows. CEO grant deletion is the
 current revocation operation and serializes behind those locks. Grant expiry
 checks use database `clock_timestamp()` rather than transaction-start `now()`.
-Review requires AUDITOR; other currently implemented grant capabilities
-require AGENT. Shared development fallback remains limited to explicitly
-allowed development identities and capabilities.
+Review and reconciliation require AUDITOR; other currently implemented grant
+capabilities require AGENT. SQLite prototype shared tokens do not authenticate
+the PostgreSQL API.
 
 ## Boundaries and remaining risks
 
@@ -34,7 +34,9 @@ allowed development identities and capabilities.
   denied. Another test verifies denial when a grant expires while the check is
   blocked behind a row lock. These tests are single controlled schedules, not
   repeated adversarial stress tests.
-- The queue still has legacy worker registrations. Its individual principal path already locks credential rows, but legacy retirement is outstanding.
+- Migration 006 removes the legacy worker registration table after transferring
+  its identities. The migration and identity handoff still warrant independent
+  review and collision/recovery testing.
 - Concurrent credential rotation/revocation, grant revocation against queue
   claim/completion, expiry across long-running operations, and repeated
   adversarial schedules remain to be tested.

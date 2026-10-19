@@ -57,7 +57,10 @@ contra la base explícitamente desechable indicada por `.env.test` sobre
 `ca1857e8fa387f6834540b70f21bf11202cfc8e3`: **52 passed, 0 skipped, 0
 warnings**. Ruff informó `All checks passed!`, pip check informó `No broken
 requirements found`, y `git diff --check` terminó sin errores. Esta evidencia
-es local y aún no incluye CI ni revisión independiente.
+es local y la ejecución GitHub Actions `39252871118` terminó `success` en el
+SHA final `7f7fd63483f5dc467a464db67ef87022e7254dff`. CI valida compileall,
+Ruff, migraciones contra PostgreSQL desechable, integración y `pip check`.
+No es revisión independiente ni aceptación M2.
 
 Tras las 43 pruebas confirmadas, se incorporaron las rutas individuales de
 lectura de proyectos/tableros y el bloqueo de tokens compartidos de workers y

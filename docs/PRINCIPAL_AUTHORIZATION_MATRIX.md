@@ -1,7 +1,7 @@
 # Principal authorization matrix
 
 **Scope:** current development API and internal execution/reconciliation
-operations, updated in the shared-auth retirement worktree based on `a47c853`. This is an
+operations, updated for commit `ca1857e`. This is an
 engineering inventory, not a production authorization policy or independent
 security review. The PostgreSQL API and its internal helpers are not a claim of
 M2 acceptance.
