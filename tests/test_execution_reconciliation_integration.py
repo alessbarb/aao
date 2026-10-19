@@ -462,11 +462,11 @@ def test_effect_proposal_serializes_with_agent_credential_revocation(monkeypatch
                 with connect_postgres() as observer:
                     row = observer.execute(
                         "SELECT pid FROM pg_stat_activity WHERE query LIKE %s "
-                        "AND wait_event_type='Lock' LIMIT 1", (pattern,),
+                        "AND wait_event_type='Lock' "
+                        "AND %s=ANY(pg_blocking_pids(pid)) LIMIT 1",
+                        (pattern, blocker_pid),
                     ).fetchone()
-                    if row and observer.execute(
-                        "SELECT %s=ANY(pg_blocking_pids(%s))", (blocker_pid, row[0]),
-                    ).fetchone()[0]:
+                    if row:
                         return row[0]
                 time.sleep(0.01)
             raise AssertionError(f"query did not wait on expected lock: {pattern}")
@@ -501,6 +501,35 @@ def test_effect_proposal_serializes_with_agent_credential_revocation(monkeypatch
         })
         assert regrant.status_code == 201, regrant.text
 
+        # Reverse the order: a queued grant deletion obtains the row before a
+        # competing proposal's FOR SHARE check, so the proposal must fail.
+        with ThreadPoolExecutor(max_workers=2) as pool, connect_postgres() as blocker:
+            blocker_pid = blocker.execute("SELECT pg_backend_pid()").fetchone()[0]
+            blocker.execute(
+                "SELECT project_id FROM project_grants WHERE principal_id=%s "
+                "AND project_id=%s AND capability='effect.propose' FOR UPDATE",
+                (worker_id, project),
+            )
+            revoke_grant_future = pool.submit(
+                client.delete,
+                f"/v1/projects/{project}/grants/{worker_id}/effect.propose",
+                headers=ceo,
+            )
+            revoker_pid = wait_for_blocked_query(
+                "DELETE FROM project_grants%", blocker_pid,
+            )
+            proposal_future = pool.submit(make_proposal)
+            wait_for_blocked_query(
+                "SELECT 1 FROM project_grants%", revoker_pid,
+            )
+        assert revoke_grant_future.result(timeout=5).status_code == 204
+        with pytest.raises(EffectConflict, match="proposal grant required"):
+            proposal_future.result(timeout=5)
+        regrant = client.post(f"/v1/projects/{project}/grants", headers=ceo, json={
+            "principal_id": worker_id, "capability": "effect.propose",
+        })
+        assert regrant.status_code == 201, regrant.text
+
         with ThreadPoolExecutor(max_workers=2) as pool, connect_postgres() as blocker:
             blocker_pid = blocker.execute("SELECT pg_backend_pid()").fetchone()[0]
             blocker.execute(
@@ -522,3 +551,61 @@ def test_effect_proposal_serializes_with_agent_credential_revocation(monkeypatch
         assert revoked.status_code == 200, revoked.text
         with pytest.raises(EffectConflict, match="credential required"):
             make_proposal()
+
+        # Exercise the inverse credential ordering with an independent AGENT:
+        # revocation queues first, then proposal waits and is denied.
+        second_worker_id = "proposal-worker-" + str(uuid4())
+        second_issued = client.post("/v1/principals/credentials", headers=ceo, json={
+            "principal_id": second_worker_id, "kind": "AGENT",
+        })
+        assert second_issued.status_code == 201, second_issued.text
+        second_credential = second_issued.json()["token"]
+        second_worker = {"X-Agent-Token": second_credential}
+        for capability in ("work.create", "work.admit", "execution.claim", "effect.propose"):
+            response = client.post(f"/v1/projects/{project}/grants", headers=ceo, json={
+                "principal_id": second_worker_id, "capability": capability,
+            })
+            assert response.status_code == 201, response.text
+        second_work = client.post(f"/v1/projects/{project}/work", headers=second_worker, json={
+            "title": "Reverse credential race", "author_id": second_worker_id,
+            "acceptance_criteria": ["revocation wins before proposal"],
+        }).json()["id"]
+        assert client.post(
+            f"/v1/work/{second_work}/admit", headers=second_worker,
+        ).status_code == 200
+        second_execution = client.post(
+            f"/v1/work/{second_work}/stage-inert", headers=second_worker,
+        ).json()["execution_id"]
+        second_lease = claim(
+            second_worker_id, agent_credential=second_credential, project_id=project,
+        )
+        assert second_lease and second_lease["execution_id"] == second_execution
+
+        def make_second_proposal():
+            return propose(
+                execution_id=second_execution, worker_id=second_worker_id,
+                lease_token=second_lease["token"],
+                agent_credential=second_credential,
+                idempotency_key="reverse-credential-" + str(uuid4()),
+                capability="test.inert", request={"kind": "test-only"},
+            )
+
+        with ThreadPoolExecutor(max_workers=2) as pool, connect_postgres() as blocker:
+            blocker_pid = blocker.execute("SELECT pg_backend_pid()").fetchone()[0]
+            blocker.execute(
+                "SELECT principal_id FROM principal_credentials WHERE principal_id=%s "
+                "FOR UPDATE", (second_worker_id,),
+            )
+            revoke_future = pool.submit(
+                client.post, f"/v1/principals/{second_worker_id}/revoke", headers=ceo,
+            )
+            revoker_pid = wait_for_blocked_query(
+                "UPDATE principal_credentials SET enabled=false%", blocker_pid,
+            )
+            proposal_future = pool.submit(make_second_proposal)
+            wait_for_blocked_query(
+                "SELECT principal_id FROM principal_credentials%", revoker_pid,
+            )
+        assert revoke_future.result(timeout=5).status_code == 200
+        with pytest.raises(EffectConflict, match="credential required"):
+            proposal_future.result(timeout=5)
