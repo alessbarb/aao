@@ -88,3 +88,7 @@ Operator supplied terminal output for commit `5fe0b4b86d999b020e928e0bd4e8375e5c
 ## M2 transaction-time principal guard — candidate (not yet validated)
 
 The work API now rechecks principal credential state and principal kind under a PostgreSQL row lock inside `require_grant` before checking a project grant. The earlier separate authentication could otherwise allow a revoked credential to keep using its resolved identity in a subsequent transaction. Three unit test cases cover inactive/missing/wrong-kind principals, allowed identities and disallowed shared fallback. See `PRINCIPAL_AUTHORITY_AND_REVOCATION_BOUNDARIES.md` for scope and remaining unprotected read routes. No local tests have been run on this change; the previous 47 passing tests belong to `5fe0b4b86d999b020e928e0bd4e8375e5c0dc7c9`. Independent security review and M2 acceptance remain pending.
+
+## M2 grant-boundary validation — 2026-10-19
+
+Operator ran at `87779b5d8422d33e7f8befbe87c4e4ff307cee52` with Python 3.12.13 and pytest 9.1.1: `python -m compileall -q src tests` succeeded, `python -m ruff check src tests` reported `All checks passed!`, and `AAO_ENV=test AAO_ENV_FILE=.env.test python -m pytest -v -rs -W error` collected and passed **50/50 tests**, 0 failures, 0 skipped, and 0 warnings in **2.43 seconds**. This is a local operator-reported result, including the three additional grant-boundary tests. It demonstrates the implemented test scope only, not an adversarial revocation race or independent security audit. M2 remains open.
