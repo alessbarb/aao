@@ -28,6 +28,23 @@ browser storage, or evidence. Credential issuance, rotation, revocation, mandate
 administration, project creation and grant administration remain CEO-only
 development operations. They are not ordinary worker or frontend APIs.
 
+### Authentication headers
+
+Send the token in the runtime's explicit header; `Authorization: Bearer` is
+not a supported substitute. HTTP header names are case-insensitive.
+
+| Identity | Header | Routes |
+| --- | --- | --- |
+| AGENT | `X-Agent-Token` | Worker operations and AGENT-authorized reads. |
+| AUDITOR | `X-Auditor-Token` | Auditor-only patch/review operations. |
+| Development CEO | `X-CEO-Token` | CEO-only development administration and the distinct CEO read paths. |
+| None | — | `/health`, `/ready`; these expose no principal or project data. |
+
+The development CEO header is not an AGENT/AUDITOR identity and must not be
+used to execute work. A read endpoint that supports CEO access does not make
+that header valid for ordinary frontend sessions. Missing, wrong-kind or
+invalid credentials fail closed with the route's documented `403` behavior.
+
 ## Existing runtime interface
 
 All routes below are implemented in `src/aao/work_management_api.py`. JSON
