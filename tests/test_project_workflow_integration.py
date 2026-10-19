@@ -61,6 +61,34 @@ def test_postgres_mandate_project_grant_work_admission(monkeypatch):
         )
         assert created.status_code == 201, created.text
         wid = created.json()["id"]
+        assert client.get(f"/v1/projects/{project}", headers=worker).status_code == 403
+        assert client.get(f"/v1/projects/{project}/work/{wid}", headers=worker).status_code == 403
+        assert client.get(f"/v1/projects/{project}/activity", headers=worker).status_code == 403
+        assert client.post(
+            f"/v1/projects/{project}/grants", headers=ceo,
+            json={"principal_id": agent_id, "capability": "project.read"},
+        ).status_code == 201
+        detail = client.get(f"/v1/projects/{project}", headers=worker)
+        assert detail.status_code == 200, detail.text
+        assert detail.json()["mandate"]["id"] == mid
+        task_detail = client.get(f"/v1/projects/{project}/work/{wid}", headers=worker)
+        assert task_detail.status_code == 200, task_detail.text
+        assert task_detail.json()["id"] == wid
+        assert task_detail.json()["executions"] == []
+        activity = client.get(f"/v1/projects/{project}/activity", headers=worker)
+        assert activity.status_code == 200, activity.text
+        assert any(event["kind"] == "work.created" for event in activity.json())
+        revoked_read = client.delete(
+            f"/v1/projects/{project}/grants/{agent_id}/project.read", headers=ceo,
+        )
+        assert revoked_read.status_code == 204
+        assert client.get(f"/v1/projects/{project}", headers=worker).status_code == 403
+        assert client.get(f"/v1/projects/{project}/activity", headers=worker).status_code == 403
+        assert client.get(f"/v1/projects/{project}/work/{wid}", headers=worker).status_code == 403
+        assert client.post(
+            f"/v1/projects/{project}/grants", headers=ceo,
+            json={"principal_id": agent_id, "capability": "project.read"},
+        ).status_code == 201
         assert client.post(f"/v1/work/{wid}/admit").status_code == 403
         admitted = client.post(f"/v1/work/{wid}/admit", headers=worker)
         assert admitted.status_code == 200, admitted.text
@@ -243,7 +271,13 @@ def test_postgres_workboard_requires_ceo_read_credentials(monkeypatch):
     with TestClient(app) as client:
         page = client.get("/")
         assert page.status_code == 200
-        assert "AAO" in page.text
+        for label in (
+            "AAO Control Center", "Inicio", "Proyecto", "Actividad",
+            "Evidencias", "Decisiones reservadas",
+        ):
+            assert label in page.text
+        assert "No se presentan como disponibles" in page.text
+        assert "localStorage" not in page.text
         assert client.get("/v1/projects").status_code == 403
         assert client.get("/v1/projects", headers={"X-CEO-Token": "wrong"}).status_code == 403
         allowed = client.get(

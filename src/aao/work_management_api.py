@@ -435,6 +435,81 @@ def board(project_id: str, principal: str = Depends(read_principal)):
         ]
 
 
+@app.get("/v1/projects/{project_id}")
+def project_detail(project_id: str, principal: str = Depends(read_principal)):
+    """Read project and its mandate through the same project-scoped gate as the board."""
+    with tx() as db:
+        if principal is not _CEO_PRINCIPAL:
+            require_grant(db, principal, project_id, "project.read")
+        row = db.execute(
+            "SELECT p.id,p.name,p.state,p.mandate_id,m.title,m.objective,m.status,"
+            "m.confirmed_by,m.created_at "
+            "FROM projects p JOIN mandates m ON m.id=p.mandate_id WHERE p.id=%s",
+            (project_id,),
+        ).fetchone()
+        if not row:
+            raise HTTPException(404, "Project not found")
+        return {
+            "id": row[0], "name": row[1], "state": row[2],
+            "mandate": {"id": row[3], "title": row[4], "objective": row[5],
+                        "status": row[6], "confirmed_by": row[7],
+                        "created_at": row[8]},
+        }
+
+
+@app.get("/v1/projects/{project_id}/activity")
+def project_activity(project_id: str, principal: str = Depends(read_principal)):
+    """Return recent audit events scoped to a readable project; no inferred events."""
+    with tx() as db:
+        if principal is not _CEO_PRINCIPAL:
+            require_grant(db, principal, project_id, "project.read")
+        if not db.execute("SELECT 1 FROM projects WHERE id=%s", (project_id,)).fetchone():
+            raise HTTPException(404, "Project not found")
+        rows = db.execute(
+            "SELECT e.id,e.subject_id,e.kind,e.details,e.created_at "
+            "FROM events e WHERE e.subject_id=%s OR e.subject_id IN "
+            "(SELECT w.id FROM work_items w WHERE w.project_id=%s) "
+            "ORDER BY e.created_at DESC,e.id DESC LIMIT 100",
+            (project_id, project_id),
+        ).fetchall()
+        return [{"id": r[0], "subject_id": r[1], "kind": r[2],
+                 "details": r[3], "created_at": r[4]} for r in rows]
+
+
+@app.get("/v1/projects/{project_id}/work/{work_id}")
+def work_detail(project_id: str, work_id: str, principal: str = Depends(read_principal)):
+    """Read task, inert execution attempts and stored reviews without certifying them."""
+    with tx() as db:
+        if principal is not _CEO_PRINCIPAL:
+            require_grant(db, principal, project_id, "project.read")
+        task = db.execute(
+            "SELECT id,title,status,author_id,acceptance_criteria,evidence "
+            "FROM work_items WHERE id=%s AND project_id=%s",
+            (work_id, project_id),
+        ).fetchone()
+        if not task:
+            raise HTTPException(404, "Work not found in project")
+        executions = db.execute(
+            "SELECT id,status,worker_id,attempts,created_at,lease_expires_at,result_json "
+            "FROM execution_queue WHERE work_id=%s ORDER BY created_at,id", (work_id,),
+        ).fetchall()
+        reviews = db.execute(
+            "SELECT id,reviewer_id,decision,evidence,created_at FROM reviews "
+            "WHERE work_id=%s ORDER BY created_at,id", (work_id,),
+        ).fetchall()
+        return {
+            "id": task[0], "title": task[1], "status": task[2],
+            "author_id": task[3], "acceptance_criteria": task[4],
+            "evidence": task[5],
+            "executions": [{"id": r[0], "status": r[1], "worker_id": r[2],
+                            "attempts": r[3], "created_at": r[4],
+                            "lease_expires_at": r[5], "result": r[6]}
+                           for r in executions],
+            "reviews": [{"id": r[0], "reviewer_id": r[1], "decision": r[2],
+                         "evidence": r[3], "created_at": r[4]} for r in reviews],
+        }
+
+
 @app.post("/v1/work/{work_id}/admit")
 def admit(work_id: str, principal: str = Depends(require_worker)):
     with tx() as db:
