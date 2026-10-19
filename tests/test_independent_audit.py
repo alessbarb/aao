@@ -3,6 +3,7 @@ import os
 import pwd
 import shutil
 import subprocess
+from pathlib import Path
 
 import pytest
 
@@ -175,7 +176,7 @@ def test_readable_key_and_self_audit_are_rejected(env):
     assert "auditor-is-implementer-or-implementer-unknown" in report["blocking_findings"]
 
 
-def test_tampered_ledger_blocks_promotion(env):
+def test_naively_truncated_ledger_is_detected(env):
     sha = commit(env["repo"], {"src/app.py": "X = 8\n"}, "change")
     run_audit(env, sha, name="first", veto_reason="stop")
     run_audit(env, sha)
@@ -183,6 +184,13 @@ def test_tampered_ledger_blocks_promotion(env):
     lines = ledger.read_text().splitlines()
     ledger.write_text(lines[1] + "\n")  # drop the veto entry
     assert "audit ledger is missing or invalid" in gate(env, sha).reasons
+
+
+def test_secrets_visible_inside_the_sandbox_are_refused(env):
+    sha = commit(env["repo"], {"src/app.py": "X = 10\n"}, "change")
+    with pytest.raises(AuditError, match="readable by candidate code"):
+        run_audit(env, sha, key_path=Path("/etc/aao-auditor/key.pem"))
+    assert not (env["auditor"] / "run").exists()
 
 
 def test_unknown_sha_is_refused(env):

@@ -42,12 +42,14 @@ _GIT_ENV = {
     "LANG": "C.UTF-8",
 }
 _OUTPUT_LIMIT = 12_000
+_SANDBOX_SYSTEM_PATHS = ("/usr", "/bin", "/lib", "/lib64", "/etc")
 _LIMITATIONS = (
     ("Auditor checks run only Python argv defined by the trusted policy; PostgreSQL integration tests are skipped "
      "inside the network-less sandbox and are covered only by implementer-controlled CI."),
     "CI check-runs are recorded as implementer-controlled inputs, not as independent evidence.",
     "Adversarial rules are deterministic path and test-weakening heuristics, not a semantic security review.",
-    "Ledger tail truncation is detectable only through custody of the ledger file by the auditor account.",
+    ("The ledger hash chain is unkeyed: it detects accidental corruption only; protection against anyone able "
+     "to write the file (for example to drop a veto) comes solely from auditor-account file custody."),
     ("The gate's implementer identity comes from the caller; it must be supplied by the merge authority, "
      "not by the implementer."),
 )
@@ -124,16 +126,21 @@ def adversarial_findings(clone: Path, base_sha: str, candidate_sha: str, policy:
         if status == "D" and path.startswith("tests/"):
             findings.append({"id": f"deleted-test:{path}", "path": path, "detail": "test file deleted"})
     asserts: dict[str, list[int]] = {}
-    current = ""
+    current, line_number = "", 0
     for line in _git(clone, "diff", "--no-renames", "-U0", base_sha, candidate_sha, "--", "tests").splitlines():
         if line.startswith("+++ "):
             current = line[6:] if line.startswith("+++ b/") else ""
             continue
+        if line.startswith("@@"):
+            line_number = int(line.split("+", 1)[1].split(" ", 1)[0].split(",", 1)[0])
+            continue
         if line.startswith("--- ") or not current:
             continue
         if line.startswith("+") and any(m in line for m in ("pytest.skip", "mark.skip", "xfail", "importorskip")):
-            findings.append({"id": f"added-skip:{current}:{line[1:].strip()[:80]}", "path": current,
-                             "detail": "test skip or expected failure added"})
+            findings.append({"id": f"added-skip:{current}:{line_number}", "path": current,
+                             "detail": f"test skip or expected failure added: {line[1:].strip()[:120]}"})
+        if line.startswith("+"):
+            line_number += 1
         if line[:1] in "+-" and line[1:].lstrip().startswith("assert"):
             asserts.setdefault(current, [0, 0])[line[0] == "-"] += 1
     for path, (added, removed) in sorted(asserts.items()):
@@ -141,6 +148,15 @@ def adversarial_findings(clone: Path, base_sha: str, candidate_sha: str, policy:
             findings.append({"id": f"removed-asserts:{path}", "path": path,
                              "detail": f"{removed} assertions removed, {added} added"})
     return list({item["id"]: item for item in findings}.values())
+
+
+def _sandbox_runtimes() -> list[str]:
+    return sorted({str(Path(sys.base_prefix).resolve()), os.path.abspath(sys.prefix)})
+
+
+def _visible_in_sandbox(path: Path) -> bool:
+    resolved = path.resolve()
+    return any(resolved.is_relative_to(root) for root in (*_SANDBOX_SYSTEM_PATHS, *_sandbox_runtimes()))
 
 
 def _interpreter_links(executable: str, mounted: list[str]) -> list[str]:
@@ -167,10 +183,10 @@ def run_sandboxed(clone: Path, argv: list[str], timeout_seconds: int = 600) -> t
     if sys.platform != "linux" or not bwrap or not timeout or not prlimit:
         raise AuditError("bubblewrap, timeout and prlimit are required for audit checks")
     # Interpreter and environment keep their host paths so nested tools (ruff binary, sandboxed tests) resolve alike.
-    runtimes = sorted({str(Path(sys.base_prefix).resolve()), os.path.abspath(sys.prefix)})
+    runtimes = _sandbox_runtimes()
     command = [
         bwrap, "--unshare-all", "--die-with-parent", "--new-session",
-        *[arg for path in ("/usr", "/bin", "/lib", "/lib64", "/etc") if Path(path).exists()
+        *[arg for path in _SANDBOX_SYSTEM_PATHS if Path(path).exists()
           for arg in ("--ro-bind", path, path)],
         "--proc", "/proc", "--dev", "/dev", "--size", "268435456", "--tmpfs", "/tmp", "--dir", "/tmp/home",
         *[arg for path in runtimes for arg in ("--ro-bind", path, path)],
@@ -193,7 +209,7 @@ def auditor_revision() -> str:
     root = Path(__file__).resolve().parents[2]
     try:
         sha = _git(root, "rev-parse", "HEAD").strip()
-        dirty = _git(root, "status", "--porcelain", "--untracked-files=no").strip()
+        dirty = _git(root, "status", "--porcelain", "--untracked-files=all").strip()
     except (OSError, subprocess.SubprocessError):
         return "unknown"
     return f"{sha}-dirty" if dirty else sha
@@ -264,6 +280,9 @@ def audit_candidate(
     runner: Callable[[Path, list[str]], tuple[int, str, str]] = run_sandboxed,
 ) -> dict[str, Any]:
     policy, policy_digest = load_policy(policy_path)
+    for secret in (key_path, output, ledger, policy_path):
+        if secret is not None and _visible_in_sandbox(secret):
+            raise AuditError(f"{secret} would be readable by candidate code inside the sandbox")
     output.mkdir(parents=True, exist_ok=False)
     evidence_dir = output / "evidence"
     evidence_dir.mkdir()
