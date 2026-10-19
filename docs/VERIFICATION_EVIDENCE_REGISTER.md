@@ -824,3 +824,18 @@ coverage, independent review, or M2 acceptance.
   an already-claimed inert execution. It does not simulate an AAO process
   restart, post-reconciliation redelivery, or an autonomous event consumer and
   does not close the broader M2-06 recovery requirement.
+
+## Consolidated M2 candidate verification — 2026-10-19
+
+- Exact checked-out revision: `7a9835316c273da5249329f3ead1f5e3e64cd732`
+  on `feat/aao-m0-foundation`; this revision contains documentation-only
+  changes after the implementation candidate `99760c7` recorded above.
+- Re-ran locally against the explicitly disposable PostgreSQL test database:
+  `AAO_ENV=test AAO_ENV_FILE=.env.test python -m pytest -q -rs -W error` —
+  **80 passed, 0 failed, 0 skipped, 0 warnings** in **19.80 s**.
+- `python -m compileall -q src tests`, `python -m ruff check src tests`,
+  `python -m pip check`, and `git diff --check` all passed at this checkout.
+  CI was not awaited per operator instruction.
+- This re-verifies the repository candidate at the stated local boundary. It
+  is not a formal independent review, CI result, operational recovery proof,
+  scope ratification, or M2 acceptance.
