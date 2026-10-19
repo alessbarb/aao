@@ -28,7 +28,22 @@ Only then attach inert workers, leaving real effect adapters disabled.
 
 Worker `claim()` now rechecks the project state under a row lock before marking a queued execution RUNNING. `complete()` requires the authenticated registered worker credential, a matching live lease, and an ACTIVE project locked in the same transaction. This prevents a completed state being committed concurrently with a project suspension transaction that acquires the same project row lock (subject to transaction ordering).
 
-An opt-in PostgreSQL integration test covers invalid credentials and suspended-project completion. No PostgreSQL server run was observed in this session. Lease expiry still leads to UNCERTAIN through explicit quarantine; project suspension **does not yet** automatically quarantine ongoing work or cancel external effects. A production stop controller and credential-rotation policy remain future gates.
+Migration `007_fence_leases_across_project_state_changes` adds a database-owned
+project state generation. A claim records that generation; completion and
+effect proposal require it still to match. Pausing and later resuming therefore
+does not revive an old lease. The generation trigger increments only when the
+state actually changes and overwrites caller-supplied generation values. A
+stale lease remains `RUNNING` until its lease expires and the existing explicit
+quarantine moves it to `UNCERTAIN`; pause is not an automatic retry or effect
+cancellation mechanism. This fence is defense-in-depth, not proof that an
+external action did not occur.
+
+Migration rollback policy is forward-only after deployment: preserve lease and
+journal evidence, fix defects with a new migration, and do not remove the
+generation columns/trigger while claims may depend on them. A disposable test
+database may be recreated from migrations 001 onward.
+
+Opt-in PostgreSQL integration tests cover invalid credentials, suspended-project completion, and the pause-resume stale-lease fence. Lease expiry still leads to UNCERTAIN through explicit quarantine; project suspension does not automatically quarantine ongoing work or cancel external effects. A production stop controller and credential-rotation policy remain future gates.
 
 ## Reconciliation candidate
 

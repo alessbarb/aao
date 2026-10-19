@@ -9,15 +9,35 @@ grants, work creation and work admission. No real agents or external effects.
 
 ## Isolated setup
 
-Requires a development PostgreSQL database.
+Requires a fresh, dedicated development PostgreSQL database. Apply the
+schema migrations once, in order; migration 006 consolidates legacy worker
+identities and migration 007 fences old leases across project-state changes.
+Do not run migrations against production or a database with unreviewed data.
+The migration ledger is `schema_migrations`; inspect it before upgrading and
+never rerun an applied migration. The scripts are one-shot, not a general
+schema-repair or rollback tool. If an interrupted migration leaves ambiguous
+state, stop and inspect the database rather than rerunning it blindly.
 
 ```sh
 python -m pip install -e '.[postgres]'
-psql "$AAO_POSTGRES_URL" -v ON_ERROR_STOP=1 -f db/postgres/001_foundation.sql
-psql "$AAO_POSTGRES_URL" -v ON_ERROR_STOP=1 -f db/postgres/002_dev_identity.sql
+for migration in db/postgres/001_foundation.sql \
+  db/postgres/002_dev_identity.sql \
+  db/postgres/003_execution.sql \
+  db/postgres/004_execution_guards.sql \
+  db/postgres/005_principal_credentials.sql \
+  db/postgres/006_unified_execution_identity.sql \
+  db/postgres/007_fence_leases_across_project_state_changes.sql; do
+  psql "$AAO_POSTGRES_URL" -v ON_ERROR_STOP=1 -f "$migration"
+done
 export AAO_CEO_TOKEN='locally-generated-secret'
 uvicorn aao.work_management_api:app --host 127.0.0.1 --port 8001
 ```
+
+For an existing database, apply only migrations absent from
+`schema_migrations`, preserving the same order. Migration 007 is forward-only
+after deployment: preserve queue/journal evidence and correct defects with a
+new migration instead of dropping its generation columns or trigger. Recreate
+only explicitly disposable databases when a clean migration replay is needed.
 
 PostgreSQL work and review routes require individually issued credentials.
 Use the CEO-authenticated `/v1/principals/credentials` endpoint to provision

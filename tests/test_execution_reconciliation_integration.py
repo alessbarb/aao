@@ -59,10 +59,20 @@ def test_reconciliation_requires_distinct_granted_reviewer(monkeypatch):
         eid = client.post(f"/v1/work/{wid}/stage-inert", headers=worker).json()["execution_id"]
     lease = claim(worker_id, agent_credential=secret, project_id=project, seconds=1)
     assert lease["execution_id"] == eid
+    from aao.external_effect_registry import EffectConflict, propose
+    from aao.postgresql_connection import connect_postgres
+    with connect_postgres() as db:
+        db.execute("UPDATE projects SET state='PAUSED' WHERE id=%s", (project,))
+        db.execute("UPDATE projects SET state='ACTIVE' WHERE id=%s", (project,))
+    with pytest.raises(EffectConflict, match="lease is not active"):
+        propose(
+            execution_id=eid, worker_id=worker_id, lease_token=lease["token"],
+            agent_credential=secret, idempotency_key="paused-resume-" + str(uuid4()),
+            capability="test.inert", request={"kind": "test-only"},
+        )
     # Quarantine is global: previous tests may leave other expired leases.
     time.sleep(1.1)
-    from aao.external_effect_registry import EffectConflict, propose
-    with pytest.raises(EffectConflict, match="lease expired"):
+    with pytest.raises(EffectConflict, match="lease is not active"):
         propose(
             execution_id=eid, worker_id=worker_id, lease_token=lease["token"],
             agent_credential=secret, idempotency_key="expired-" + str(uuid4()),
@@ -127,7 +137,6 @@ def test_reconciliation_requires_distinct_granted_reviewer(monkeypatch):
     )
     assert again["id"] == proposal["id"]
     assert again["status"] == "PROPOSED_OR_EXISTING"
-    from aao.postgresql_connection import connect_postgres
     with connect_postgres() as db:
         proposer = db.execute(
             "SELECT details->>'proposed_by' FROM execution_journal "

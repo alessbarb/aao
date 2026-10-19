@@ -58,7 +58,8 @@ def reconcile(execution_id: str, *, auditor_credential: str, evidence: list[str]
         new_state = "QUEUED" if disposition == "RETRY_CONFIRMED_SAFE" else "FAILED"
         db.execute(
             "UPDATE execution_queue SET status=%s,worker_id=NULL,"
-            "lease_token=NULL,lease_expires_at=NULL WHERE id=%s",
+            "lease_token=NULL,lease_expires_at=NULL,project_state_generation=NULL "
+            "WHERE id=%s",
             (new_state, execution_id),
         )
         db.execute(

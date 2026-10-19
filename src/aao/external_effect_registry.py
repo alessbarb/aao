@@ -37,16 +37,19 @@ def propose(*, execution_id: str, worker_id: str, lease_token: str,
             raise EffectConflict("Credential does not match execution worker")
         execution = db.execute(
             "SELECT q.status,q.project_id,q.worker_id,q.lease_token,"
-            "q.lease_expires_at,p.state FROM execution_queue q "
+            "q.lease_expires_at,p.state,q.project_state_generation,"
+            "p.state_generation FROM execution_queue q "
             "JOIN projects p ON p.id=q.project_id WHERE q.id=%s "
             "FOR UPDATE OF q,p",
             (execution_id,),
         ).fetchone()
         if not execution:
             raise EffectConflict("Unknown execution")
-        status, project_id, owner, current_token, expires_at, project_state = execution
+        (status, project_id, owner, current_token, expires_at, project_state,
+         claimed_generation, current_generation) = execution
         if (status != "RUNNING" or owner != worker_id or str(current_token) != lease_token
-                or expires_at is None or project_state != "ACTIVE"):
+                or expires_at is None or project_state != "ACTIVE"
+                or claimed_generation is None or claimed_generation != current_generation):
             raise EffectConflict("Execution lease is not active for this worker")
         grant = db.execute(
             "SELECT 1 FROM project_grants WHERE principal_id=%s AND project_id=%s "

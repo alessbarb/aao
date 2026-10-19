@@ -38,6 +38,7 @@ jobs:
           done
           psql "$AAO_TEST_POSTGRES_URL" -v ON_ERROR_STOP=1 -c "INSERT INTO worker_registrations(worker_id,token_digest,enabled) VALUES ('legacy-ci-agent','f96fec142530f614fd37bdadb76c54cd017b1ccabb0d29164ef894447f36a81f',true)"
           psql "$AAO_TEST_POSTGRES_URL" -v ON_ERROR_STOP=1 -f db/postgres/006_unified_execution_identity.sql
+          psql "$AAO_TEST_POSTGRES_URL" -v ON_ERROR_STOP=1 -f db/postgres/007_fence_leases_across_project_state_changes.sql
       - run: python -m compileall -q src tests
       - run: python -m ruff check src tests
       - name: Run unit and PostgreSQL integration tests with warnings as errors

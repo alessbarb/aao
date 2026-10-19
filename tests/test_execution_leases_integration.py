@@ -109,15 +109,55 @@ def test_worker_claim_complete_respects_identity_and_project_state(monkeypatch):
         with pytest.raises(ExecutionConflict):
             complete(eid, lease["token"], worker_id, {"ok": True}, agent_credential="wrong")
         assert state(eid)["status"] == "RUNNING"
+        with ThreadPoolExecutor(max_workers=1) as pool, connect_postgres() as blocker:
+            blocker.execute("SELECT id FROM projects WHERE id=%s FOR UPDATE", (project_id,))
+            paused_completion = pool.submit(
+                complete, eid, lease["token"], worker_id, {"ok": True},
+                agent_credential=token,
+            )
+            deadline = time.monotonic() + 5
+            waiting_for_project = False
+            while time.monotonic() < deadline:
+                with connect_postgres() as observer:
+                    waiting_for_project = observer.execute(
+                        "SELECT EXISTS (SELECT 1 FROM pg_stat_activity "
+                        "WHERE query LIKE 'SELECT state,state_generation FROM projects%' "
+                        "AND wait_event_type='Lock')"
+                    ).fetchone()[0]
+                if waiting_for_project:
+                    break
+                time.sleep(0.01)
+            assert waiting_for_project, "completion did not wait on project-state lock"
+            blocker.execute("UPDATE projects SET state='PAUSED' WHERE id=%s", (project_id,))
+        with pytest.raises(ExecutionConflict, match="Project is not active"):
+            paused_completion.result(timeout=5)
         with connect_postgres() as db:
-            db.execute("UPDATE projects SET state='PAUSED' WHERE id=%s", (project_id,))
-        with pytest.raises(ExecutionConflict):
-            complete(eid, lease["token"], worker_id, {"ok": True}, agent_credential=token)
+            paused_generation = db.execute(
+                "SELECT state_generation FROM projects WHERE id=%s", (project_id,),
+            ).fetchone()[0]
+            assert paused_generation == 1
+            db.execute(
+                "UPDATE projects SET state_generation=999 WHERE id=%s", (project_id,),
+            )
+            assert db.execute(
+                "SELECT state_generation FROM projects WHERE id=%s", (project_id,),
+            ).fetchone()[0] == paused_generation
         assert state(eid)["status"] == "RUNNING"
         with connect_postgres() as db:
             db.execute("UPDATE projects SET state='ACTIVE' WHERE id=%s", (project_id,))
-        complete(eid, lease["token"], worker_id, {"ok": True}, agent_credential=token)
-        assert state(eid)["status"] == "SUCCEEDED"
+            assert db.execute(
+                "SELECT state_generation FROM projects WHERE id=%s", (project_id,),
+            ).fetchone()[0] == 2
+        with pytest.raises(ExecutionConflict, match="Project state changed"):
+            complete(eid, lease["token"], worker_id, {"ok": True}, agent_credential=token)
+        assert state(eid)["status"] == "RUNNING"
+        with connect_postgres() as db:
+            db.execute(
+                "UPDATE execution_queue SET lease_expires_at=clock_timestamp()-interval '1 second' "
+                "WHERE id=%s", (eid,),
+            )
+        assert quarantine_expired() >= 1
+        assert state(eid)["status"] == "UNCERTAIN"
 
         # A completion blocked beyond its lease deadline must use the database
         # clock at the guarded update, not a timestamp captured before waiting.
@@ -148,7 +188,7 @@ def test_worker_claim_complete_respects_identity_and_project_state(monkeypatch):
                 with connect_postgres() as observer:
                     waiting = observer.execute(
                         "SELECT EXISTS (SELECT 1 FROM pg_stat_activity "
-                        "WHERE query LIKE 'SELECT project_id FROM execution_queue%' "
+                        "WHERE query LIKE 'SELECT project_id,project_state_generation FROM execution_queue%' "
                         "AND wait_event_type='Lock')"
                     ).fetchone()[0]
                 if waiting:

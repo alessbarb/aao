@@ -60,7 +60,8 @@ def claim(worker_id: str, *, agent_credential: str, project_id: str,
             "SELECT project_id FROM execution_queue WHERE id=%s", (eid,)
         ).fetchone()[0]
         project = db.execute(
-            "SELECT state FROM projects WHERE id=%s FOR UPDATE", (project_id,)
+            "SELECT state,state_generation FROM projects WHERE id=%s FOR UPDATE",
+            (project_id,),
         ).fetchone()
         if not project or project[0] != "ACTIVE":
             return None
@@ -68,8 +69,9 @@ def claim(worker_id: str, *, agent_credential: str, project_id: str,
         expiry = db.execute(
             "UPDATE execution_queue SET status='RUNNING',lease_token=%s,"
             "worker_id=%s,lease_expires_at=clock_timestamp()+make_interval(secs => %s),"
-            "attempts=attempts+1 WHERE id=%s RETURNING lease_expires_at",
-            (token, worker_id, seconds, eid),
+            "project_state_generation=%s,attempts=attempts+1 "
+            "WHERE id=%s RETURNING lease_expires_at",
+            (token, worker_id, seconds, project[1], eid),
         ).fetchone()[0]
         journal(db, eid, "claimed", {"worker_id": worker_id})
     return {"execution_id": eid, "token": token, "worker_id": worker_id,
@@ -81,16 +83,20 @@ def complete(execution_id: str, token: str, worker_id: str, result: dict,
     with connect_postgres() as db:
         verify_execution_principal(db, worker_id, agent_credential)
         execution = db.execute(
-            "SELECT project_id FROM execution_queue WHERE id=%s FOR UPDATE",
+            "SELECT project_id,project_state_generation FROM execution_queue "
+            "WHERE id=%s FOR UPDATE",
             (execution_id,),
         ).fetchone()
         if not execution:
             raise ExecutionConflict("Execution not found")
         project = db.execute(
-            "SELECT state FROM projects WHERE id=%s FOR UPDATE", (execution[0],)
+            "SELECT state,state_generation FROM projects WHERE id=%s FOR UPDATE",
+            (execution[0],),
         ).fetchone()
         if not project or project[0] != "ACTIVE":
             raise ExecutionConflict("Project is not active")
+        if execution[1] is None or execution[1] != project[1]:
+            raise ExecutionConflict("Project state changed after this lease was issued")
         grant = db.execute(
             "SELECT 1 FROM project_grants WHERE principal_id=%s AND project_id=%s "
             "AND capability='execution.claim' "

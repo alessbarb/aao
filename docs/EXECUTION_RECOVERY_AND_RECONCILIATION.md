@@ -4,6 +4,14 @@ An execution whose lease expires is quarantined in `UNCERTAIN`.
 `execution_reconciliation.reconcile()` allows two dispositions only:
 `MARK_FAILED` or `RETRY_CONFIRMED_SAFE`. It never invokes a worker or tool.
 
+Migration `007_fence_leases_across_project_state_changes` binds each newly
+claimed lease to the project's state generation. Any actual state transition,
+including pause followed by resume, invalidates the prior lease for completion
+and effect proposal. The stale row remains `RUNNING` until explicit expiry
+quarantine; retry still requires independent reconciliation. Migration 007 is
+forward-only after deployment so execution and journal evidence is preserved;
+use a new corrective migration rather than removing the fence.
+
 The reviewer must present an active individual `AUDITOR` credential and have
 an unexpired project-scoped `execution.reconcile` grant; the reviewer ID is
 derived from that credential inside the same transaction. AGENT credentials
