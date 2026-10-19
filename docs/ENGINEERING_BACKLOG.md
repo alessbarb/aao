@@ -61,7 +61,10 @@ amendment or CEO-confirmed constitutional rule.
    execution grant. Actual queue claim and completion also serialize before
    concurrent AGENT credential revocation. Still required: repeated/adversarial
    schedules across remaining operations, alternate operation/revocation
-   orderings, and review of long-running transaction expiry semantics. HTTP
+   orderings, and review of long-running transaction expiry semantics. The
+   AUDITOR review route now has one controlled PostgreSQL schedule showing an
+   authorized rejection commit before concurrent credential revocation; this
+   does not cover every review ordering or exhaustive races. HTTP
    request contexts now retain the presented token digest and compare it again
    under `FOR SHARE` in protected reads and writes. A PostgreSQL integration
    test captures a project-list context, rotates its token before the route

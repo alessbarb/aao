@@ -686,3 +686,19 @@ coverage, independent review, or M2 acceptance.
 - This is a fail-closed development boundary, not proof of auditor identity,
   evidence validity, independent review, retrospective validation of DONE
   records, or M2 acceptance.
+
+## Review rejection serializes with auditor credential revocation — 2026-10-19
+
+- Code revision: `c0a1aa7` on `feat/aao-m0-foundation`.
+- A disposable-PostgreSQL integration test pauses the actual review route after
+  its in-transaction AUDITOR credential and `work.review` grant checks. With a
+  separate connection, CEO credential revocation is observed blocked by the
+  review transaction's backend PID. After release, rejection commits, revocation
+  succeeds, and a later review attempt with the revoked token is denied.
+- The controlled schedule passed three consecutive focused runs. The full
+  explicitly disposable PostgreSQL suite passed **70 tests, 0 skipped, 0
+  warnings** under `-W error`; compileall, Ruff, `pip check`, and
+  `git diff --check` passed locally. CI was not awaited per operator
+  instruction.
+- This covers one protected-operation-first ordering for `REJECT`; it is not
+  exhaustive auditor-revocation coverage, independent review, or M2 acceptance.
