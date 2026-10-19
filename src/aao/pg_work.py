@@ -106,7 +106,7 @@ class ReviewRequest(BaseModel):
 
 class GrantRequest(BaseModel):
     principal_id: str = Field(min_length=1)
-    capability: str = Field(pattern="^(work.create|work.admit|work.review|work.progress|project.read)$")
+    capability: str = Field(pattern=r"^(?:work\.(?:create|admit|review|progress)|project\.read|execution\.claim)$")
 
 
 app = FastAPI(title="AAO PostgreSQL development core", version="0.2.0")
