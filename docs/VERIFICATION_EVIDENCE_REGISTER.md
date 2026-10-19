@@ -509,3 +509,26 @@ coverage, independent review, or M2 acceptance.
   check`. This bounded test proves
   rotation between HTTP dependency resolution and project-list transaction;
   it does not prove all rotation/revocation schedules or M2 acceptance.
+
+## Project-state generation fences execution leases — 2026-10-19
+
+- Code revision: `b1478f53dd591a0c2bda3b300d94984566d4e35d` on
+  `feat/aao-m0-foundation`.
+- Migration 007 binds each claim to a database-owned project state generation.
+  Completion and effect proposal deny stale generations; authorized retry
+  reconciliation clears the old generation before a fresh claim. The trigger
+  advances only on an actual state transition and prevents callers from
+  forging the generation value. Migration 001-005 remain unchanged.
+- PostgreSQL integration tests cover a real pause transaction blocking on the
+  project row while completion waits, pause/resume invalidation of the old
+  lease, stale effect-proposal denial, expiry quarantine, and authorized
+  reconciliation followed by a fresh claim. The controlled pause/complete
+  lock schedule passed four consecutive runs.
+- Local validation against the explicitly disposable `aao_test` database:
+  full suite **67 passed, 0 skipped, 0 warnings** under `-W error`; compileall,
+  Ruff, `pip check`, and `git diff --check` passed. Migration 007 was applied
+  to `aao_test`; the database name was checked without displaying its URL.
+- CI validation is pending. These checks cover bounded local PostgreSQL
+  schedules and migration application, not exhaustive race schedules,
+  production recovery, external effect cancellation, independent review, or
+  M2 acceptance.
