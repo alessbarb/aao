@@ -46,10 +46,10 @@ remains `99760c7339323600368e5dbb145b088d83ad0715`. Subsequent code fixes and
 their evidence are recorded separately; recheck exact live refs before review
 and acceptance.
 
-The suspension/credential-boundary follow-up is implemented at
-`cbcab10f7010004b8ee12801356a2643f9dc6a79`; its exact local evidence is in the
-verification register. This revision is not yet represented by the live PR
-until the push and ref check are complete.
+Suspension, credential-boundary, and inert proposal idempotency follow-ups are
+implemented at `9fa503c334f17e3a7b6ef962a5df3a6428b280e8`; their exact local
+evidence is in the verification register. This revision is not yet represented
+by the live PR until the push and ref check are complete.
 
 ## M2-A measurable acceptance criteria
 

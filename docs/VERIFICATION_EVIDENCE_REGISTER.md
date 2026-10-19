@@ -888,3 +888,22 @@ coverage, independent review, or M2 acceptance.
   against the configured disposable test database, not a fresh replay of the
   entire migration chain. CI was not awaited. This is engineering evidence,
   not independent review or M2-A acceptance.
+
+## M2-A inert proposal idempotency race fix — 2026-10-19
+
+- Exact implementation candidate: `9fa503c334f17e3a7b6ef962a5df3a6428b280e8`
+  on `feat/aao-m0-foundation`; it follows suspension/credential fix
+  `cbcab10f7010004b8ee12801356a2643f9dc6a79`.
+- PostgreSQL effect proposal insertion now resolves a concurrent winner using
+  `ON CONFLICT (idempotency_key) DO NOTHING RETURNING` followed by a locked
+  read and semantic comparison. The regression schedule uses separate
+  transactions, two active executions, and one previously absent key; one
+  proposal succeeds and the other returns a domain conflict rather than a raw
+  unique-constraint error.
+- Focused integration suite: **7 passed** in **8.90 s**. Full suite at the
+  exact source tree: **83 passed, 0 failed, 0 skipped, 0 warnings** in
+  **19.89 s**, with warnings as errors. `compileall`, Ruff, `pip check`, and
+  `git diff --check` passed. Documentation-only acceptance/scope references
+  were updated after the code commit; no code changed after that test run.
+- This is local disposable PostgreSQL evidence, not CI, independent review,
+  production behavior, external-effect idempotency, or M2-A acceptance.
