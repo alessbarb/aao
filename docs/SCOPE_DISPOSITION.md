@@ -48,8 +48,13 @@ and acceptance.
 
 Suspension, credential-boundary, and inert proposal idempotency follow-ups are
 implemented at `9fa503c334f17e3a7b6ef962a5df3a6428b280e8`; their exact local
-evidence is in the verification register. This revision is not yet represented
-by the live PR until the push and ref check are complete.
+evidence is in the verification register. The current package/documentation
+revision is `8b8c03616110e0fca74c103f60891add83f51cde`. The local checkout and
+both pushed branch refs match this SHA, but GitHub's REST representation of PR
+#2 still reports head `8720366260426c18bb53f3271c1690a603b03947`. Therefore PR
+#2 does **not** currently contain the exact candidate, despite its source branch
+being advanced. Do not treat PR #2 as an exact-head review vehicle until this
+discrepancy is repaired and verified; do not rewrite validated code to mask it.
 
 ## M2-A measurable acceptance criteria
 
