@@ -23,6 +23,12 @@ def propose(*, execution_id: str, idempotency_key: str, capability: str, request
         raise EffectConflict("Idempotency key too long")
     digest = canonical_digest(request)
     with connect_postgres() as db:
+        execution = db.execute(
+            "SELECT status FROM execution_queue WHERE id=%s FOR UPDATE",
+            (execution_id,),
+        ).fetchone()
+        if not execution:
+            raise EffectConflict("Unknown execution")
         row = db.execute(
             "SELECT id,execution_id,capability,request_digest FROM external_effects "
             "WHERE idempotency_key=%s FOR UPDATE", (idempotency_key,)
@@ -31,9 +37,8 @@ def propose(*, execution_id: str, idempotency_key: str, capability: str, request
             if str(row[1]) != execution_id or row[2] != capability or row[3] != digest:
                 raise EffectConflict("Idempotency key reused with different request")
             return {"id": str(row[0]), "status": "PROPOSED_OR_EXISTING"}
-        exists = db.execute("SELECT id FROM execution_queue WHERE id=%s", (execution_id,)).fetchone()
-        if not exists:
-            raise EffectConflict("Unknown execution")
+        if execution[0] != "RUNNING":
+            raise EffectConflict("Effects may only be proposed for a running execution")
         effect_id = str(uuid4())
         db.execute(
             "INSERT INTO external_effects(id,execution_id,idempotency_key,capability,status,request_digest) "

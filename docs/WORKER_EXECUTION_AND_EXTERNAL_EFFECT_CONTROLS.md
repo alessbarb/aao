@@ -4,8 +4,10 @@
 Migration 004 provides an explicit worker registration record (disabled by
 default) and an external-effect ledger with unique idempotency keys.
 `worker_auth.py` verifies registered worker credentials and provides an
-explicit opt-in development bootstrap. `external_effect_registry.py` can **record only**
-PROPOSED effects; it contains no execution or approval operation.
+explicit opt-in development bootstrap. `external_effect_registry.py` can
+**record only** PROPOSED effects, and only while the referenced queue row is
+`RUNNING`; it contains no execution or approval operation. Proposal admission
+locks that queue row, serializing it with reconciliation/retry decisions.
 
 ## Safety boundaries
 - Worker registration is now checked on queue claims, but completion still uses only the lease token and worker ID. The claim check does not establish mTLS/OIDC or secure worker attestation.

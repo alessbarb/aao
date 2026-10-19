@@ -78,7 +78,14 @@ def test_reconciliation_requires_distinct_granted_reviewer(monkeypatch):
                      evidence=["inert-only confirmed"],
                      disposition="RETRY_CONFIRMED_SAFE") == "QUEUED"
     from aao.external_effect_reconciliation import EffectReviewDenied, reject_unexecuted_proposal
-    from aao.external_effect_registry import propose
+    from aao.external_effect_registry import EffectConflict, propose
+    with pytest.raises(EffectConflict, match="running execution"):
+        propose(
+            execution_id=eid, idempotency_key="queued-" + str(uuid4()),
+            capability="test.inert", request={"kind": "test-only"},
+        )
+    lease = claim(worker_id, agent_credential=secret, project_id=project)
+    assert lease["execution_id"] == eid
     proposal = propose(
         execution_id=eid, idempotency_key="reconcile-" + str(uuid4()),
         capability="test.inert", request={"kind": "test-only"},
