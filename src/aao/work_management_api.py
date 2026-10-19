@@ -268,6 +268,16 @@ def projects(principal: str = Depends(read_principal)):
         if principal == "ceo":
             rows = db.execute("SELECT id,name,state FROM projects ORDER BY name,id").fetchall()
         else:
+            if principal == "development-worker":
+                if not shared_dev_tokens_enabled():
+                    raise HTTPException(403, "Shared development reader disabled")
+            else:
+                credential = db.execute(
+                    "SELECT kind,enabled FROM principal_credentials "
+                    "WHERE principal_id=%s FOR SHARE", (principal,),
+                ).fetchone()
+                if not credential or credential[0] != "AGENT" or not credential[1]:
+                    raise HTTPException(403, "Individual reader invalid or revoked")
             rows = db.execute(
                 "SELECT p.id,p.name,p.state FROM projects p JOIN project_grants g ON g.project_id=p.id "
                 "WHERE g.principal_id=%s AND g.capability='project.read' "
