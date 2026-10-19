@@ -92,7 +92,8 @@ def _build_command(repository: Path, check_id: str, site_packages: Path) -> list
     prlimit = shutil.which("prlimit")
     if not bwrap or not timeout or not prlimit:
         raise RepositoryCheckError("bubblewrap, timeout, and prlimit are required")
-    python = Path("/usr/bin/python3")
+    python_root = Path(sys.base_prefix).resolve()
+    python = python_root / "bin" / "python3"
     if not python.is_file():
         raise RepositoryCheckError("system Python interpreter is unavailable")
 
@@ -138,6 +139,9 @@ def _build_command(repository: Path, check_id: str, site_packages: Path) -> list
         "--dir",
         "/opt",
         "--ro-bind",
+        str(python_root),
+        "/opt/aao-python",
+        "--ro-bind",
         str(packages),
         "/opt/aao-site-packages",
         "--dir",
@@ -166,6 +170,9 @@ def _build_command(repository: Path, check_id: str, site_packages: Path) -> list
         "PYTHONPATH",
         "/workspace/src:/opt/aao-site-packages",
         "--setenv",
+        "PYTHONHOME",
+        "/opt/aao-python",
+        "--setenv",
         "PYTHONDONTWRITEBYTECODE",
         "1",
         "--setenv",
@@ -182,7 +189,7 @@ def _build_command(repository: Path, check_id: str, site_packages: Path) -> list
         "--nproc=64",
         "--nofile=64",
         "--",
-        str(python),
+        "/opt/aao-python/bin/python3",
         "-B",
         "-m",
         "pytest",
