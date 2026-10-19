@@ -282,9 +282,9 @@ def change_project_state(
 
 
 def read_principal(
-    x_ceo_token: str | None = Header(None),
-    x_agent_token: str | None = Header(None),
-    x_auditor_token: str | None = Header(None),
+    x_ceo_token: Annotated[str | None, Header()] = None,
+    x_agent_token: Annotated[str | None, Header()] = None,
+    x_auditor_token: Annotated[str | None, Header()] = None,
 ):
     ceo = os.getenv("AAO_CEO_TOKEN")
     if (_ceo_bearer_enabled() and ceo and x_ceo_token
