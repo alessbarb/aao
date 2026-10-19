@@ -503,8 +503,9 @@ coverage, independent review, or M2 acceptance.
   **66 passed, 0 skipped, 0 warnings** under `-W error`; compileall, Ruff,
   `pip check`, and diff check passed. Tests ran against the configured
   explicitly disposable PostgreSQL database.
-- GitHub Actions run for this revision is pending at time of entry. The
-  preceding code revision `e9890cd7845a7b5b2be6359f513647b9db918368` passed
-  CI run `39261323490` with its PostgreSQL suite. This bounded test proves
+- GitHub Actions run `39261728929` passed for this exact code revision. CI
+  applied migrations to a fresh disposable PostgreSQL service and completed
+  compileall, Ruff, the warnings-as-errors unit/integration suite and `pip
+  check`. This bounded test proves
   rotation between HTTP dependency resolution and project-list transaction;
   it does not prove all rotation/revocation schedules or M2 acceptance.
