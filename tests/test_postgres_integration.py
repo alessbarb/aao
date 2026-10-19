@@ -382,3 +382,70 @@ def test_project_reads_are_scoped_to_granted_worker(monkeypatch):
         assert client.get(f"/v1/projects/{allow}/board", headers=worker).status_code == 200
         assert client.get(f"/v1/projects/{deny}/board", headers=worker).status_code == 403
         assert client.get(f"/v1/projects/{deny}/board", headers=ceo).status_code == 200
+
+
+@pytest.mark.skipif(
+    not os.getenv("AAO_TEST_POSTGRES_URL") or os.getenv("AAO_TEST_DB_DISPOSABLE") != "yes",
+    reason="Explicit disposable PostgreSQL database required",
+)
+def test_individual_auditor_credential_is_bound_to_review(monkeypatch):
+    from aao.pg_work import app
+    from aao.pg_principals import digest_token
+    from aao.postgres import connect_postgres
+
+    monkeypatch.setenv("AAO_POSTGRES_URL", os.environ["AAO_TEST_POSTGRES_URL"])
+    monkeypatch.setenv("AAO_CEO_TOKEN", "individual-ceo")
+    monkeypatch.setenv("AAO_WORK_TOKEN", "individual-worker")
+    ceo = {"X-CEO-Token": "individual-ceo"}
+    worker = {"X-Work-Token": "individual-worker"}
+    auditor_id = "auditor-" + str(uuid4())
+    secret = "individual-secret-" + str(uuid4())
+    with connect_postgres() as db:
+        db.execute(
+            "INSERT INTO principal_credentials(principal_id,kind,token_digest,enabled) "
+            "VALUES (%s,'AUDITOR',%s,true)",
+            (auditor_id, digest_token(secret)),
+        )
+    with TestClient(app) as client:
+        mandate = client.post("/v1/mandates", headers=ceo, json={
+            "title": "Individual reviewer " + str(uuid4()),
+            "objective": "Test credentials without external effects",
+        }).json()["id"]
+        assert client.post(f"/v1/mandates/{mandate}/confirm", headers=ceo).status_code == 200
+        project = client.post("/v1/projects", headers=ceo, json={
+            "name": "Audit test", "mandate_id": mandate
+        }).json()["id"]
+        for identity, capability in (
+            ("development-worker", "work.create"),
+            ("development-worker", "work.admit"),
+            ("development-worker", "work.progress"),
+        ):
+            assert client.post(f"/v1/projects/{project}/grants", headers=ceo, json={
+                "principal_id": identity, "capability": capability,
+            }).status_code == 201
+        with connect_postgres() as db:
+            db.execute(
+                "INSERT INTO project_grants(principal_id,project_id,capability) "
+                "VALUES (%s,%s,'work.review')", (auditor_id, project),
+            )
+        work = client.post(f"/v1/projects/{project}/work", headers=worker, json={
+            "title": "Individual audited work",
+            "author_id": "spoof-attempt",
+            "acceptance_criteria": ["independently reviewed"],
+        }).json()["id"]
+        assert client.post(f"/v1/work/{work}/admit", headers=worker).status_code == 200
+        assert client.post(f"/v1/work/{work}/progress", headers=worker).status_code == 200
+        assert client.post(f"/v1/work/{work}/progress", headers=worker).status_code == 200
+        payload = {"decision": "APPROVE", "evidence": ["isolated local proof"]}
+        denied = client.post(f"/v1/work/{work}/reviews",
+                             headers={"X-Auditor-Token": "incorrect"}, json=payload)
+        assert denied.status_code == 403
+        allowed = client.post(f"/v1/work/{work}/reviews",
+                              headers={"X-Auditor-Token": secret}, json=payload)
+        assert allowed.status_code == 201, allowed.text
+        with connect_postgres() as db:
+            actual = db.execute(
+                "SELECT reviewer_id FROM reviews WHERE id=%s",
+                (allowed.json()["review_id"],),
+            ).fetchone()
+            assert actual[0] == auditor_id
