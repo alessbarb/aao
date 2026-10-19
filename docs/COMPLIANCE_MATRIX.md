@@ -34,4 +34,6 @@ automated operational recovery, runtime-independent controls, and governed
 execution; M2-C retains continuous/production maturity. No stage authorizes
 activating models, tools, providers or real external effects. Later-stage
 assignment does not count as satisfaction. The technical matrix cannot be
-used to infer operational powers.
+used to infer operational powers. Planner/admission inputs for capacity,
+budget, risk, and authorization remain simulated; they are not operational
+safeguards or evidence of safe admission.

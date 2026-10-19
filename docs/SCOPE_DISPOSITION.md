@@ -48,18 +48,11 @@ and acceptance.
 
 Suspension, credential-boundary, inert proposal idempotency, and lease-fencing
 follow-ups are implemented at `dc084417a2ba683fe4737342f89e9cd1036b38ad`;
-their exact local evidence is in the verification register. At the earlier
-`8b8c036` checkpoint,
-PR #2's reported head lagged the branch. That historical mismatch was
-subsequently corrected and rechecked. At the current package checkpoint, local
-`HEAD`, `origin/feat/aao-m0-foundation`, `origin/review/m2-inert-candidate`,
-and live PR #2 head all equal
-`4e8fa48e91c1e8ee5b6a375dc61ecf2cf3f457b8` before the current review
-follow-up. PR #2 remains OPEN and DRAFT. At verification checkpoint
-`9faef92e1c6d5f7f509f398193d6f7886b5ddbb0`, implementation candidate
-`dc084417a2ba683fe4737342f89e9cd1036b38ad` had been pushed, and local `HEAD`,
-both branch refs, and the live PR head matched. Later documentation-only
-changes must be pushed and refs rechecked before review. The review request
+their exact local evidence is in the verification register. Earlier PR-head
+mismatches at `8b8c036` were corrected. The live refs were last verified
+together at package checkpoint `f99563bcc7c4fa9803c4aa4597812b0e23e2d6b8`;
+subsequent documentation changes require a fresh ref check before formal
+review. PR #2 was OPEN and DRAFT at that check. The exact final review request
 must pin both package and implementation revisions; no validated code history
 was rewritten.
 

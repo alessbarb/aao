@@ -21,11 +21,11 @@ authorize models, tools, providers, production deployment, or external effects.
   At the pre-fix live check, local `HEAD`, both remote refs and PR head matched
   `b15dea4f69823bcb894cb58eda54dcffdb48d602`. After committing the fixes,
   the current local implementation candidate is
-  `dc084417a2ba683fe4737342f89e9cd1036b38ad`; prior package checkpoint
-  `9faef92e1c6d5f7f509f398193d6f7886b5ddbb0` was pushed and rechecked as the
-  live PR head. Current documentation-only changes still need to be pushed
-  and rechecked before formal review. The review report must identify package
-  and source revisions separately.
+  `dc084417a2ba683fe4737342f89e9cd1036b38ad`; the prior live-ref check was
+  package checkpoint `f99563bcc7c4fa9803c4aa4597812b0e23e2d6b8`. Recheck the
+  final package/PR head and pin both exact revisions in the formal review
+  request; the report must identify package and implementation revisions
+  separately.
 
 ## What M2-A evidence demonstrates
 
@@ -61,9 +61,10 @@ acceptance.
    exact implementation source SHA `dc08441`; the subsequent package commits
    are documentation only. Re-run only if code changes or
    the formal reviewer cannot reproduce the recorded environment. Obtain a
-   qualified independent security/architecture review of exact package SHA
-   final pushed package SHA and code SHA `dc08441`. The reviewer must be different from the
-   implementer and provide an attributable report with methods and findings.
+   qualified independent security/architecture review of the exact live PR
+   package SHA and code SHA `dc084417a2ba683fe4737342f89e9cd1036b38ad`. The
+   reviewer must be different from the implementer and provide an attributable
+   report with methods and findings.
 3. Resolve or explicitly disposition review findings within the M2-A boundary.
 4. Present exact-SHA evidence and the residual-risk list below for competent
    acceptance. The engineering agent must not self-accept M2-A.
@@ -83,6 +84,10 @@ the formal independence condition.
   established.
 - Selected lock/race coverage is not exhaustive. Recovery is explicit/manual;
   no process restart or autonomous recovery controller is claimed in M2-A.
+- The planner/admission path still contains simulated authorization,
+  dependency, capacity, budget, and risk inputs. These are not operational
+  resource/risk controls and must not be treated as evidence that the candidate
+  can safely admit real work; autonomous work admission remains outside M2-A.
 - No production/deployment, continuous-service, or CI result is claimed here.
 
 ## Later stages and retained requirements

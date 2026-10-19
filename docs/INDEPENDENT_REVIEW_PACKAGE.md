@@ -9,8 +9,11 @@ not acceptance claims or implementation authorization.
 **Implementation candidate:** `dc084417a2ba683fe4737342f89e9cd1036b38ad` on
 `feat/aao-m0-foundation`, with 83-test local evidence recorded in the evidence
 register. The earlier base implementation is `99760c7339323600368e5dbb145b088d83ad0715`.
-The reviewer must separately identify the exact packaging revision containing
-this document and its companion reports.
+The package revision last verified against both branch refs and the live PR
+head was `f99563bcc7c4fa9803c4aa4597812b0e23e2d6b8`. This package has had
+documentation-only changes since that checkpoint; the latest PR comment pins
+the exact revision to review. Recheck live refs at checkout and report both
+package and implementation SHAs.
 
 This is a prepared package for a qualified independent reviewer. It is not
 itself the requested independent review and does not claim formal acceptance.
