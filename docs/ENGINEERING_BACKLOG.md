@@ -24,8 +24,10 @@ or `[BLOCKED]` labels below as live issue statuses.
    audited transactionally; API, execution and reconciliation authorization
    checks lock the matched grant row. PostgreSQL tests cover revocation waiting
    behind a protected authorization transaction and expiry during lock wait;
-   an AGENT authentication lock also serializes with token rotation. Still
-   required: repeated/adversarial schedules, full business mutation and queue
+   an AGENT authentication lock also serializes with token rotation. A
+   controlled PostgreSQL integration test proves project-grant deletion waits
+   for an HTTP work-creation transaction that already holds that grant. Still
+   required: repeated/adversarial schedules, other business mutation and queue
    claim/completion races against revocation/rotation, and review of long-
    running transaction expiry semantics.
 3. **Implemented in candidate code and locally validated:** execution/effect

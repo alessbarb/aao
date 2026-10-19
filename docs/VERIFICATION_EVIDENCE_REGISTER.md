@@ -286,3 +286,18 @@ passed **53 tests** with compileall, Ruff, pip check and diff check clean.
 GitHub Actions run `39254963905` passed on the same code SHA. This validates
 credential-row serialization, not a complete queue-claim/completion business
 operation racing rotation or all revoke/rotate schedules.
+
+## Project-grant revocation versus a protected HTTP write
+
+Commit `3168ec3ba14cd7093dc34c435db7bdcc466bb32f` adds an integration test
+that deliberately blocks an HTTP work-creation request at its final INSERT
+using a table lock, after the request has authenticated and acquired its
+project grant `FOR SHARE`. It then starts the actual grant-revocation HTTP
+route on another thread and verifies PostgreSQL reports revocation blocked by
+the work request's backend. Releasing the table lock allows the work write to
+commit first; revocation then succeeds, and the test verifies both the durable
+work row and absent grant. Five consecutive local reruns passed; full local
+validation passed **54 tests**, with compileall, Ruff, pip check and diff check
+clean. GitHub Actions run `39255217942` passed on the same code SHA. This is
+one controlled HTTP mutation/revocation ordering, not broad coverage of all
+protected routes, claim/completion, or adversarial schedules.

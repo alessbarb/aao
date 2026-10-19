@@ -49,9 +49,11 @@ inside their transaction. The CEO credential is still a single static bearer.
   serialized outcomes but not exhaustive lock scheduling.
 - Sequential credential revocation tests and unit mocks that assert SQL text
   do not prove real PostgreSQL lock behavior. Direct transaction-level tests
-  now verify grant deletion and auditor credential revocation lock behavior;
-  races against full business writes, claims and completion are still needed.
-- The current full local suite has 53 tests, including grant-row, auditor
+  verify auditor credential revocation lock behavior; a controlled HTTP work
+  creation test holds the admitted grant check while grant deletion attempts
+  to race and confirms the write commits first. Other business writes and
+  queue claim/completion races remain to be tested.
+- The current full local suite has 54 tests, including grant-row, auditor
   credential-lock, and completion-after-lease-expiry-during-row-lock-wait
   coverage, plus one AGENT authentication/rotation lock schedule. Three
   controlled races between completion and quarantine after
@@ -60,7 +62,7 @@ inside their transaction. The CEO credential is still a single static bearer.
   restart has been manually verified for one expired lease; broad restart and
   crash-recovery schedules remain open.
 - GitHub CI configures a fresh disposable PostgreSQL service and runs the
-  guarded integration suite; run `39254352077` passed on code SHA `919ce21`.
+  guarded integration suite; run `39255217942` passed on code SHA `3168ec3`.
   Current exact local results are recorded in the evidence register; this is
   not independent review or M2 acceptance.
 - Grant expiry uses `clock_timestamp()` when the locked authorization query is
