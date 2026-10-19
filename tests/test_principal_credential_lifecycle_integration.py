@@ -3,6 +3,7 @@ import os
 import time
 from concurrent.futures import ThreadPoolExecutor
 from hashlib import sha256
+from threading import Event
 from uuid import uuid4
 
 import pytest
@@ -221,6 +222,112 @@ def test_individual_auditor_credential_is_bound_to_review(monkeypatch):
                 (rejection.json()["review_id"],),
             ).fetchone()
             assert actual[0] == auditor_id
+
+
+@pytest.mark.skipif(
+    not os.getenv("AAO_TEST_POSTGRES_URL") or os.getenv("AAO_TEST_DB_DISPOSABLE") != "yes",
+    reason="Explicit disposable PostgreSQL database required",
+)
+def test_review_rejection_serializes_with_auditor_credential_revocation(monkeypatch):
+    """An in-flight authorized rejection commits before credential revocation."""
+    import aao.work_management_api as work_api
+    from aao.postgresql_connection import connect_postgres
+    from aao.work_management_api import app
+
+    monkeypatch.setenv("AAO_POSTGRES_URL", os.environ["AAO_TEST_POSTGRES_URL"])
+    monkeypatch.setenv("AAO_CEO_TOKEN", "review-revoke-ceo")
+    ceo = {"X-CEO-Token": "review-revoke-ceo"}
+    agent_id = "review-agent-" + str(uuid4())
+    auditor_id = "review-auditor-" + str(uuid4())
+    with TestClient(app) as client:
+        agent_token = client.post("/v1/principals/credentials", headers=ceo, json={
+            "principal_id": agent_id, "kind": "AGENT",
+        }).json()["token"]
+        auditor_token = client.post("/v1/principals/credentials", headers=ceo, json={
+            "principal_id": auditor_id, "kind": "AUDITOR",
+        }).json()["token"]
+        mandate = client.post("/v1/mandates", headers=ceo, json={
+            "title": "Review revocation race " + str(uuid4()),
+            "objective": "Verify review authorization is held through commit",
+        }).json()["id"]
+        assert client.post(f"/v1/mandates/{mandate}/confirm", headers=ceo).status_code == 200
+        project = client.post("/v1/projects", headers=ceo, json={
+            "name": "Review revocation race", "mandate_id": mandate,
+        }).json()["id"]
+        for principal, capability in (
+            (agent_id, "work.create"),
+            (agent_id, "work.admit"),
+            (agent_id, "work.progress"),
+            (auditor_id, "work.review"),
+        ):
+            response = client.post(f"/v1/projects/{project}/grants", headers=ceo, json={
+                "principal_id": principal, "capability": capability,
+            })
+            assert response.status_code == 201, response.text
+        worker = {"X-Agent-Token": agent_token}
+        work = client.post(f"/v1/projects/{project}/work", headers=worker, json={
+            "title": "Review authorization race",
+            "author_id": "ignored-client-identity",
+            "acceptance_criteria": ["Authorized rejection is auditable"],
+        }).json()["id"]
+        assert client.post(f"/v1/work/{work}/admit", headers=worker).status_code == 200
+        assert client.post(f"/v1/work/{work}/progress", headers=worker).status_code == 200
+        assert client.post(f"/v1/work/{work}/progress", headers=worker).status_code == 200
+
+        authorized = Event()
+        release_review = Event()
+        protected_pid = []
+        real_require_grant = work_api.require_grant
+
+        def pause_after_review_authorization(db, principal, project_id, capability):
+            real_require_grant(db, principal, project_id, capability)
+            if capability == "work.review":
+                protected_pid.append(db.execute("SELECT pg_backend_pid()").fetchone()[0])
+                authorized.set()
+                if not release_review.wait(timeout=5):
+                    raise AssertionError("test did not release the protected review transaction")
+
+        monkeypatch.setattr(work_api, "require_grant", pause_after_review_authorization)
+        with ThreadPoolExecutor(max_workers=2) as pool:
+            review_future = pool.submit(
+                client.post,
+                f"/v1/work/{work}/reviews",
+                headers={"X-Auditor-Token": auditor_token},
+                json={"decision": "REJECT", "evidence": ["needs more work"]},
+            )
+            assert authorized.wait(timeout=5), "review did not reach its in-transaction grant check"
+            revoke_future = pool.submit(
+                client.post, f"/v1/principals/{auditor_id}/revoke", headers=ceo,
+            )
+            try:
+                deadline = time.monotonic() + 5
+                blocked = False
+                while time.monotonic() < deadline:
+                    with connect_postgres() as observer:
+                        blocked = observer.execute(
+                            "SELECT EXISTS (SELECT 1 FROM pg_stat_activity "
+                            "WHERE query LIKE 'UPDATE principal_credentials SET enabled=false%%' "
+                            "AND wait_event_type='Lock' "
+                            "AND %s=ANY(pg_blocking_pids(pid)))",
+                            (protected_pid[0],),
+                        ).fetchone()[0]
+                    if blocked:
+                        break
+                    time.sleep(0.01)
+                assert blocked, "auditor credential revocation did not wait for the protected review"
+                assert not revoke_future.done()
+            finally:
+                release_review.set()
+            review_response = review_future.result(timeout=5)
+            revoke_response = revoke_future.result(timeout=5)
+
+        assert review_response.status_code == 201, review_response.text
+        assert review_response.json()["status"] == "IN_PROGRESS"
+        assert revoke_response.status_code == 200, revoke_response.text
+        denied = client.post(f"/v1/work/{work}/reviews", headers={
+            "X-Auditor-Token": auditor_token,
+        }, json={"decision": "REJECT", "evidence": ["stale credential"]})
+        assert denied.status_code == 403
 
 
 @pytest.mark.skipif(
