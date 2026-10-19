@@ -33,8 +33,8 @@ inside their transaction. The CEO credential is still a single static bearer.
 | Operation | Identity / capability check | Transaction boundary | Known boundary |
 | --- | --- | --- | --- |
 | `execution_queue.claim()` / `complete()` | Individual AGENT credential; requires unexpired `execution.claim` project grant | Credential and grant are checked with `FOR SHARE`; queue/project rows are locked. | Migration 006 transfers legacy identities and drops the old registry. Lease expiry is computed and checked with PostgreSQL `clock_timestamp()`; a real database-lock-wait test covers delayed completion. Other lease/revocation schedules remain open. |
-| `execution_reconciliation.reconcile()` | Active AUDITOR bearer credential resolves reviewer in-transaction; unexpired `execution.reconcile` grant; AGENT credentials denied | Locks credential, queue/project and grant rows | No HTTP endpoint. Evidence references are not verified; credential-revocation race lacks dedicated coverage. Retry-vs-effect-proposal race is not serialized. |
-| `external_effect_registry.propose()` | No principal authentication or project grant check in this helper | Idempotency-key row is locked; execution existence is checked without a lock | Records proposals only; does not execute. It is not safe to treat as an authorization boundary. |
+| `execution_reconciliation.reconcile()` | Active AUDITOR bearer credential resolves reviewer in-transaction; unexpired `execution.reconcile` grant; AGENT credentials denied | Locks credential, queue/project and grant rows | No HTTP endpoint. Evidence references are not verified; credential-revocation race lacks dedicated coverage. Retry-vs-proposal has a controlled integration race, not exhaustive scheduling proof. |
+| `external_effect_registry.propose()` | No principal authentication or project grant check in this helper | Locks execution row, requires `RUNNING` for new proposals, then locks matching idempotency key | Records proposals only; does not execute. It is not an authorization boundary. Queue-row lock serializes proposal admission with retry. |
 | `external_effect_reconciliation.reject_unexecuted_proposal()` | Active AUDITOR bearer credential resolves reviewer in-transaction; unexpired `effect.reconcile` grant; AGENT credentials denied | Locks credential, effect/queue and grant rows | Evidence references are not verified; internal helper only. No external effect is executed. |
 
 ## Cross-cutting gaps and test status
@@ -43,8 +43,9 @@ inside their transaction. The CEO credential is still a single static bearer.
   tuples under `FOR SHARE`; CEO grant deletion serializes behind in-flight
   protected transactions. PostgreSQL tests cover a held-check/revocation race,
   expiry during a blocked row-lock wait, and AUDITOR credential-authentication
-  serialization against revocation. Other lease, credential-rotation,
-  effect proposal/retry, and recovery races remain untested.
+  serialization against revocation. Other lease and credential-rotation
+  schedules remain untested. A barrier-started proposal/retry test covers the
+  serialized outcomes but not exhaustive lock scheduling.
 - Sequential credential revocation tests and unit mocks that assert SQL text
   do not prove real PostgreSQL lock behavior. Direct transaction-level tests
   now verify grant deletion and auditor credential revocation lock behavior;
@@ -53,11 +54,13 @@ inside their transaction. The CEO credential is still a single static bearer.
   credential-lock, and completion-after-lease-expiry-during-row-lock-wait
   coverage. Three controlled races between completion and quarantine after
   expiry also finish in `UNCERTAIN`; this is not a broad adversarial schedule
-  proof. Effect-proposal/retry races and cold-restart recovery remain untested.
-- GitHub CI now configures a fresh disposable PostgreSQL service and runs the
-  guarded integration suite; run `39251540849` passed on `585b422`. Current
-  local results are recorded in the evidence register; this is not independent
-  review or M2 acceptance.
+  proof. Effect proposal/retry races are tested as above. A cold PostgreSQL
+  restart has been manually verified for one expired lease; broad restart and
+  crash-recovery schedules remain open.
+- GitHub CI configures a fresh disposable PostgreSQL service and runs the
+  guarded integration suite; run `39254352077` passed on code SHA `919ce21`.
+  Current exact local results are recorded in the evidence register; this is
+  not independent review or M2 acceptance.
 - Grant expiry uses `clock_timestamp()` when the locked authorization query is
   evaluated, avoiding PostgreSQL transaction-start `now()` semantics. This
   does not itself prove every long-running operation stops exactly at expiry;

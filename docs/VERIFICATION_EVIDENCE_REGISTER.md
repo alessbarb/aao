@@ -247,3 +247,17 @@ PostgreSQL suite passed **52 tests** with compileall, Ruff, pip check and diff
 check clean. GitHub Actions run `39254352077` passed on the same code SHA.
 These are bounded controlled tests, not exhaustive scheduling or adversarial
 review; no external effect was executed.
+
+## Cold PostgreSQL restart with an expired execution lease
+
+On the current code checkpoint `5d64de31429748d3150a919dedc10ae27428b640`,
+I created a separate disposable `postgres:16-alpine` container, applied
+migrations 001-006, staged and claimed one inert execution with a one-second
+lease, then restarted that PostgreSQL container. The database retained the
+execution as `RUNNING` with one attempt. After reconnecting, one call to
+`quarantine_expired()` moved it to `UNCERTAIN`; the persisted journal contained
+`claimed` then `quarantined`, and the attempt count remained one. The temporary
+container was removed afterward. This demonstrates single-instance database
+restart persistence and explicit expired-lease quarantine, not automatic
+recovery, a process crash during transaction commit, failover, or repeated
+restart schedules. No production database or external effect was used.
