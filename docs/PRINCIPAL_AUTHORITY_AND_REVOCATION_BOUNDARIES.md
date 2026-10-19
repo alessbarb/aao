@@ -37,9 +37,13 @@ the PostgreSQL API.
 - Migration 006 removes the legacy worker registration table after transferring
   its identities. The migration and identity handoff still warrant independent
   review and collision/recovery testing.
-- Concurrent credential rotation/revocation, grant revocation against queue
-  claim/completion, expiry across long-running operations, and repeated
-  adversarial schedules remain to be tested.
+- Selected concurrency schedules now cover credential revocation against
+  queue claim/completion and review rejection, grant deletion against protected
+  writes, plus a stale review request context after credential or review-grant
+  revocation. They do not cover every operation or ordering. Concurrent
+  credential rotation/revocation across remaining operations, expiry across
+  long-running operations, and repeated adversarial schedules remain to be
+  tested.
 - CEO authentication remains provisional. No production identity provider, privileged token management, or independent security approval exists.
 - PostgreSQL role isolation, adverse concurrency, audit guarantees and cold-restart recovery remain acceptance gates.
 - External execution and effects remain disabled.
