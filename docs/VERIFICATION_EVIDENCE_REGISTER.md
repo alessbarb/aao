@@ -859,3 +859,11 @@ coverage, independent review, or M2 acceptance.
   review, or M2-A acceptance. The test command used the candidate worktree with
   documentation-only scope and review-package updates after implementation
   source `99760c7`; code was unchanged.
+
+## M2-A scope package verification — 2026-10-19
+
+- Exact checked-out and PR candidate revision: `acb85a268b3ec32630e858512058d970ae970191` on `feat/aao-m0-foundation` / PR #2 head `review/m2-inert-candidate`.
+- `AAO_ENV=test AAO_ENV_FILE=.env.test python -m pytest -q -rs -W error` passed **80 tests, 0 failures, 0 skips, 0 warnings** in **19.76 s** against the explicitly disposable local test database.
+- `python -m compileall -q src tests`, `python -m ruff check src tests`, `python -m pip check`, and `git diff --check` passed at this revision.
+- Separately, fresh scratch database replay of migrations 001–009 including the synthetic legacy row upgrade path and the full 80-test suite passed at this same source state; scratch DB dropped. The exact run was performed before this evidence-registration-only commit, with no code changes between runs.
+- Live PR `#2` head was initially stale immediately after push, then refreshed to this exact SHA. CI is not asserted or awaited. This remains candidate evidence, not independent review or M2-A acceptance.

@@ -35,7 +35,11 @@ plus documentation/test-history commits; it introduced no runtime-code change
 after the implementation candidate. Subsequent scope/documentation commits may
 advance PR #2's head, so a formal reviewer must use the live PR head SHA and
 identify it in the review report. Do not rewrite the validated implementation
-history to make the SHAs appear equal.
+history to make the SHAs appear equal. After the scope package was committed,
+local `HEAD`, `origin/feat/aao-m0-foundation`, `origin/review/m2-inert-candidate`,
+and live PR #2 all matched `acb85a268b3ec32630e858512058d970ae970191`.
+The implementation source remains `99760c7339323600368e5dbb145b088d83ad0715`;
+there were only documentation changes after it.
 
 ## M2-A measurable acceptance criteria
 
