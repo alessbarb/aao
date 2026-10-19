@@ -130,9 +130,11 @@ It does **not** execute tools, models or arbitrary user-specified commands.
 It is not a substitute for trusted identity, resources, risks and project
 permissions. Never enable it on a public or shared network.
 
-The initial project workboard and the queue have automated test cases committed
-but **their execution remains unverified in this session**. Do not promote or
-deploy until runtime verification and independent security review.
+At the time of this historical snapshot, the workboard and queue test cases had
+not yet been run. Current local test results and their exact validated source
+revision are recorded in the [verification evidence register](docs/VERIFICATION_EVIDENCE_REGISTER.md).
+Those engineering checks do not constitute independent security review,
+deployment approval, or M2 acceptance.
 
 ## Historical PostgreSQL development service snapshot
 
@@ -142,10 +144,10 @@ mandate, project, project grant, work-item and READY-admission writes. This is
 agent execution, external integrations, secure production authentication,
 independent-review endpoint or full workflows.
 
-Read [PostgreSQL runtime setup](docs/POSTGRESQL_RUNTIME_OPERATIONS.md). It requires applying
-`001_foundation.sql` and `002_dev_identity.sql` to a **fresh isolated development**
-database, then running on localhost. The development identity migration relaxes
-principal FK enforcement and is **not a production schema**.
+For current PostgreSQL setup instructions, use
+[PostgreSQL runtime operations](docs/POSTGRESQL_RUNTIME_OPERATIONS.md). The
+older `001`/`002` instructions in this snapshot are historical only; do not
+replay them as current setup guidance or alter migrations `001`–`005`.
 
 An opt-in integration test exists in `tests/test_project_workflow_integration.py`, `tests/test_execution_leases_integration.py`, `tests/test_execution_reconciliation_integration.py`, and `tests/test_principal_credential_lifecycle_integration.py`.
 Use it only on an explicitly disposable database:
@@ -158,7 +160,9 @@ pytest -q tests/test_project_workflow_integration.py tests/test_execution_leases
 
 The test creates records and does not delete the database afterwards.
 
-**Tests and actual PostgreSQL server execution have not been verified here.**
+**Historical checkpoint:** tests and PostgreSQL execution had not been verified
+when this section was written. See the evidence register for later, exact-SHA
+local validation and its limitations.
 
 ## M2 recovery increment
 
@@ -167,7 +171,8 @@ and an opt-in PostgreSQL concurrency test. See [M2 inert worker](docs/INERT_WORK
 
 The worker is not scheduled automatically, no AI models are connected, and no
 external effect is performed. Database-backed tests still require a disposable
-PostgreSQL instance. No verified test run or operational acceptance is claimed.
+PostgreSQL instance. This snapshot's verification statement is historical;
+current test evidence and scope are in the verification register.
 
 ## Local configuration (development-only)
 
