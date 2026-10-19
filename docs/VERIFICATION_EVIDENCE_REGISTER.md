@@ -222,3 +222,16 @@ After the 50-test baseline at `87779b5d8422d33e7f8befbe87c4e4ff307cee52`, the pr
   has no HTTP endpoint; only one lock schedule is covered; grant/lease/effect
   retry races, independent security review and competent M2 acceptance remain
   open. This is not M2 closure.
+
+## Effect proposal/retry serialization
+
+Commit `62ef676a67851d976f6d327800d46b247bdea956` locks the execution row
+before checking/inserting an effect proposal and accepts a new proposal only
+while that execution is `RUNNING`. This serializes proposal admission against
+the retry transaction's execution-row lock: a prior proposal is visible to the
+retry check; a retry that commits first leaves a queued execution, for which a
+new proposal is denied. Local disposable PostgreSQL validation passed **52
+tests** with compileall, Ruff, pip check and diff check clean. GitHub Actions
+run `39253994700` passed on the same code SHA. This verifies the implemented
+admission boundary, not every possible proposal/retry schedule and not any
+external effect execution.
