@@ -15,7 +15,10 @@ use a new corrective migration rather than removing the fence.
 The reviewer must present an active individual `AUDITOR` credential and have
 an unexpired project-scoped `execution.reconcile` grant; the reviewer ID is
 derived from that credential inside the same transaction. AGENT credentials
-are rejected. Evidence references are mandatory.
+are rejected. The same principal ID as the former execution worker is rejected,
+but principal-ID separation is not proof of distinct human identity. Evidence
+references are mandatory but are not validated against an artifact store or
+cryptographically bound to their contents.
 Retry is refused when the project is paused or cancelled, or when any external
 effect exists except one explicitly rejected. That restriction errs on the
 side of refusing potentially unsafe duplicate effects.
@@ -28,20 +31,24 @@ project, and grant checks and proposal+journal writes occur in one transaction.
 This does not authorize or execute any external action; no effect adapter is
 enabled.
 
-**Important caveats:** evidence references are not cryptographically verified.
-The function remains intentionally **not exposed as an HTTP endpoint**. A
-caller with direct database/code execution privileges can bypass this Python
-policy; database roles/permissions must also be secured. Dedicated concurrent
-auditor-credential-revocation tests are still required.
-Tests of database-level reconciliation require an isolated PostgreSQL instance.
+**Important caveats:** the function remains intentionally **not exposed as an
+HTTP endpoint**. A caller with direct database/code execution privileges can
+bypass this Python policy; database roles/permissions must also be secured.
+Disposable-PostgreSQL tests now cover both controlled grant-deletion orderings
+for execution reconciliation (`MARK_FAILED`) and effect-proposal rejection,
+and both execution-reconciliation dispositions against auditor credential
+revocation. These schedules do not prove exhaustive/adversarial concurrency,
+human auditor independence, or evidence integrity. Tests of database-level
+reconciliation require an isolated PostgreSQL instance.
 
 ## Next gates
-- Concurrent auditor-credential revocation schedules now cover both
-  `MARK_FAILED` and `RETRY_CONFIRMED_SAFE`; grant-revocation races remain open.
-- Credential/grant revocation schedules and hostile ordering tests for effect
-  proposal and reconciliation; the proposal/rejection lock-order schedule now
-  passes five repeated controlled PostgreSQL competitions per focused test run,
-  but revocation races and broader adversarial schedules remain open.
+- Controlled auditor credential-revocation schedules cover both
+  `MARK_FAILED` and `RETRY_CONFIRMED_SAFE`. Both grant-deletion orderings have
+  selected tests for `execution.reconcile` (`MARK_FAILED`) and
+  `effect.reconcile`; broaden adversarial and repeated schedules as warranted.
+- Proposal/rejection lock-order tests and effect-proposal credential/grant
+  revocation schedules cover selected controlled orderings. Broader adversarial
+  schedules remain open.
 - Immutable verification of evidence and signed disposition.
 - Recovery of paused/running work and explicit in-flight effects reconciliation.
 - Repeated crash/credential rotation and concurrent-worker integration tests.
