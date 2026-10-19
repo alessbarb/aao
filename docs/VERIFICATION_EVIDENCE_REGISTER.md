@@ -1022,3 +1022,50 @@ coverage, independent review, or M2 acceptance.
   revision `31e7397` has not been added to PR #2 and needs a new exact package
   pin for any future formal review. Neither review nor M2-A acceptance is
   established by this entry.
+
+## Self-development read access and isolated cycle verification — 2026-10-19
+
+- Candidate source SHA: `73f2c94ccd5f2f25246a80a43c94d4cfd2f30f06` (PR #6,
+  OPEN/DRAFT). Reader auth supports individual AGENT/AUDITOR credentials;
+  `project.read` remains an explicit project-scoped grant. CEO authentication
+  was not changed.
+- On the exact candidate tree, a fresh, temporary PostgreSQL 16 container was
+  created for this run, migrations 001–009 were applied, and the container was
+  removed afterward. With the explicit disposable-test marker set,
+  `python -m compileall -q src tests`, `python -m ruff check src tests`,
+  `python -m pytest -q -rs -W error`, `python -m pip check`, and
+  `git diff --check` passed; pytest reported **105 passed, 0 skipped** in
+  **17.08 s**.
+- That full suite included `test_sandbox_worker_persists_self_development_cycle`:
+  it creates a test-only mandate, project, task, credentials, execution and PR
+  record in the disposable database, runs the allow-listed `core-unit` check in
+  Bubblewrap, verifies the stored result/PR SHA linkage, and confirms approval
+  remains disabled without independent evidence. The focused Bubblewrap runner
+  test also passed. These test fixtures are not the persisted development
+  project and are not represented as its live browser session.
+- GitHub CI run `39309700256` passed for the exact candidate source SHA.
+  Unlike the local run, CI reported the two Bubblewrap capability-dependent
+  tests skipped because the hosted runner denied namespace creation. The local
+  disposable-container run therefore supplies the exact SHA's executed
+  end-to-end sandbox test evidence; it does not establish operation on every
+  deployment host.
+- No authenticated browser session was opened and no credentials/secrets were
+  accessed. This test evidence makes no claim about the current persisted
+  development project's task or review status. It is engineering verification
+  only, not independent audit, CEO acceptance, or authorization to merge PR #6
+  or enable further operations.
+
+## Auditor read path through the persisted isolated cycle — 2026-10-19
+
+- At source SHA `29d6fcdd70cb12bf97b9846b35efa0d70146b65a`, the PostgreSQL
+  end-to-end cycle additionally checks that the individual auditor cannot
+  enumerate or read the task before a grant, then can list the project and read
+  task detail/activity after CEO grants only `project.read`. The returned task
+  remains `IN_REVIEW`, has no reviews, and exposes the recorded execution
+  result SHA and PR SHA; approval remains rejected. This establishes API
+  authorization and data linkage with disposable test data, not the actual
+  persisted project or a browser session.
+- A fresh temporary PostgreSQL 16 database replayed migrations 001–009 and was
+  removed after the full suite. At that exact source SHA, compileall, Ruff,
+  `pytest -q -rs -W error` (**105 passed, 0 skipped**, 17.33 s), `pip check`,
+  and `git diff --check` passed. No CI result is implied by this local run.

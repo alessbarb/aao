@@ -48,14 +48,14 @@ def claim(worker_id: str, *, agent_credential: str, project_id: str,
         if not grant:
             raise ExecutionConflict("Project execution claim grant required")
         row = db.execute(
-            "SELECT q.id FROM execution_queue q JOIN projects p ON p.id=q.project_id "
+            "SELECT q.id,q.work_id,q.input_json FROM execution_queue q JOIN projects p ON p.id=q.project_id "
             "WHERE q.status='QUEUED' AND p.state='ACTIVE' AND q.project_id=%s "
             "ORDER BY q.created_at,q.id FOR UPDATE OF q SKIP LOCKED LIMIT 1",
             (project_id,),
         ).fetchone()
         if not row:
             return None
-        eid = str(row[0])
+        eid, work_id, input_json = str(row[0]), str(row[1]), row[2]
         project_id = db.execute(
             "SELECT project_id FROM execution_queue WHERE id=%s", (eid,)
         ).fetchone()[0]
@@ -74,8 +74,8 @@ def claim(worker_id: str, *, agent_credential: str, project_id: str,
             (token, worker_id, seconds, project[1], eid),
         ).fetchone()[0]
         journal(db, eid, "claimed", {"worker_id": worker_id})
-    return {"execution_id": eid, "token": token, "worker_id": worker_id,
-            "expires_at": expiry.isoformat()}
+    return {"execution_id": eid, "work_id": work_id, "input": input_json,
+            "token": token, "worker_id": worker_id, "expires_at": expiry.isoformat()}
 
 
 def complete(execution_id: str, token: str, worker_id: str, result: dict,

@@ -13,7 +13,8 @@
     h1{font-size:1.2rem;margin:0;letter-spacing:.01em}h2{font-size:1.05rem;margin:0 0 14px}h3{font-size:.95rem;margin:0 0 8px}p{line-height:1.5;color:#aeb9c9;margin:.45rem 0}
     .top-actions{display:flex;align-items:center;gap:10px}button,select{font:inherit;color:#e9eef6;background:#202b38;border:1px solid #3a495b;border-radius:7px;padding:9px 12px}button{cursor:pointer}button:hover{background:#2a3848}button:focus-visible,a:focus-visible,select:focus-visible{outline:3px solid #8ec5ff;outline-offset:2px}
     .layout{display:grid;grid-template-columns:220px minmax(0,1fr);gap:26px;padding-top:24px}.nav{display:flex;flex-direction:column;gap:5px}.nav button{text-align:left;background:transparent;border-color:transparent;color:#aeb9c9}.nav button[aria-current="page"]{background:#1c2a35;border-color:#2f4a50;color:#9ae2c8}
-    main{min-width:0}.page-head{display:flex;align-items:flex-start;justify-content:space-between;gap:16px;margin-bottom:20px}.eyebrow,.muted,.meta{font-size:.82rem;color:#9aa9ba}.eyebrow{letter-spacing:.08em;text-transform:uppercase}.grid{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:12px}.panel,.metric,.task-card{background:#171f29;border:1px solid #2a3745;border-radius:9px;padding:16px}.metric strong{display:block;font-size:1.4rem;margin-top:6px}.panel{margin-bottom:14px}.panel p:last-child{margin-bottom:0}.banner{border-left:3px solid #d7a64a;background:#292519;padding:12px 14px;color:#ecd8a8;margin:14px 0 20px;font-size:.9rem}.state{display:inline-block;border:1px solid #42546a;border-radius:99px;padding:3px 8px;font-size:.75rem;color:#c6d5e5}.board{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:12px}.lane{background:#141b24;border:1px solid #273341;border-radius:9px;padding:12px;min-height:120px}.lane h3{color:#cbd6e3}.task-card{padding:12px;margin-top:9px}.task-title{color:#e9eef6;background:none;border:0;padding:0;text-align:left;font-weight:650}.list{list-style:none;margin:0;padding:0}.list li{border-top:1px solid #2a3745;padding:12px 0}.row{display:flex;justify-content:space-between;gap:12px;align-items:start}.error{color:#ffb4b4}.empty{padding:28px 16px;text-align:center;border:1px dashed #3a495b;border-radius:9px;color:#aeb9c9}.refs{font-family:ui-monospace,monospace;font-size:.8rem;overflow-wrap:anywhere;color:#c2d4e7}.decision{border-left:3px solid #8b6c35;padding-left:12px}.hidden{display:none!important}
+    main{min-width:0}.page-head{display:flex;align-items:flex-start;justify-content:space-between;gap:16px;margin-bottom:20px}.eyebrow,.muted,.meta{font-size:.82rem;color:#9aa9ba}.eyebrow{letter-spacing:.08em;text-transform:uppercase}.grid{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:12px}.panel,.metric,.task-card{background:#171f29;border:1px solid #2a3745;border-radius:9px;padding:16px}.metric strong{display:block;font-size:1.4rem;margin-top:6px}.panel{margin-bottom:14px}.panel p:last-child{margin-bottom:0}.banner{border-left:3px solid #d7a64a;background:#292519;padding:12px 14px;color:#ecd8a8;margin:14px 0 20px;font-size:.9rem}.state{display:inline-block;border:1px solid #42546a;border-radius:99px;padding:3px 8px;font-size:.75rem;color:#c6d5e5}.board{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:12px}.lane{background:#141b24;border:1px solid #273341;border-radius:9px;padding:12px;min-height:120px}.lane h3{color:#cbd6e3}.task-card{padding:12px;margin-top:9px}.task-title{color:#e9eef6;background:none;border:0;padding:0;text-align:left;font-weight:650}.list{list-style:none;margin:0;padding:0}.list li{border-top:1px solid #2a3745;padding:12px 0}.row{display:flex;justify-content:space-between;gap:12px;align-items:start}.error{color:#ffb4b4}.empty{padding:28px 16px;text-align:center;border:1px dashed #3a495b;border-radius:9px;color:#aeb9c9}.refs{font-family:ui-monospace,monospace;font-size:.8rem;overflow-wrap:anywhere;color:#c2d4e7}pre{white-space:pre-wrap;overflow-wrap:anywhere;max-height:280px;overflow:auto;background:#111820;border-radius:6px;padding:10px;color:#cbd6e3;font-size:.8rem}.decision{border-left:3px solid #8b6c35;padding-left:12px}.hidden{display:none!important}
+    .auth-panel{display:flex;align-items:end;gap:10px;flex-wrap:wrap;margin:14px 0;padding:14px;border:1px solid #3a495b;border-radius:9px;background:#171f29}.auth-panel label{display:grid;gap:6px;min-width:min(240px,100%);color:#cbd6e3;font-size:.85rem}.auth-panel input{font:inherit;color:#e9eef6;background:#10151c;border:1px solid #3a495b;border-radius:7px;padding:9px 12px}.auth-panel p{flex-basis:100%;margin:0;font-size:.82rem}
     @media(max-width:800px){.shell{padding:16px}.layout{grid-template-columns:1fr;gap:16px}.nav{flex-direction:row;overflow-x:auto;padding-bottom:5px}.nav button{white-space:nowrap}.grid,.board{grid-template-columns:1fr 1fr}}
     @media(max-width:520px){.topbar,.page-head{align-items:flex-start;flex-direction:column}.top-actions{width:100%}.top-actions select{min-width:0;flex:1}.grid,.board{grid-template-columns:1fr}}
   </style>
@@ -22,9 +23,22 @@
   <div class="shell">
     <header class="topbar">
       <div class="brand"><div class="mark" aria-hidden="true">A</div><div><h1>AAO Control Center</h1><span class="muted">Operaciones organizativas · desarrollo local</span></div></div>
-      <div class="top-actions"><label class="hidden" for="project">Proyecto</label><select id="project" aria-label="Proyecto"></select><button id="reload" type="button">Actualizar</button></div>
+      <div class="top-actions"><span id="session-status" class="muted hidden" role="status"></span><label class="hidden" for="project">Proyecto</label><select id="project" aria-label="Proyecto"></select><button id="reload" type="button">Actualizar</button><button id="disconnect" type="button" class="hidden">Desconectar</button></div>
     </header>
-    <div id="message" role="status" aria-live="polite" class="muted">Conectando con el núcleo local…</div>
+    <form id="auth-panel" class="auth-panel" autocomplete="off">
+      <label for="reader-kind">Identidad individual
+        <select id="reader-kind" name="reader-kind">
+          <option value="AGENT">Agente</option>
+          <option value="AUDITOR">Auditor</option>
+        </select>
+      </label>
+      <label for="auth-token">Credencial individual de desarrollo
+        <input id="auth-token" name="token" type="password" autocomplete="new-password" required>
+      </label>
+      <button type="submit">Conectar</button>
+      <p>Solo se consultan datos autorizados por el grant project.read. La credencial se conserva en memoria de esta pestaña y nunca se guarda en almacenamiento local.</p>
+    </form>
+    <div id="message" role="status" aria-live="polite" class="muted">Autenticación requerida para consultar el núcleo local.</div>
     <div class="layout">
       <nav class="nav" aria-label="Navegación principal">
         <button type="button" data-page="home" aria-current="page">Inicio</button>
@@ -33,7 +47,7 @@
         <button type="button" data-page="evidence">Evidencias</button>
         <button type="button" data-page="decisions">Decisiones reservadas</button>
       </nav>
-      <main id="content" tabindex="-1"></main>
+      <main id="content" tabindex="-1"><div class="empty">Introduce una credencial de desarrollo para consultar los datos reales de PostgreSQL.</div></main>
     </div>
   </div>
   <script>
@@ -41,18 +55,19 @@
     const states=["INBOX","READY","IN_PROGRESS","IN_REVIEW","VERIFIED","DONE"];
     const labels={INBOX:"Entrada",READY:"Preparado",IN_PROGRESS:"En curso",IN_REVIEW:"En revisión",VERIFIED:"Verificado",DONE:"Completado"};
     const projectSelect=document.querySelector("#project"),content=document.querySelector("#content"),message=document.querySelector("#message");
-    let projects=[],selectedProject=null,board=[],detail=null,activity=[],selectedTask=null,activePage="home",ceoToken=null;
+    const authPanel=document.querySelector("#auth-panel"),authInput=document.querySelector("#auth-token"),readerKind=document.querySelector("#reader-kind"),disconnectButton=document.querySelector("#disconnect"),sessionStatus=document.querySelector("#session-status");
+    let projects=[],selectedProject=null,board=[],detail=null,activity=[],selectedTask=null,activePage="home",readerToken=null,readerIdentity="AGENT";
     function el(tag,text,cls){const item=document.createElement(tag);if(text!==undefined)item.textContent=text;if(cls)item.className=cls;return item}
     function panel(title){const p=el("section",undefined,"panel");p.append(el("h2",title));return p}
     function empty(text){return el("div",text,"empty")}
     function displayDate(value){if(!value)return "Fecha no disponible";const d=new Date(value);return Number.isNaN(d.getTime())?String(value):d.toLocaleString("es-ES")}
     async function request(path){
-      const headers=ceoToken?{"X-CEO-Token":ceoToken}:{};
-      let response=await fetch(path,{credentials:"same-origin",headers});
-      if(response.status===403&&!ceoToken){
-        const token=window.prompt("Token CEO de desarrollo para consultar PostgreSQL (permanece solo en esta pestaña):");
-        if(!token)throw new Error("Acceso no autorizado. No se ha guardado ninguna credencial.");
-        ceoToken=token;response=await fetch(path,{credentials:"same-origin",headers:{"X-CEO-Token":ceoToken}});
+      const headers=readerToken?{[readerIdentity==="AUDITOR"?"X-Auditor-Token":"X-Agent-Token"]:readerToken}:{};
+      const response=await fetch(path,{credentials:"same-origin",headers});
+      if(response.status===401||response.status===403){
+        if(readerToken){readerToken=null;authInput.value="";readerKind.disabled=false;disconnectButton.classList.add("hidden");sessionStatus.classList.add("hidden");sessionStatus.textContent=""}
+        authPanel.classList.remove("hidden");
+        throw new Error("Acceso no autorizado. Introduce una credencial de desarrollo para continuar.");
       }
       if(!response.ok)throw new Error("La API respondió HTTP "+response.status);
       return response.json();
@@ -113,23 +128,50 @@
       box.append(el("p","Autor (identidad de agente): "+data.author_id,"meta"));
       const runs=el("div");runs.append(el("h3","Ejecuciones (procesos técnicos)"));
       if(!data.executions.length)runs.append(empty("No hay ejecuciones registradas para esta tarea."));
-      for(const run of data.executions){const row=el("article",undefined,"task-card");row.append(el("strong","Ejecución "+run.id,"refs"),el("p","Estado: "+run.status+" · intentos: "+run.attempts),el("p","Worker (identidad): "+(run.worker_id||"no asignado"),"meta"));runs.append(row)}box.append(runs);
+      for(const run of data.executions){const row=el("article",undefined,"task-card");row.append(el("strong","Ejecución "+run.id,"refs"),el("p","Estado: "+run.status+" · intentos: "+run.attempts),el("p","Worker (identidad): "+(run.worker_id||"no asignado"),"meta"));if(run.result){row.append(el("p","Resultado registrado: "+(run.result.kind||"sin tipo"),"meta"));if(run.result.check_id){row.append(el("p","Comprobación: "+run.result.check_id+" · conclusión: "+(run.result.conclusion||"no disponible")),el("p","Revisión SHA: "+(run.result.candidate_sha||"no registrada"),"refs"));if(run.result.stdout)row.append(el("pre",run.result.stdout));if(run.result.stderr)row.append(el("pre",run.result.stderr))}}runs.append(row)}box.append(runs);
       const reviews=el("div");reviews.append(el("h3","Revisiones registradas"));
       if(!data.reviews.length)reviews.append(empty("No hay dictamen registrado. No se infiere aprobación."));
       for(const review of data.reviews){const row=el("article",undefined,"task-card");row.append(el("strong",review.decision+" · " + review.id),el("p","Auditor (identidad): "+review.reviewer_id+" · "+displayDate(review.created_at)),el("p","Registro almacenado; independencia y validez no certificadas.","meta"));reviews.append(row)}box.append(reviews);
-      box.append(el("p","Los resultados de pruebas y metadatos de PR no están expuestos por la API actual; esta vista no los simula.","banner"));content.append(box);
+      if(data.pull_request){const pr=panel("Pull request vinculada");const link=document.createElement("a");link.href=data.pull_request.url;link.target="_blank";link.rel="noopener noreferrer";link.textContent=data.pull_request.url;pr.append(link,el("p","SHA guardado al publicar: "+data.pull_request.candidate_sha,"refs"));const matchedCheck=data.executions.some(run=>run.status==="SUCCEEDED"&&run.result&&run.result.conclusion==="success"&&run.result.candidate_sha===data.pull_request.candidate_sha);pr.append(el("p",matchedCheck?"Trazabilidad local: hay una ejecución exitosa registrada para el mismo SHA.":"Trazabilidad local: no consta una ejecución exitosa para el SHA guardado.","meta"),el("p","Estado remoto de la PR: no verificado por AAO","meta"));box.append(pr)}
+      box.append(el("p","La coincidencia local solo compara registros almacenados; no certifica que el SHA siga siendo el HEAD remoto, ni sustituye CI, auditoría independiente o aceptación.","banner"));content.append(box);
     }
     function renderActivity(){
-      content.append(el("span","Perspectiva técnica","eyebrow"),el("h2","Actividad auditada"),el("p","Eventos persistidos del proyecto y sus tareas. Lista limitada a los 100 más recientes.","muted"));
+      content.append(el("span","Perspectiva técnica","eyebrow"),el("h2","Actividad auditada"),el("p","Eventos del proyecto y journal de ejecuciones persistidos. Lista limitada a los 100 más recientes.","muted"));
       if(!activity.length){content.append(empty("No hay eventos registrados para este proyecto."));return}
       const list=el("ol",undefined,"list");for(const event of activity){const item=el("li"),row=el("div",undefined,"row");row.append(el("strong",event.kind),el("time",displayDate(event.created_at),"meta"));item.append(row,el("p","Sujeto: "+event.subject_id,"refs"));list.append(item)}content.append(list);
     }
-    function renderEvidence(){
-      content.append(el("span","Pruebas, auditoría y procedencia","eyebrow"),el("h2","Evidencias"),el("p","Referencias tal como están almacenadas. Una referencia no es validación ni dictamen.","muted"));
-      const rows=board.flatMap(task=>(task.evidence||[]).map(ref=>({task,ref})));
-      if(!rows.length){content.append(empty("No existen referencias de evidencia en las tareas de este proyecto."));}
-      else{const list=el("ul",undefined,"list");for(const {task,ref} of rows){const item=el("li");item.append(el("strong",task.title),el("p",String(ref),"refs"),el("p","Estado de integridad: no verificado por esta vista","meta"));list.append(item)}content.append(list)}
-      content.append(el("aside","La API actual no expone resultados de CI ni un dictamen auditor verificable por SHA. No se presentan como disponibles.","banner"));
+    async function renderEvidence(){
+      const projectAtStart=selectedProject;
+      content.append(el("span","Pruebas, auditoría y procedencia","eyebrow"),el("h2","Evidencias"),el("p","Trazabilidad almacenada por tarea: ejecución, referencias, revisiones registradas y PR. Los registros no equivalen a validación.","muted"));
+      if(!board.length){content.append(empty("No hay tareas de las que consultar evidencias."));return}
+      content.append(el("div","Consultando detalles autorizados de las tareas…","empty"));
+      try{
+        const records=await Promise.all(board.map(task=>request("/v1/projects/"+encodeURIComponent(projectAtStart)+"/work/"+encodeURIComponent(task.id))));
+        if(activePage!=="evidence"||selectedProject!==projectAtStart)return;
+        content.replaceChildren(el("span","Pruebas, auditoría y procedencia","eyebrow"),el("h2","Evidencias"),el("p","Trazabilidad almacenada por tarea: ejecución, referencias, revisiones registradas y PR. Los registros no equivalen a validación.","muted"));
+        for(const task of records){
+          const section=panel(task.title);section.append(el("span","Tarea · "+task.status,"state"),el("p","ID de tarea: "+task.id,"refs"));
+          if(task.acceptance_criteria&&task.acceptance_criteria.length){section.append(el("h3","Criterios de aceptación"));const criteria=el("ul",undefined,"list");for(const criterion of task.acceptance_criteria)criteria.append(el("li",String(criterion)));section.append(criteria)}
+          const taskEvidence=task.evidence||[];
+          if(taskEvidence.length){const refs=el("ul",undefined,"list");for(const ref of taskEvidence){const item=el("li");item.append(el("span",String(ref),"refs"),el("p","Referencia almacenada; integridad no verificada por esta vista.","meta"));refs.append(item)}section.append(el("h3","Referencias de evidencia"),refs)}
+          else section.append(el("p","Sin referencias de evidencia registradas.","muted"));
+          section.append(el("h3","Ejecuciones"));
+          if(!task.executions.length)section.append(empty("No hay ejecuciones registradas para esta tarea."));
+          for(const run of task.executions){
+            const item=el("article",undefined,"task-card");item.append(el("strong","Ejecución "+run.id,"refs"),el("p","Estado: "+run.status+" · worker: "+(run.worker_id||"no asignado"),"meta"));
+            if(run.result){item.append(el("p","Check: "+(run.result.check_id||"no registrado")+" · conclusión: "+(run.result.conclusion||"no disponible"),"meta"),el("p","SHA comprobado: "+(run.result.candidate_sha||"no registrado"),"refs"));}
+            section.append(item);
+          }
+          section.append(el("h3","Dictámenes almacenados"));
+          if(!task.reviews.length)section.append(empty("No hay dictamen registrado; la tarea no se considera aprobada."));
+          for(const review of task.reviews){const item=el("article",undefined,"task-card");item.append(el("strong",review.decision),el("p","Auditor: "+review.reviewer_id+" · "+displayDate(review.created_at),"meta"));if(review.evidence&&review.evidence.length){const refs=el("ul",undefined,"list");for(const ref of review.evidence)refs.append(el("li",String(ref),"refs"));item.append(el("h3","Referencias citadas por el auditor"),refs)}item.append(el("p","Independencia y validez del dictamen no certificadas por esta vista.","meta"));section.append(item)}
+          section.append(el("h3","Pull request"));
+          if(task.pull_request){const link=document.createElement("a");link.href=task.pull_request.url;link.target="_blank";link.rel="noopener noreferrer";link.textContent=task.pull_request.url;section.append(link,el("p","SHA publicado: "+task.pull_request.candidate_sha,"refs"));const matched=task.executions.some(run=>run.status==="SUCCEEDED"&&run.result&&run.result.conclusion==="success"&&run.result.candidate_sha===task.pull_request.candidate_sha);section.append(el("p",matched?"Existe una ejecución exitosa registrada para el mismo SHA.":"No consta ejecución exitosa para el SHA de la PR.","meta"));}
+          else section.append(el("p","No hay una PR vinculada en el registro local.","muted"));
+          content.append(section);
+        }
+        content.append(el("aside","Las revisiones aquí mostradas son registros, no una certificación de independencia. La PR remota, CI y la vigencia del SHA no se consultan ni verifican desde esta vista.","banner"));
+      }catch(error){if(activePage=== "evidence"&&selectedProject===projectAtStart){content.replaceChildren(el("div","No se pudieron consultar las evidencias autorizadas: "+error.message,"empty"));}}
     }
     function renderDecisions(){
       content.append(el("span","Autoridad reservada","eyebrow"),el("h2","Decisiones reservadas"));
@@ -138,11 +180,13 @@
       box.append(el("p","No hay endpoint de lectura para una bandeja de decisiones pendiente; no se inventa una lista.","meta"));content.append(box);
     }
     function syncNav(){for(const button of document.querySelectorAll(".nav button")){if(button.dataset.page===activePage)button.setAttribute("aria-current","page");else button.removeAttribute("aria-current")}}
-    function render(){content.replaceChildren();if(!projects.length){renderHome();return}if(activePage==="home")renderHome();else if(activePage==="project")renderProject();else if(activePage==="activity")renderActivity();else if(activePage==="evidence")renderEvidence();else renderDecisions();syncNav()}
+    function render(){content.replaceChildren();if(!projects.length){renderHome();return}if(activePage==="home")renderHome();else if(activePage==="project")renderProject();else if(activePage==="activity")renderActivity();else if(activePage==="evidence")void renderEvidence();else renderDecisions();syncNav()}
     projectSelect.addEventListener("change",()=>{selectedProject=projectSelect.value;selectedTask=null;loadProjectData()});
     document.querySelector("#reload").addEventListener("click",()=>loadProjects().catch(err=>setMessage("No se pudo actualizar: "+err.message,true)));
+    authPanel.addEventListener("submit",event=>{event.preventDefault();const token=authInput.value.trim();if(!token)return;readerIdentity=readerKind.value;readerToken=token;readerKind.disabled=true;authInput.value="";disconnectButton.classList.remove("hidden");loadProjects().then(()=>{authPanel.classList.add("hidden");sessionStatus.textContent="Identidad autenticada · "+(readerIdentity==="AUDITOR"?"auditor":"agente")+" · proyectos según grants";sessionStatus.classList.remove("hidden")}).catch(err=>{readerKind.disabled=false;sessionStatus.classList.add("hidden");setMessage("No se pudo conectar: "+err.message,true)})});
+    disconnectButton.addEventListener("click",()=>{readerToken=null;readerIdentity="AGENT";readerKind.value="AGENT";readerKind.disabled=false;projects=[];selectedProject=null;board=[];detail=null;activity=[];disconnectButton.classList.add("hidden");sessionStatus.classList.add("hidden");sessionStatus.textContent="";authPanel.classList.remove("hidden");render();setMessage("Sesión de lectura desconectada.")});
     document.querySelectorAll(".nav button").forEach(button=>button.addEventListener("click",()=>{activePage=button.dataset.page;selectedTask=null;render()}));
-    loadProjects().catch(err=>{projectSelect.replaceChildren();setMessage("No se puede consultar el núcleo: "+err.message,true);content.replaceChildren(el("div","La interfaz no usa datos simulados. Comprueba la API y los permisos antes de reintentar.","empty"))});
+    authPanel.classList.remove("hidden");
   </script>
 </body>
 </html>

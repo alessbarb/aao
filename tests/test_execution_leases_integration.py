@@ -430,7 +430,7 @@ def test_execution_claim_serializes_with_grant_revocation(monkeypatch):
                 with connect_postgres() as observer:
                     claim_waiting = observer.execute(
                         "SELECT EXISTS (SELECT 1 FROM pg_stat_activity "
-                        "WHERE query LIKE 'SELECT q.id FROM execution_queue q JOIN projects p%' "
+                        "WHERE query LIKE 'SELECT q.id%FROM execution_queue q JOIN projects p%' "
                         "AND wait_event_type='Lock')"
                     ).fetchone()[0]
                 if claim_waiting:
@@ -700,7 +700,7 @@ def test_execution_claim_serializes_with_credential_revocation(monkeypatch):
                 with connect_postgres() as observer:
                     claim_waiting = observer.execute(
                         "SELECT EXISTS (SELECT 1 FROM pg_stat_activity "
-                        "WHERE query LIKE 'SELECT q.id FROM execution_queue q JOIN projects p%' "
+                        "WHERE query LIKE 'SELECT q.id%FROM execution_queue q JOIN projects p%' "
                         "AND wait_event_type='Lock')"
                     ).fetchone()[0]
                 if claim_waiting:
