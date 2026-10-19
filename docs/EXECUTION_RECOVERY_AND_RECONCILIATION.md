@@ -1,7 +1,7 @@
 # M2 — Uncertain execution reconciliation
 
 An execution whose lease expires is quarantined in `UNCERTAIN`.
-`pg_reconciliation.reconcile()` allows two dispositions only:
+`execution_reconciliation.reconcile()` allows two dispositions only:
 `MARK_FAILED` or `RETRY_CONFIRMED_SAFE`. It never invokes a worker or tool.
 
 The reviewer must have an unexpired project-scoped `execution.reconcile`
