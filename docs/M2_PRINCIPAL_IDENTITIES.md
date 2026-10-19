@@ -32,3 +32,21 @@ Credentials must be generated locally and never copied into source, logs,
 messages or documentation. Provisioning and rotation need a governed
 administrative workflow; do not manually insert production credentials.
 No execution authority is granted by authentication alone.
+
+## Individual agent work identity
+
+The PostgreSQL work endpoints also accept `X-Agent-Token` with an enabled
+`AGENT` principal credential. A valid bearer token resolves to the registered
+principal ID; project-specific grants determine authorized operations.
+The payload's `author_id` is not trusted. Revocation (`enabled=false`) blocks
+subsequent requests. If an invalid individual token is sent alongside a
+shared development worker token, the operation is denied without fallback.
+
+This is a development-stage transition: the shared `X-Work-Token` is still
+accepted where no individual token is supplied. It must be retired before
+production, alongside the shared reviewer token.
+
+A PostgreSQL integration regression test exercises cross-project denial,
+non-spoofable work authorship and credential revocation. Execution leases
+are still authenticated through a separate worker registration mechanism;
+the two identity registries must be consolidated before M2 acceptance.
