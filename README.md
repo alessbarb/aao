@@ -6,24 +6,22 @@ An independently governed, private, multi-project AI organization. AAO is **not*
 
 PR #1 merged the M0 foundation. The current feature branch continues PostgreSQL
 development work toward M2; M2 is **not accepted** and this repository is not a
-deployed autonomous-agent system. The PostgreSQL development API, individual
-AGENT/AUDITOR credentials, project grants, execution leases and an inert queue
-exist, but shared development tokens and legacy worker registrations remain.
-Credential revalidation exists for protected API operations, while grant
-revocation races, adversarial lease/recovery behavior, trusted reconciliation
-identity, production authentication and independent review remain unresolved.
-The authorization inventory is in
-[`docs/PRINCIPAL_AUTHORIZATION_MATRIX.md`](docs/PRINCIPAL_AUTHORIZATION_MATRIX.md).
+deployed autonomous-agent system. The PostgreSQL development API, individual AGENT/AUDITOR credentials,
+project-scoped grants, execution leases, and an inert queue exist. Shared
+worker/reviewer tokens and the legacy worker-registration table have been
+removed from the PostgreSQL runtime; migration 006 unifies execution identity.
+Protected transactions recheck credentials and lock grants for the operations
+covered by current integration tests. The static CEO bearer is restricted to
+explicit development/test modes and rejected elsewhere; production CEO identity
+and constitutional approval are not implemented. Remaining gaps include HTTP
+credential-rotation races, broader grant/revocation ordering, adversarial
+lease/recovery behavior, and independent review. See the current authorization
+matrix and verification register for exact scope and evidence.
 
-The latest exact local engineering validation is commit
-`d080da58d4a8a41749a932d8fdf2c1caec5ac652`: compileall and Ruff passed; the
-explicit disposable PostgreSQL suite completed 51 tests with warnings treated
-as errors; `pip check` and `git diff --check` passed. The current branch has
-later documentation-only commits. CI for the previous code revision
-`60de4cb7792a3e7a8229f1e9487bdac49f828294` failed on Ruff B023; the fix is in
-the local feature branch and has no CI result until pushed. Normal GitHub CI
-does not configure PostgreSQL, so it does not by itself establish that the
-guarded PostgreSQL integration tests ran.
+The latest exact local engineering validation is recorded in
+[`docs/VERIFICATION_EVIDENCE_REGISTER.md`](docs/VERIFICATION_EVIDENCE_REGISTER.md).
+The current candidate is not M2-accepted. CI is checked against each exact SHA;
+a green result is not independent security review or acceptance.
 
 No external effects, model adapters or autonomous operations are enabled. The
 CEO token remains a provisional development bearer, not constitutional

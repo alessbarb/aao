@@ -170,3 +170,36 @@ def test_project_listing_rechecks_active_reader_in_transaction(monkeypatch):
     assert work_management_api.projects(principal="agent-1") == []
     assert len(active.queries) == 2
     assert active.queries[1][1] == ("agent-1",)
+
+
+@pytest.mark.parametrize("environment", ["production", " PRODUCTION ", "prodution"])
+def test_static_ceo_bearer_is_unavailable_outside_development(monkeypatch, environment):
+    from fastapi import HTTPException
+    from fastapi.testclient import TestClient
+
+    from aao.work_management_api import app, read_principal, require_ceo
+
+    monkeypatch.setenv("AAO_ENV", environment)
+    monkeypatch.setenv("AAO_CEO_TOKEN", "development-ceo-token")
+    with pytest.raises(HTTPException) as direct:
+        require_ceo(x_ceo_token="development-ceo-token")
+    assert direct.value.status_code == 503
+
+    with pytest.raises(HTTPException) as reader:
+        read_principal(
+            x_ceo_token="development-ceo-token", x_agent_token=None,
+        )
+    assert reader.value.status_code == 403
+
+    with TestClient(app) as client:
+        response = client.post(
+            "/v1/mandates",
+            headers={"X-CEO-Token": "development-ceo-token"},
+            json={"title": "Must be denied", "objective": "Test only"},
+        )
+    assert response.status_code == 503
+    with TestClient(app) as client:
+        response = client.get(
+            "/v1/projects", headers={"X-CEO-Token": "development-ceo-token"},
+        )
+    assert response.status_code == 403

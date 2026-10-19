@@ -81,7 +81,11 @@ amendment or CEO-confirmed constitutional rule.
 5. **Implemented and CI-validated:** CI provisions a fresh disposable
    PostgreSQL database, applies migrations, and runs guarded integration tests.
    Local execution still requires explicit disposable-database configuration.
-6. Obtain adversarial independent security/architecture review and competent
+6. **Production CEO authentication remains unavailable by design:** the static
+   development bearer is denied for administrative routes in production. A
+   production identity/signature and constitutional confirmation flow is not
+   designed or implemented; do not add a replacement bearer as a shortcut.
+7. Obtain adversarial independent security/architecture review and competent
    acceptance. Codex cannot substitute for either.
 
 This document is a repository bootstrap artifact. **It is not GitHub Issues or GitHub Projects as the operational Kanban.** On M1, import the work definitions into AAO's own database and manage all status transitions there.

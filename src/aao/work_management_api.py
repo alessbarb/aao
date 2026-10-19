@@ -21,7 +21,14 @@ from pydantic import BaseModel, Field
 from aao.planner import Admission, decide_admission
 
 
+def _ceo_bearer_enabled() -> bool:
+    mode = os.getenv("AAO_ENV", "development").strip().lower()
+    return mode in {"development", "test"}
+
+
 def require_ceo(x_ceo_token: str | None = Header(None)):
+    if not _ceo_bearer_enabled():
+        raise HTTPException(503, "CEO development bearer is unavailable in this environment")
     expected = os.getenv("AAO_CEO_TOKEN")
     if not expected:
         raise HTTPException(503, "CEO credential not configured")
@@ -215,7 +222,8 @@ def read_principal(
     x_agent_token: str | None = Header(None),
 ):
     ceo = os.getenv("AAO_CEO_TOKEN")
-    if ceo and x_ceo_token and secrets.compare_digest(ceo, x_ceo_token):
+    if (_ceo_bearer_enabled() and ceo and x_ceo_token
+            and secrets.compare_digest(ceo, x_ceo_token)):
         return "ceo"
     if x_agent_token is not None:
         from aao.principal_credentials import PrincipalDenied, authenticate
