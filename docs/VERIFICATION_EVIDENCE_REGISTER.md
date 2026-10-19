@@ -392,3 +392,5 @@ suite passed **60 tests**, with compileall, Ruff, `pip check`, and
 `git diff --check` clean. CI has not run for this change. This does not address
 constitutional CEO approval, delegation limits, revoking already-issued
 capabilities, or independent grant review.
+
+CI run `39257126986` passed for code commit `d891bacba49e2b4e291971f7ab23758a5ba73c00`, including the disposable PostgreSQL suite, compilation, Ruff, and dependency checks.
