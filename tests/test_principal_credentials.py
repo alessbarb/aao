@@ -187,14 +187,19 @@ def test_project_listing_rechecks_active_reader_in_transaction(monkeypatch):
     assert active.queries[1][1] == ("agent-1",)
 
 
-@pytest.mark.parametrize("environment", ["production", " PRODUCTION ", "prodution"])
+@pytest.mark.parametrize(
+    "environment", ["production", " PRODUCTION ", "prodution", None],
+)
 def test_static_ceo_bearer_is_unavailable_outside_development(monkeypatch, environment):
     from fastapi import HTTPException
     from fastapi.testclient import TestClient
 
     from aao.work_management_api import app, read_principal, require_ceo
 
-    monkeypatch.setenv("AAO_ENV", environment)
+    if environment is None:
+        monkeypatch.delenv("AAO_ENV", raising=False)
+    else:
+        monkeypatch.setenv("AAO_ENV", environment)
     monkeypatch.setenv("AAO_CEO_TOKEN", "development-ceo-token")
     with pytest.raises(HTTPException) as direct:
         require_ceo(x_ceo_token="development-ceo-token")

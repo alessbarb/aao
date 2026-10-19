@@ -87,9 +87,11 @@ amendment or CEO-confirmed constitutional rule.
    PostgreSQL database, applies migrations, and runs guarded integration tests.
    Local execution still requires explicit disposable-database configuration.
 6. **Production CEO authentication remains unavailable by design:** the static
-   development bearer is denied for administrative routes in production. A
-   production identity/signature and constitutional confirmation flow is not
-   designed or implemented; do not add a replacement bearer as a shortcut.
+   development bearer is enabled only when `AAO_ENV` is explicitly set to
+   `development` or `test`; it is denied when the mode is absent, unknown, or
+   production. A production identity/signature and constitutional confirmation
+   flow is not designed or implemented; do not add a replacement bearer as a
+   shortcut.
 7. Obtain adversarial independent security/architecture review and competent
    acceptance. Codex cannot substitute for either.
 

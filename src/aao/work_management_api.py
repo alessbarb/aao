@@ -22,7 +22,7 @@ from aao.planner import Admission, decide_admission
 
 
 def _ceo_bearer_enabled() -> bool:
-    mode = os.getenv("AAO_ENV", "development").strip().lower()
+    mode = os.getenv("AAO_ENV", "").strip().lower()
     return mode in {"development", "test"}
 
 
