@@ -122,13 +122,23 @@ def test_reconciliation_requires_distinct_granted_reviewer(monkeypatch):
             "principal_id": auditor_id, "capability": "execution.reconcile",
         })
         assert granted.status_code == 201, granted.text
-    from aao.evidence_registry import read_evidence
+    from aao.evidence_registry import EvidenceDenied, read_evidence
     inspected = read_evidence(
         project, [evidence_ref], auditor_credential=auditor_secret,
         capability="execution.reconcile",
     )
     assert inspected[0]["content"] == b"AAO inert execution evidence for integration coverage"
     assert inspected[0]["submitted_by"] == worker_id
+    with pytest.raises(EvidenceDenied, match="Active auditor credential required"):
+        read_evidence(
+            project, [evidence_ref], auditor_credential=secret,
+            capability="execution.reconcile",
+        )
+    with pytest.raises(EvidenceDenied, match="Evidence review capability required"):
+        read_evidence(
+            project, [evidence_ref], auditor_credential=auditor_secret,
+            capability="effect.reconcile",
+        )
     with pytest.raises(ReconciliationDenied, match="Evidence artifact not found"):
         reconcile(
             eid, auditor_credential=auditor_secret,
