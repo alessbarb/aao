@@ -16,6 +16,7 @@
     .card{background:#263242;border:1px solid #3a4b60;padding:12px;margin-top:10px;border-radius:8px}
     .meta{font-size:.8rem;color:#aeb9c9}.error{color:#ffb4b4}
     .safety-note{margin-top:18px;padding:12px 14px;border:1px solid #8b6c35;border-radius:8px;background:#302819;color:#f1d79e}
+    .capabilities{margin-top:22px}.capability-list{display:grid;grid-template-columns:repeat(auto-fit,minmax(260px,1fr));gap:12px}
     @media(max-width:720px){.board{grid-template-columns:1fr}header{display:block}}
   </style>
 </head>
@@ -25,21 +26,22 @@
   <aside class="safety-note" role="note">Gate técnico activo: nuevas aprobaciones y finalización están bloqueadas hasta verificar la independencia del auditor y las referencias de evidencia. El tablero muestra estados almacenados; no certifica su validez.</aside>
   <div id="message" role="status"></div>
   <section id="board" class="board" aria-label="Kanban"></section>
+  <section class="capabilities"><h2>Capacidades del proyecto</h2><p>Metadatos registrados; el catálogo no concede autorización de ejecución.</p><div id="capabilities" class="capability-list"></div><h3>Evaluaciones vinculadas a tareas</h3><div id="capability-evaluations" class="capability-list"></div></section>
   <script>
     const states=["INBOX","READY","IN_PROGRESS","IN_REVIEW","VERIFIED","DONE"];
     const labels={INBOX:"Entrada",READY:"Preparado",IN_PROGRESS:"En curso",IN_REVIEW:"Revisión",VERIFIED:"Verificado",DONE:"Completado"};
-    const project=document.querySelector("#project"),board=document.querySelector("#board"),message=document.querySelector("#message");
+    const project=document.querySelector("#project"),board=document.querySelector("#board"),message=document.querySelector("#message"),capabilities=document.querySelector("#capabilities"),evaluations=document.querySelector("#capability-evaluations");
     function node(tag,text,cls){const e=document.createElement(tag);e.textContent=text;if(cls)e.className=cls;return e}
-    // Development-only: CEO token stays in tab memory (never URL or localStorage).
-    let ceoToken=null;
+    // Project reader credential stays in tab memory (never URL or localStorage).
+    let readerToken=null;
     async function json(url){
-      let headers=ceoToken?{"X-CEO-Token":ceoToken}:{};
+      let headers=readerToken?{"X-Agent-Token":readerToken}:{};
       let r=await fetch(url,{credentials:"same-origin",headers});
-      if(r.status===403 && !ceoToken){
-        const supplied=window.prompt("Token CEO de desarrollo para consultar PostgreSQL:");
-        if(!supplied)throw new Error("Se requiere token CEO para consultar proyectos");
-        ceoToken=supplied;
-        r=await fetch(url,{credentials:"same-origin",headers:{"X-CEO-Token":ceoToken}});
+      if(r.status===403 && !readerToken){
+        const supplied=window.prompt("Token individual AGENT con grant project.read:");
+        if(!supplied)throw new Error("Se requiere identidad AGENT con acceso de lectura al proyecto");
+        readerToken=supplied;
+        r=await fetch(url,{credentials:"same-origin",headers:{"X-Agent-Token":readerToken}});
       }
       if(!r.ok)throw new Error("HTTP "+r.status);
       return r.json()
@@ -49,13 +51,39 @@
       project.replaceChildren();
       for(const p of projects){const opt=node("option",p.name+" · "+p.state);opt.value=p.id;project.append(opt)}
       if(projects.some(p=>p.id===previous))project.value=previous;
-      if(projects.length)await loadBoard();else {board.replaceChildren();message.textContent="Sin proyectos autorizados"}
+      if(projects.length)await loadBoard();else {board.replaceChildren();capabilities.replaceChildren();evaluations.replaceChildren();message.textContent="Sin proyectos autorizados"}
     }
     async function loadBoard(){
       if(!project.value)return;
       message.textContent="Cargando...";
       try{
         const work=await json("/v1/projects/"+encodeURIComponent(project.value)+"/board");
+        const available=await json("/v1/projects/"+encodeURIComponent(project.value)+"/capabilities");
+        const assessments=await json("/v1/projects/"+encodeURIComponent(project.value)+"/capability-evaluations");
+        capabilities.replaceChildren();
+        if(!available.length)capabilities.append(node("p","No hay capacidades registradas para este proyecto.","meta"));
+        for(const capability of available){
+          const card=node("article","","card");
+          card.append(node("strong",capability.capability_id+" · "+capability.version),
+            node("div",capability.capability_type+" · "+capability.status,"meta"),
+            node("p",typeof capability.contract.purpose==="string"?capability.contract.purpose:"Contrato registrado; propósito no especificado."),
+            node("div","Permisos declarados: "+(capability.required_permissions.join(", ")||"ninguno"),"meta"),
+            node("div","Ejecución autorizada: no","meta"));
+          capabilities.append(card)
+        }
+        evaluations.replaceChildren();
+        if(!assessments.length)evaluations.append(node("p","No hay evaluaciones registradas.","meta"));
+        for(const assessment of assessments){
+          const details=assessment.details,card=node("article","","card");
+          const recommendation=details.recommendation||"Sin recomendación única (empate)";
+          card.append(node("strong",assessment.task_title+" · "+recommendation),
+            node("div",assessment.task_id,"meta"),
+            node("p",details.rationale),
+            node("div","Puntuaciones: "+Object.entries(details.scores).map(([name,score])=>name+" "+score).join(" · "),"meta"),
+            node("div","Evidencia: "+details.evidence.join(", "),"meta"),
+            node("div","Evaluación no autoriza ejecución.","meta"));
+          evaluations.append(card)
+        }
         board.replaceChildren();
         for(const state of states){
           const col=node("section","","column");col.append(node("h2",labels[state]));

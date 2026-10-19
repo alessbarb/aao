@@ -18,6 +18,7 @@ from fastapi import Depends, FastAPI, Header, HTTPException
 from fastapi.responses import FileResponse, JSONResponse, Response
 from pydantic import BaseModel, Field
 
+from aao.capability_evaluation import recommend
 from aao.planner import Admission, decide_admission
 from aao.review import evaluate_review
 
@@ -105,6 +106,40 @@ class PrincipalCredentialRequest(BaseModel):
 class GrantRequest(BaseModel):
     principal_id: str = Field(min_length=1)
     capability: str = Field(pattern=r"^(?:work\.(?:create|admit|review|progress)|project\.read|execution\.claim|execution\.reconcile|effect\.(?:propose|reconcile)|evidence\.submit)$")
+
+
+class CapabilityRequest(BaseModel):
+    capability_id: str = Field(min_length=1, max_length=128, pattern=r"^[a-zA-Z0-9._-]+$")
+    version: str = Field(min_length=1, max_length=64)
+    capability_type: str = Field(pattern=r"^(cli_script|library|application_service|agent|agent_skill|knowledge_procedure|workflow)$")
+    provenance: dict
+    contract: dict
+    required_permissions: list[str] = Field(default_factory=list, max_length=32)
+    risks: list[str] = Field(default_factory=list, max_length=32)
+    dependencies: list[str] = Field(default_factory=list, max_length=64)
+    tests: list[str] = Field(default_factory=list, max_length=64)
+    compatibility: dict = Field(default_factory=dict)
+    evidence: list[str] = Field(default_factory=list, max_length=64)
+    status: str = Field(default="registered_local", pattern=r"^registered_local$")
+
+
+class CapabilityOption(BaseModel):
+    choice: str = Field(pattern=r"^(reuse|adapt|build)$")
+    fit: int = Field(ge=0, le=5)
+    security: int = Field(ge=0, le=5)
+    cost: int = Field(ge=0, le=5)
+    time: int = Field(ge=0, le=5)
+    tokens: int = Field(ge=0, le=5)
+    maintenance: int = Field(ge=0, le=5)
+
+
+class CapabilityEvaluationRequest(BaseModel):
+    task_id: str
+    options: list[CapabilityOption] = Field(min_length=3, max_length=3)
+    rationale: str = Field(min_length=1, max_length=2000)
+    evidence: list[str] = Field(min_length=1, max_length=32)
+    capability_id: str | None = Field(default=None, max_length=128)
+    version: str | None = Field(default=None, max_length=64)
 
 
 app = FastAPI(title="AAO PostgreSQL development core", version="0.2.0")
@@ -433,6 +468,160 @@ def board(project_id: str, principal: str = Depends(read_principal)):
             {"id": r[0], "title": r[1], "status": r[2],
              "acceptance_criteria": r[3], "evidence": r[4]} for r in rows
         ]
+
+
+@app.get("/v1/projects/{project_id}/capabilities")
+def list_capabilities(
+    project_id: str, principal: str = Depends(read_principal),
+    query: str | None = None, capability_type: str | None = None,
+):
+    """Discover real project-local capability versions; listing grants no execution authority."""
+    allowed_types = {
+        "cli_script", "library", "application_service", "agent", "agent_skill",
+        "knowledge_procedure", "workflow",
+    }
+    if capability_type is not None and capability_type not in allowed_types:
+        raise HTTPException(422, "Unknown capability type")
+    with tx() as db:
+        if not db.execute("SELECT 1 FROM projects WHERE id=%s", (project_id,)).fetchone():
+            raise HTTPException(404, "Project not found")
+        if principal is not _CEO_PRINCIPAL:
+            require_grant(db, principal, project_id, "project.read")
+        rows = db.execute(
+            "SELECT capability_id,version,capability_type,status,provenance,contract,"
+            "required_permissions,risks,dependencies,tests,compatibility,evidence,created_by,created_at "
+            "FROM capability_versions WHERE project_id=%s "
+            "AND (%s::text IS NULL OR capability_type=%s) "
+            "AND (%s::text IS NULL OR capability_id ILIKE %s OR contract::text ILIKE %s) "
+            "ORDER BY capability_id,version",
+            (project_id, capability_type, capability_type, query,
+             f"%{query}%" if query else None, f"%{query}%" if query else None),
+        ).fetchall()
+        return [{
+            "capability_id": str(row[0]), "version": row[1], "capability_type": row[2],
+            "status": row[3], "provenance": row[4], "contract": row[5],
+            "required_permissions": row[6], "risks": row[7], "dependencies": row[8],
+            "tests": row[9], "compatibility": row[10], "evidence": row[11],
+            "created_by": row[12], "created_at": row[13].isoformat(),
+            "execution_authorized": False,
+        } for row in rows]
+
+
+@app.post("/v1/projects/{project_id}/capabilities", status_code=201)
+def register_capability(
+    project_id: str, payload: CapabilityRequest,
+    principal: str = Depends(require_worker),
+):
+    """Record project-owned capability metadata, not an executable authorization."""
+    if not payload.provenance or not payload.contract:
+        raise HTTPException(422, "Capability provenance and contract are required")
+    if not payload.tests or not payload.evidence:
+        raise HTTPException(422, "At least one test reference and evidence reference are required")
+    with tx() as db:
+        project = db.execute(
+            "SELECT state FROM projects WHERE id=%s FOR SHARE", (project_id,),
+        ).fetchone()
+        if not project:
+            raise HTTPException(404, "Project not found")
+        if project[0] != "ACTIVE":
+            raise HTTPException(409, "Capabilities can only be registered in active projects")
+        require_grant(db, principal, project_id, "work.create")
+        db.execute(
+            "INSERT INTO capability_versions(project_id,capability_id,version,capability_type,"
+            "status,provenance,contract,required_permissions,risks,dependencies,tests,"
+            "compatibility,evidence,created_by) VALUES (%s,%s,%s,%s,%s,%s::jsonb,%s::jsonb,"
+            "%s::jsonb,%s::jsonb,%s::jsonb,%s::jsonb,%s::jsonb,%s::jsonb,%s)",
+            (project_id, payload.capability_id, payload.version, payload.capability_type,
+             "registered_local", json.dumps(payload.provenance), json.dumps(payload.contract),
+             json.dumps(payload.required_permissions), json.dumps(payload.risks),
+             json.dumps(payload.dependencies), json.dumps(payload.tests),
+             json.dumps(payload.compatibility), json.dumps(payload.evidence), principal),
+        )
+        audit(db, project_id, "capability.version_registered", {
+            "capability_id": payload.capability_id, "version": payload.version,
+            "capability_type": payload.capability_type, "created_by": principal,
+            "execution_authorized": False,
+        })
+    return {"project_id": project_id, "capability_id": payload.capability_id,
+            "version": payload.version, "status": "registered_local",
+            "execution_authorized": False}
+
+
+@app.post("/v1/projects/{project_id}/capability-evaluations", status_code=201)
+def evaluate_capabilities(
+    project_id: str, payload: CapabilityEvaluationRequest,
+    principal: str = Depends(require_worker),
+):
+    """Compare reuse/adapt/build for a real project task and audit the recommendation."""
+    choices = [option.choice for option in payload.options]
+    if sorted(choices) != ["adapt", "build", "reuse"]:
+        raise HTTPException(422, "Exactly one reuse, adapt, and build option is required")
+    if not payload.rationale.strip() or any(not item.strip() for item in payload.evidence):
+        raise HTTPException(422, "Rationale and evidence references must be non-blank")
+    selected_options = [option.model_dump() for option in payload.options]
+    recommendation, scores = recommend(selected_options)
+    if recommendation in {"reuse", "adapt"}:
+        if not payload.capability_id or not payload.version:
+            raise HTTPException(422, "Reuse or adaptation requires a registered capability version")
+    elif payload.capability_id or payload.version:
+        raise HTTPException(422, "Build comparison must not claim an existing capability version")
+
+    with tx() as db:
+        project = db.execute(
+            "SELECT state FROM projects WHERE id=%s FOR SHARE", (project_id,),
+        ).fetchone()
+        if not project:
+            raise HTTPException(404, "Project not found")
+        if project[0] != "ACTIVE":
+            raise HTTPException(409, "Capability evaluation requires an active project")
+        require_grant(db, principal, project_id, "work.create")
+        task = db.execute(
+            "SELECT 1 FROM work_items WHERE id=%s AND project_id=%s FOR SHARE",
+            (payload.task_id, project_id),
+        ).fetchone()
+        if not task:
+            raise HTTPException(404, "Task not found in this project")
+        if recommendation in {"reuse", "adapt"}:
+            capability = db.execute(
+                "SELECT status FROM capability_versions WHERE project_id=%s "
+                "AND capability_id=%s AND version=%s FOR SHARE",
+                (project_id, payload.capability_id, payload.version),
+            ).fetchone()
+            if not capability or capability[0] != "registered_local":
+                raise HTTPException(409, "Selected capability version is unavailable locally")
+        details = {
+            "project_id": project_id, "task_id": payload.task_id,
+            "principal_id": principal, "options": selected_options,
+            "scores": scores, "recommendation": recommendation,
+            "capability_id": payload.capability_id, "version": payload.version,
+            "rationale": payload.rationale, "evidence": payload.evidence,
+            "score_method": "equal-weighted mean of six caller-assessed 0-5 dimensions",
+            "execution_authorized": False,
+        }
+        audit(db, payload.task_id, "capability.evaluated", details)
+    return {"task_id": payload.task_id, "recommendation": recommendation,
+            "scores": scores, "capability_id": payload.capability_id,
+            "version": payload.version, "execution_authorized": False}
+
+
+@app.get("/v1/projects/{project_id}/capability-evaluations")
+def list_capability_evaluations(
+    project_id: str, principal: str = Depends(read_principal),
+):
+    with tx() as db:
+        if not db.execute("SELECT 1 FROM projects WHERE id=%s", (project_id,)).fetchone():
+            raise HTTPException(404, "Project not found")
+        if principal is not _CEO_PRINCIPAL:
+            require_grant(db, principal, project_id, "project.read")
+        rows = db.execute(
+            "SELECT e.subject_id,e.details,e.created_at,w.title FROM events e "
+            "JOIN work_items w ON w.id=e.subject_id AND w.project_id=%s "
+            "WHERE e.kind='capability.evaluated' ORDER BY e.created_at DESC",
+            (project_id,),
+        ).fetchall()
+        return [{"task_id": str(row[0]), "details": row[1],
+                 "created_at": row[2].isoformat(), "task_title": row[3]}
+                for row in rows]
 
 
 @app.post("/v1/work/{work_id}/admit")
