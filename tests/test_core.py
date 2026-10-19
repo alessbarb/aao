@@ -68,3 +68,37 @@ def test_mandate_and_kanban_gates():
             assert client.post(f"/v1/projects/{project}/cancel", headers=headers).json()["state"] == "CANCELLED"
             assert client.post(f"/v1/projects/{project}/resume", headers=worker_headers).status_code == 409
             assert len(client.get("/v1/events").json()) >= 9
+
+
+def test_postgres_readiness_probe_is_sanitized_and_read_only(monkeypatch):
+    from contextlib import contextmanager
+
+    from fastapi.testclient import TestClient
+
+    from aao import work_management_api
+
+    @contextmanager
+    def available_database():
+        class Database:
+            def execute(self, statement):
+                assert statement == "SELECT 1"
+
+        yield Database()
+
+    monkeypatch.setattr(work_management_api, "tx", available_database)
+    with TestClient(work_management_api.app) as client:
+        assert client.get("/ready").json() == {
+            "status": "ready", "database": "available",
+        }
+
+    @contextmanager
+    def unavailable_database():
+        raise RuntimeError("must not leak connection details")
+        yield  # pragma: no cover
+
+    monkeypatch.setattr(work_management_api, "tx", unavailable_database)
+    with TestClient(work_management_api.app) as client:
+        response = client.get("/ready")
+    assert response.status_code == 503
+    assert response.json() == {"status": "not_ready", "database": "unavailable"}
+    assert "connection details" not in response.text
