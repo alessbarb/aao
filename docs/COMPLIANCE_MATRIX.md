@@ -11,6 +11,11 @@ evidence; it is not formal M2-A acceptance.
 **Frozen implementation under PR #2:** `dc084417a2ba683fe4737342f89e9cd1036b38ad`.
 **Frozen PR #2 package:** `ef1a6e64ad4d6523cacd6c98a3b25ae7cebf4ad5`.
 **Separate corrected implementation candidate:** `31e7397be082394a6da95eadebd0d8ad6bf99c39`.
+**Initial corrected documentation package:** `c9b2c7ad44d2cadc2e214904073073221e1207cd`.
+**Final review package:** the exact SHA will be added after the formal review
+request is committed; its `src`, `tests`, and `db` trees must remain identical
+to the corrected implementation candidate. The corrected source/package pair
+is separate from the frozen PR #2 pair and must not be described as the PR head.
 The corrected candidate has not replaced PR #2. **Verification:** see exact-SHA entries in
 [`VERIFICATION_EVIDENCE_REGISTER.md`](VERIFICATION_EVIDENCE_REGISTER.md).
 
@@ -28,6 +33,10 @@ The corrected candidate has not replaced PR #2. **Verification:** see exact-SHA 
 | Project suspension applicable to the inert environment (backlog M2-05; Constitution §10) | CEO-authenticated PostgreSQL API supports audited `ACTIVE→PAUSED`, `PAUSED→ACTIVE`, and active/paused→`CANCELLED` transitions; database-owned generation fencing invalidates stale leases. PostgreSQL integration test covers authorization, allowed/denied transitions, audit rows, and generation changes. | Not an independent stop controller for a live AI runtime; none is enabled. Production CEO identity/stop authority remain absent. | **SATISFECHO** for M2-A inert project suspension; runtime-independent control is **DIFERIDO** to M2-B and production supervision to M2-C. |
 | M2-04: Sandbox runners with operation-scoped capabilities (backlog) | The PostgreSQL candidate's worker emits only a deterministic inert marker; no tools, shell, network, model or external calls are enabled. The SQLite prototype's `sandbox-queue` route is not a sandbox and is not evidence for this criterion. | A capability-constrained sandbox is not implemented. CEO scope disposition places it in M2-B. | **DIFERIDO** to M2-B; still **PENDIENTE** there and not satisfied by transfer. |
 | Independent security/architecture review and competent acceptance | Candidate review package is prepared by this repository and M2-A scope is now explicitly recorded; internal subagent reviews are recorded as internal only. | No qualified independent reviewer is assigned/available through current repository collaborators; no M2-A acceptance exists. | **PENDIENTE**; acceptance follows formal review and explicit disposition of residual risks. |
+
+The precise reviewer qualification, target pair, scope, and required report are
+specified in [`FORMAL_REVIEW_REQUEST.md`](FORMAL_REVIEW_REQUEST.md). Its
+existence is preparation only and does not change the pending status above.
 
 ## External adversarial audit disposition
 

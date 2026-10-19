@@ -948,6 +948,40 @@ coverage, independent review, or M2 acceptance.
   validation, or M2-A acceptance. The package SHA must be rechecked against the
   live PR immediately before formal review.
 
+## Corrected candidate clean-clone reproduction — 2026-10-19
+
+- Exact corrected implementation: `31e7397be082394a6da95eadebd0d8ad6bf99c39`.
+  Exact documentation package checked out in a clean read-only clone:
+  `c9b2c7ad44d2cadc2e214904073073221e1207cd`. `31e7397` is an ancestor of
+  `c9b2c7a`; the diff for `src`, `tests`, and `db` was empty. The checkout was
+  detached and clean before and after verification.
+- In a separate isolated test copy, a fresh disposable PostgreSQL 16 container
+  replayed migrations 001–009, including the synthetic legacy `worker_registrations`
+  upgrade fixture between 005 and 006. The final schema was
+  `009_prevent_evidence_truncation`. The full suite with warnings as errors
+  passed **91 tests, 0 failures, 0 skips, 0 warnings** in **18.20 s**.
+- `python -m pip check`, `python -m compileall -q src tests`,
+  `python -m ruff check src tests`, and `git diff --check` passed. The isolated
+  container and temporary clone were removed. This is reproducible local
+  automated evidence, not CI, human review, production validation, or acceptance.
+- PR #2 was separately observed OPEN/DRAFT at frozen package SHA
+  `ef1a6e64ad4d6523cacd6c98a3b25ae7cebf4ad5`; no reviewer was assigned and no
+  review was submitted. This check does not make PR #2 the corrected candidate.
+
+## Formal review request package preparation — 2026-10-19
+
+- A reviewer-facing request is prepared in `docs/FORMAL_REVIEW_REQUEST.md`.
+  It pins corrected source `31e7397`, identifies initial docs package `c9b2c7a`,
+  preserves frozen PR #2 pair `dc084417`/`ef1a6e64`, requires an independently
+  attributable qualified human report, and keeps H-02/H-03/H-04 explicit.
+- The request document itself is a documentation-only change after `c9b2c7a`;
+  therefore the final package containing it must be recorded by its full SHA
+  after commit. The final package needs a source/tree diff check and should be
+  pinned in any human review report. No formal reviewer is currently assigned.
+- The external adversarial input file used for H-01..H-05 disposition has
+  SHA-256 `bd7592cb44704f94b357d3a237935187d458dee8dc495be6bc16ce58c1feff48`.
+  It remains a separate technical input, not a formal human review.
+
 ## External adversarial H-01 correction — 2026-10-19
 
 - Input: `AAO_M2A_AUDITORIA_TECNICA_EXTERNA_20261019.md`, a separate partial

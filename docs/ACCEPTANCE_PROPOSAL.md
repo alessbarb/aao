@@ -14,25 +14,22 @@ formally reviewed and PR #2 remains unchanged and open/draft.
 
 ## Candidate revisions
 
-- **Implementation candidate:** `dc084417a2ba683fe4737342f89e9cd1036b38ad`,
-  including production-mode denial for development principal credentials,
-  audited CEO-authenticated project suspension, and race-safe inert proposal
-  idempotency. The earlier baseline implementation source was
-  `99760c7339323600368e5dbb145b088d83ad0715`.
-- **Prior evidence package:** `b15dea4f69823bcb894cb58eda54dcffdb48d602`
-  passed 80 tests and static checks. Following the identified fixes, the current
-  candidate `dc08441` passed 83 tests, zero failures/skips/warnings, plus
-  compileall, Ruff, `pip check`, and diff checks. Fresh replay of migrations
-  001–009 predates these code-only fixes; they do not change schema.
-- **Review vehicle:** [draft GitHub PR #2](https://github.com/alessbarb/aao/pull/2).
-  At the pre-fix live check, local `HEAD`, both remote refs and PR head matched
-  `b15dea4f69823bcb894cb58eda54dcffdb48d602`. After committing the fixes,
-  the current local implementation candidate is
-  `dc084417a2ba683fe4737342f89e9cd1036b38ad`; the prior live-ref check was
-  package checkpoint `f99563bcc7c4fa9803c4aa4597812b0e23e2d6b8`. Recheck the
-  final package/PR head and pin both exact revisions in the formal review
-  request; the report must identify package and implementation revisions
+- **Frozen historical implementation/package:**
+  `dc084417a2ba683fe4737342f89e9cd1036b38ad` /
+  `ef1a6e64ad4d6523cacd6c98a3b25ae7cebf4ad5` (PR #2). This pair is retained
+  for provenance and still contains H-01; do not use it as the corrected
+  candidate or move the PR ref.
+- **Corrected implementation candidate:**
+  `31e7397be082394a6da95eadebd0d8ad6bf99c39`.
+- **Initial corrected documentation package:**
+  `c9b2c7ad44d2cadc2e214904073073221e1207cd`; the code/test/database diff
+  (`src`, `tests`, `db`) from implementation to this package is empty. A later
+  package SHA will include this formal review request and must be pinned
   separately.
+- **Review status:** PR #2 remains OPEN/DRAFT at `ef1a6e64`; it is not the
+  corrected review vehicle. No qualified independent reviewer is assigned.
+  The exact formal review request is in
+  [`FORMAL_REVIEW_REQUEST.md`](FORMAL_REVIEW_REQUEST.md).
 
 ## What M2-A evidence demonstrates
 
@@ -52,26 +49,26 @@ formally reviewed and PR #2 remains unchanged and open/draft.
   reviewer independence and evidence sufficiency are not established.
 - Execution remains inert: no model, shell, network, tool, provider, or real
   external action is enabled.
-- Local full suite and static checks at the exact SHA listed above; CI is not
-  asserted as part of this evidence.
+- The corrected source has a reproduced 91-test local disposable-PostgreSQL
+  run and static checks; a clean read-only clone of package `c9b2c7a` also
+  reproduced the suite. CI is not asserted as part of this evidence.
 
 These are bounded implementation and test facts, not formal assurance or
 acceptance.
 
 ## Conditions before M2-A may be presented for acceptance
 
-1. **Complete before current code fixes:** migrations 001–009 were replayed in order on a newly created
-   explicitly disposable PostgreSQL database using the CI legacy-row upgrade
-   path; the full suite passed against it and the scratch database was dropped.
-   Exact local evidence is recorded in the verification register.
-2. **Engineering checks and review:** the frozen `dc084417` checks remain
-   historical evidence for PR #2, which contains H-01. The corrected candidate
-   `31e7397be082394a6da95eadebd0d8ad6bf99c39` has fresh full PostgreSQL and
-   static-check evidence. It requires a new exact package SHA and a qualified
-   independent security/architecture review of the corrected code plus that
-   package. The reviewer must be different from the implementer and provide an
-   attributable report with methods and findings. Do not move PR #2 or claim
-   its old head contains the correction.
+1. **Reproducibility:** migrations 001–009 were replayed in order on a newly
+   created explicitly disposable PostgreSQL database using the synthetic
+   legacy-row upgrade path; the full 91-test suite passed and the container was
+   removed. A clean read-only clone of package `c9b2c7a` reproduced 91 passing
+   tests and static checks. This is local automated evidence, not CI or formal
+   review.
+2. **Formal review:** source `31e7397` and the exact final documentation
+   package SHA require review by a qualified independent human other than the
+   implementer. The request is prepared in `FORMAL_REVIEW_REQUEST.md`; review
+   is not yet available. Do not move PR #2 or claim its old head contains the
+   correction.
 3. Resolve or explicitly disposition review findings within the M2-A boundary.
 4. Present exact-SHA evidence and the residual-risk list below for competent
    acceptance. The engineering agent must not self-accept M2-A.
