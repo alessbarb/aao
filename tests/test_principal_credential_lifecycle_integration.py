@@ -757,3 +757,40 @@ def test_ceo_project_grant_inventory_returns_metadata_only(monkeypatch):
         assert client.get(
             f"/v1/projects/{project}/grants", headers={"X-CEO-Token": "wrong"},
         ).status_code == 403
+
+
+@pytest.mark.skipif(
+    not os.getenv("AAO_TEST_POSTGRES_URL") or os.getenv("AAO_TEST_DB_DISPOSABLE") != "yes",
+    reason="Explicit disposable PostgreSQL database required",
+)
+def test_ceo_mandate_inventory_binds_confirmation_project_and_event_ids(monkeypatch):
+    from aao.work_management_api import app
+
+    monkeypatch.setenv("AAO_POSTGRES_URL", os.environ["AAO_TEST_POSTGRES_URL"])
+    monkeypatch.setenv("AAO_CEO_TOKEN", "mandate-inventory-ceo")
+    ceo = {"X-CEO-Token": "mandate-inventory-ceo"}
+    title = "Mandate inventory " + str(uuid4())
+    project_name = "Mandate inventory " + str(uuid4())
+    with TestClient(app) as client:
+        mandate = client.post("/v1/mandates", headers=ceo, json={
+            "title": title, "objective": "Verify authorized lifecycle evidence",
+        }).json()["id"]
+        assert client.post(f"/v1/mandates/{mandate}/confirm", headers=ceo).status_code == 200
+        project = client.post("/v1/projects", headers=ceo, json={
+            "name": project_name, "mandate_id": mandate,
+        }).json()["id"]
+
+        response = client.get("/v1/mandates", headers=ceo)
+        assert response.status_code == 200, response.text
+        result = next(row for row in response.json() if row["id"] == mandate)
+        assert result["title"] == title
+        assert result["objective"] == "Verify authorized lifecycle evidence"
+        assert result["status"] == "CONFIRMED"
+        assert result["project"] == {
+            "id": project, "name": project_name, "state": "ACTIVE",
+        }
+        assert {event["kind"] for event in result["events"]} >= {
+            "mandate.drafted", "mandate.confirmed", "project.created",
+        }
+        assert all("id" in event and "subject_id" in event for event in result["events"])
+        assert all("details" not in event for event in result["events"])

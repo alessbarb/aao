@@ -21,6 +21,13 @@ from urllib.error import HTTPError, URLError
 from urllib.parse import urlparse
 from urllib.request import Request, urlopen
 
+MANDATE_TITLE = "AAO — Self Development"
+MANDATE_OBJECTIVE = (
+    "Build the minimum functional core for AAO to manage, develop, test, audit, "
+    "and improve its own software as its first project. Deliver the autonomous "
+    "backend and AAO Control Center, with authentic, traceable work under "
+    "bounded authorization."
+)
 PROJECT_NAME = "AAO Self Development"
 GRANTS = ("project.read", "work.admit", "execution.claim")
 GRANT_LIFETIME = timedelta(hours=8)
@@ -84,6 +91,88 @@ def write_private_token(path: Path, token: str) -> None:
         raise
 
 
+def ensure_mandated_project(base_url: str, ceo_token: str) -> tuple[dict, dict]:
+    """Idempotently verify/register only the confirmed AAO self-development scope."""
+    mandates = request_json(base_url, "/v1/mandates", ceo_token=ceo_token)
+    if not isinstance(mandates, list):
+        raise BootstrapError("mandate inventory response is invalid")
+    matches = [row for row in mandates if row.get("title") == MANDATE_TITLE]
+    if len(matches) > 1:
+        raise BootstrapError("multiple matching CEO mandates exist; refusing ambiguity")
+    if matches:
+        mandate = matches[0]
+        if mandate.get("objective") != MANDATE_OBJECTIVE:
+            raise BootstrapError("existing CEO mandate does not match the canonical objective")
+    else:
+        if any(
+            isinstance(row.get("project"), dict)
+            and row["project"].get("name") == PROJECT_NAME
+            for row in mandates
+        ):
+            raise BootstrapError("project name is already bound to a different mandate")
+        mandate = request_json(
+            base_url, "/v1/mandates", method="POST", ceo_token=ceo_token,
+            body={"title": MANDATE_TITLE, "objective": MANDATE_OBJECTIVE},
+        )
+        if not isinstance(mandate, dict) or not mandate.get("id"):
+            raise BootstrapError("mandate creation response is invalid")
+
+    mandate_id = mandate["id"]
+    if mandate.get("status") == "DRAFT":
+        mandate = request_json(
+            base_url, f"/v1/mandates/{mandate_id}/confirm", method="POST",
+            ceo_token=ceo_token,
+        )
+        if mandate.get("status") != "CONFIRMED":
+            raise BootstrapError("CEO mandate confirmation did not complete")
+    elif mandate.get("status") != "CONFIRMED":
+        raise BootstrapError("CEO mandate is not in a confirmable state")
+
+    inventory = request_json(base_url, "/v1/mandates", ceo_token=ceo_token)
+    record = next((row for row in inventory if row.get("id") == mandate_id), None)
+    if not record or record.get("status") != "CONFIRMED":
+        raise BootstrapError("confirmed mandate could not be verified")
+    events = record.get("events")
+    if not isinstance(events, list) or not any(
+        event.get("kind") == "mandate.confirmed"
+        and event.get("subject_id") == mandate_id
+        for event in events
+    ):
+        raise BootstrapError("mandate confirmation event is missing")
+
+    project = record.get("project")
+    if project is None:
+        if any(
+            isinstance(row.get("project"), dict)
+            and row["project"].get("name") == PROJECT_NAME
+            for row in inventory
+        ):
+            raise BootstrapError("project name is already bound to a different mandate")
+        project = request_json(
+            base_url, "/v1/projects", method="POST", ceo_token=ceo_token,
+            body={"name": PROJECT_NAME, "mandate_id": mandate_id},
+        )
+        if not isinstance(project, dict) or not project.get("id"):
+            raise BootstrapError("project creation response is invalid")
+        inventory = request_json(base_url, "/v1/mandates", ceo_token=ceo_token)
+        record = next((row for row in inventory if row.get("id") == mandate_id), None)
+        project = record.get("project") if record else None
+    if (
+        not isinstance(project, dict)
+        or project.get("name") != PROJECT_NAME
+        or project.get("state") != "ACTIVE"
+    ):
+        raise BootstrapError("project record does not match the active mandate scope")
+    project_events = [
+        event for event in record["events"]
+        if event.get("kind") == "project.created"
+        and event.get("subject_id") == project.get("id")
+    ]
+    if not project_events:
+        raise BootstrapError("project creation event is missing")
+    return record, project
+
+
 def bootstrap(base_url: str) -> tuple[str, str, datetime, Path]:
     parsed = urlparse(base_url)
     if parsed.scheme != "http" or parsed.hostname not in {"127.0.0.1", "localhost"}:
@@ -95,13 +184,7 @@ def bootstrap(base_url: str) -> tuple[str, str, datetime, Path]:
     if not ceo_token:
         raise BootstrapError("CEO credential is required")
 
-    projects = request_json(base_url, "/v1/projects", ceo_token=ceo_token)
-    if not isinstance(projects, list):
-        raise BootstrapError("project listing response is invalid")
-    matches = [p for p in projects if p.get("name") == PROJECT_NAME]
-    if len(matches) != 1 or matches[0].get("state") != "ACTIVE":
-        raise BootstrapError("exactly one active AAO Self Development project is required")
-    project = matches[0]
+    mandate, project = ensure_mandated_project(base_url, ceo_token)
     # Inspect the currently authorized inventory before creating any new identity.
     # The endpoint is CEO-only and returns metadata only, never credential material.
     existing_grants = request_json(
@@ -178,7 +261,7 @@ def bootstrap(base_url: str) -> tuple[str, str, datetime, Path]:
         del ceo_token
         del agent_token
 
-    return principal_id, project["id"], expiry, token_path
+    return principal_id, mandate["id"], project["id"], expiry, token_path
 
 
 def main() -> int:
@@ -186,11 +269,12 @@ def main() -> int:
     parser.add_argument("--base-url", default="http://127.0.0.1:8001")
     arguments = parser.parse_args()
     try:
-        principal, project, expiry, token_file = bootstrap(arguments.base_url)
+        principal, mandate, project, expiry, token_file = bootstrap(arguments.base_url)
     except BootstrapError as exc:
         print(f"Bootstrap not completed: {exc}", file=sys.stderr)
         return 1
     print(f"AGENT provisioned: {principal}")
+    print(f"Confirmed mandate: {mandate}")
     print(f"Project: {PROJECT_NAME} ({project})")
     print(f"Grants: {', '.join(GRANTS)}")
     print(f"Grant expiry (UTC): {expiry.isoformat()}")

@@ -282,6 +282,42 @@ def create_mandate(payload: MandateRequest, _: str = Depends(require_ceo)):
     return {"id": mid, "status": "DRAFT"}
 
 
+@app.get("/v1/mandates")
+def list_mandates(_: str = Depends(require_ceo)):
+    """CEO-only mandate and lifecycle-event inventory for safe local bootstrap."""
+    with tx() as db:
+        rows = db.execute(
+            "SELECT m.id,m.title,m.objective,m.status,p.id,p.name,p.state, "
+            "COALESCE(json_agg(json_build_object('id',e.id,'subject_id',e.subject_id, "
+            "'kind',e.kind,'created_at',e.created_at) ORDER BY e.created_at) "
+            "FILTER (WHERE e.id IS NOT NULL), '[]'::json) "
+            "FROM mandates m LEFT JOIN projects p ON p.mandate_id=m.id "
+            "LEFT JOIN events e ON e.subject_id=m.id OR e.subject_id=p.id "
+            "GROUP BY m.id,p.id ORDER BY m.created_at,m.id"
+        ).fetchall()
+    return [
+        {
+            "id": str(row[0]),
+            "title": row[1],
+            "objective": row[2],
+            "status": row[3],
+            "project": None if row[4] is None else {
+                "id": str(row[4]), "name": row[5], "state": row[6],
+            },
+            "events": [
+                {
+                    "id": str(event["id"]),
+                    "subject_id": str(event["subject_id"]),
+                    "kind": event["kind"],
+                    "created_at": str(event["created_at"]),
+                }
+                for event in row[7]
+            ],
+        }
+        for row in rows
+    ]
+
+
 @app.post("/v1/mandates/{mandate_id}/confirm")
 def confirm_mandate(mandate_id: str, _: str = Depends(require_ceo)):
     with tx() as db:
