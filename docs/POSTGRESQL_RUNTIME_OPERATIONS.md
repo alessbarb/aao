@@ -26,7 +26,8 @@ for migration in db/postgres/001_foundation.sql \
   db/postgres/004_execution_guards.sql \
   db/postgres/005_principal_credentials.sql \
   db/postgres/006_unified_execution_identity.sql \
-  db/postgres/007_fence_leases_across_project_state_changes.sql; do
+  db/postgres/007_fence_leases_across_project_state_changes.sql \
+  db/postgres/008_content_addressed_evidence.sql; do
   psql "$AAO_POSTGRES_URL" -v ON_ERROR_STOP=1 -f "$migration"
 done
 export AAO_CEO_TOKEN='locally-generated-secret'

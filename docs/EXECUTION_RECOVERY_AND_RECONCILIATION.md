@@ -17,8 +17,10 @@ an unexpired project-scoped `execution.reconcile` grant; the reviewer ID is
 derived from that credential inside the same transaction. AGENT credentials
 are rejected. The same principal ID as the former execution worker is rejected,
 but principal-ID separation is not proof of distinct human identity. Evidence
-references are mandatory but are not validated against an artifact store or
-cryptographically bound to their contents.
+references must resolve to project-scoped, append-only artifacts whose bytes
+are re-hashed during reconciliation. This establishes stored-byte integrity,
+not the truth of the content, its authorship, or independent review. There is
+no HTTP upload/read endpoint; submission is an internal Python capability.
 Retry is refused when the project is paused or cancelled, or when any external
 effect exists except one explicitly rejected. That restriction errs on the
 side of refusing potentially unsafe duplicate effects.
@@ -49,7 +51,9 @@ reconciliation require an isolated PostgreSQL instance.
 - Proposal/rejection lock-order tests and effect-proposal credential/grant
   revocation schedules cover selected controlled orderings. Broader adversarial
   schedules remain open.
-- Immutable verification of evidence and signed disposition.
+- Evidence truth/authorship, reviewer access to inspect artifact bytes, and
+  database-role protection against privileged mutation/truncation; no signed
+  disposition exists yet.
 - Recovery of paused/running work and explicit in-flight effects reconciliation.
 - Repeated crash/credential rotation and concurrent-worker integration tests.
 

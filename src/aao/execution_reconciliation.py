@@ -1,4 +1,4 @@
-"""Independent, evidence-bound reconciliation of UNCERTAIN executions.
+"""Reconcile UNCERTAIN executions using project-scoped evidence artifacts.
 
 This operation only changes queue state. It NEVER calls tools or retries work.
 """
@@ -16,7 +16,7 @@ def reconcile(execution_id: str, *, auditor_credential: str, evidence: list[str]
               disposition: str) -> str:
     if disposition not in {"RETRY_CONFIRMED_SAFE", "MARK_FAILED"}:
         raise ReconciliationDenied("Unknown disposition")
-    if not auditor_credential or not evidence or not all(e.strip() for e in evidence):
+    if not auditor_credential or not evidence:
         raise ReconciliationDenied("Active auditor credential and independent evidence required")
     with connect_postgres() as db:
         from aao.principal_credentials import PrincipalDenied, authenticate_in_transaction
@@ -44,6 +44,11 @@ def reconcile(execution_id: str, *, auditor_credential: str, evidence: list[str]
         ).fetchone()
         if not grant:
             raise ReconciliationDenied("Reconciliation capability required")
+        from aao.evidence_registry import EvidenceDenied, verify_evidence_references
+        try:
+            verified_evidence = verify_evidence_references(db, project_id, evidence)
+        except EvidenceDenied as exc:
+            raise ReconciliationDenied(str(exc)) from exc
         if disposition == "RETRY_CONFIRMED_SAFE":
             if project_state != "ACTIVE":
                 raise ReconciliationDenied("Project must be active to retry")
@@ -67,7 +72,7 @@ def reconcile(execution_id: str, *, auditor_credential: str, evidence: list[str]
             "VALUES (%s,%s,'reconciled',%s::jsonb)",
             (str(uuid4()), execution_id, json.dumps({
                 "reviewer": reviewer_id, "disposition": disposition,
-                "evidence": evidence, "prior_state": status,
+                "evidence": verified_evidence, "prior_state": status,
             })),
         )
     return new_state

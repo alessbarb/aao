@@ -1,7 +1,7 @@
 # Principal authorization matrix
 
 **Scope:** current development API and internal execution/reconciliation
-operations, updated through `edc0e42`.
+operations, updated through the pending content-addressed evidence increment.
 This is an engineering inventory, not a production authorization policy or
 independent security review. The PostgreSQL API and its internal helpers are
 not a claim of M2 acceptance.
@@ -48,9 +48,11 @@ register for test status.
 | Operation | Identity / capability check | Transaction boundary | Known boundary |
 | --- | --- | --- | --- |
 | `execution_queue.claim()` / `complete()` | Individual AGENT credential; requires unexpired `execution.claim` project grant | Credential and grant are checked with `FOR SHARE`; queue/project rows are locked. | Migration 006 transfers legacy identities and drops the old registry. Lease expiry is computed and checked with PostgreSQL `clock_timestamp()`; a real database-lock-wait test covers delayed completion. Other lease/revocation schedules remain open. |
-| `execution_reconciliation.reconcile()` | Active AUDITOR bearer credential resolves reviewer in-transaction; unexpired `execution.reconcile` grant; AGENT credentials denied | Locks credential, queue/project and grant rows | No HTTP endpoint. Evidence references are not verified; controlled auditor-credential revocation schedules cover both dispositions. Both orderings of `execution.reconcile` grant deletion against `MARK_FAILED` are covered with observed PostgreSQL blockers. |
+| `execution_reconciliation.reconcile()` | Active AUDITOR bearer credential resolves reviewer in-transaction; unexpired `execution.reconcile` grant; AGENT credentials denied | Locks credential, queue/project, grant, and referenced evidence rows | No HTTP endpoint. Evidence refs resolve to project-scoped append-only artifacts and bytes are re-hashed; this does not prove truth/authorship. Controlled auditor-credential revocation schedules cover both dispositions. |
 | `external_effect_registry.propose()` | Active individual AGENT credential must match `worker_id`; requires `effect.propose` grant | In one transaction, locks credential, execution/project, then grant; requires active project, `RUNNING`, matching worker and lease token, and a lease not expired by DB clock | Records only; never executes. Appends `effect.proposed` journal event with proposer identity and request digest. No external adapter is enabled. |
-| `external_effect_reconciliation.reject_unexecuted_proposal()` | Active AUDITOR bearer credential resolves reviewer in-transaction; unexpired `effect.reconcile` grant; AGENT credentials denied | Locks credential, effect/queue and grant rows | Evidence references are not verified; internal helper only. Both grant-deletion orderings are covered with observed PostgreSQL blockers; no external effect is executed. |
+| `external_effect_reconciliation.reject_unexecuted_proposal()` | Active AUDITOR bearer credential resolves reviewer in-transaction; unexpired `effect.reconcile` grant; AGENT credentials denied | Locks credential, effect/queue, grant, and referenced evidence rows | Evidence refs resolve to project-scoped append-only artifacts and bytes are re-hashed; this does not prove truth/authorship. Internal helper only; no external effect is executed. |
+
+| `evidence_registry.register_evidence()` | Active individual AGENT credential matching submitter; active project; unexpired `evidence.submit` grant | Checks identity/project/grant and inserts artifact plus event in one transaction | Internal Python operation, no HTTP upload/read API. Artifacts are capped at 1 MiB and keyed by project plus SHA-256; privileged DB mutation/truncation and evidence truth remain outside this guarantee. |
 
 ## Cross-cutting gaps and test status
 

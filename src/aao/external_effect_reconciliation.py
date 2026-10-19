@@ -14,7 +14,7 @@ class EffectReviewDenied(ValueError):
 
 
 def reject_unexecuted_proposal(effect_id: str, *, auditor_credential: str, evidence: list[str]):
-    if not auditor_credential or not evidence or not all(x.strip() for x in evidence):
+    if not auditor_credential or not evidence:
         raise EffectReviewDenied("Active auditor credential and meaningful evidence required")
     with connect_postgres() as db:
         from aao.principal_credentials import PrincipalDenied, authenticate_in_transaction
@@ -55,12 +55,18 @@ def reject_unexecuted_proposal(effect_id: str, *, auditor_credential: str, evide
         ).fetchone()
         if not grant:
             raise EffectReviewDenied("Independent effect capability missing")
+        from aao.evidence_registry import EvidenceDenied, verify_evidence_references
+        try:
+            verified_evidence = verify_evidence_references(db, project_id, evidence)
+        except EvidenceDenied as exc:
+            raise EffectReviewDenied(str(exc)) from exc
         db.execute("UPDATE external_effects SET status='REJECTED' WHERE id=%s", (effect_id,))
         db.execute(
             "INSERT INTO execution_journal(id,execution_id,kind,details) "
             "VALUES (%s,%s,'effect.rejected',%s::jsonb)",
             (str(uuid4()), execution_id, json.dumps({
-                "effect_id": effect_id, "reviewer": reviewer_id, "evidence": evidence,
+                "effect_id": effect_id, "reviewer": reviewer_id,
+                "evidence": verified_evidence,
             })),
         )
     return "REJECTED"

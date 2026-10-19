@@ -8,6 +8,16 @@ import pytest
 from fastapi.testclient import TestClient
 
 
+def _registered_evidence(project_id, agent_id, credential):
+    from aao.evidence_registry import register_evidence
+
+    return register_evidence(
+        project_id, b"AAO inert execution evidence for integration coverage",
+        agent_id=agent_id, agent_credential=credential,
+        media_type="text/plain",
+    )
+
+
 @pytest.mark.skipif(
     not os.getenv("AAO_TEST_POSTGRES_URL") or os.getenv("AAO_TEST_DB_DISPOSABLE") != "yes",
     reason="Explicit disposable PostgreSQL database required",
@@ -47,10 +57,29 @@ def test_reconciliation_requires_distinct_granted_reviewer(monkeypatch):
             (worker_id, "work.admit"),
             (worker_id, "execution.claim"),
             (worker_id, "effect.propose"),
+            (worker_id, "evidence.submit"),
         ):
             client.post(f"/v1/projects/{project}/grants", headers=ceo, json={
                 "principal_id": principal_id, "capability": capability
             })
+        evidence_ref = _registered_evidence(project, worker_id, secret)
+        import psycopg
+
+        from aao.postgresql_connection import connect_postgres
+
+        digest = evidence_ref.removeprefix("sha256:")
+        with pytest.raises(psycopg.errors.RaiseException, match="append-only"), \
+                connect_postgres() as db:
+            db.execute(
+                "UPDATE evidence_artifacts SET media_type='application/json' "
+                "WHERE project_id=%s AND digest=%s", (project, digest),
+            )
+        with pytest.raises(psycopg.errors.RaiseException, match="append-only"), \
+                connect_postgres() as db:
+            db.execute(
+                "DELETE FROM evidence_artifacts WHERE project_id=%s AND digest=%s",
+                (project, digest),
+            )
         wid = client.post(f"/v1/projects/{project}/work", headers=worker, json={
             "title": "Inert recovery", "author_id": worker_id,
             "acceptance_criteria": ["Recorded"]
@@ -90,6 +119,12 @@ def test_reconciliation_requires_distinct_granted_reviewer(monkeypatch):
             "principal_id": auditor_id, "capability": "execution.reconcile",
         })
         assert granted.status_code == 201, granted.text
+    with pytest.raises(ReconciliationDenied, match="Evidence artifact not found"):
+        reconcile(
+            eid, auditor_credential=auditor_secret,
+            evidence=["sha256:" + "0" * 64], disposition="RETRY_CONFIRMED_SAFE",
+        )
+    assert state(eid)["status"] == "UNCERTAIN"
     with pytest.raises(ReconciliationDenied):
         reconcile(eid, auditor_credential=secret, evidence=["agent cannot review"],
                   disposition="RETRY_CONFIRMED_SAFE")
@@ -107,7 +142,7 @@ def test_reconciliation_requires_distinct_granted_reviewer(monkeypatch):
             capability="test.inert", request={"kind": "test-only"},
         )
     assert reconcile(
-        eid, auditor_credential=auditor_secret, evidence=["inert-only confirmed"],
+        eid, auditor_credential=auditor_secret, evidence=[evidence_ref],
         disposition="RETRY_CONFIRMED_SAFE",
     ) == "QUEUED"
     lease = claim(worker_id, agent_credential=secret, project_id=project)
@@ -160,7 +195,7 @@ def test_reconciliation_requires_distinct_granted_reviewer(monkeypatch):
         }).status_code == 201
     with pytest.raises(EffectReviewDenied):
         reject_unexecuted_proposal(
-            proposal["id"], auditor_credential=secret, evidence=["agent denied"]
+            proposal["id"], auditor_credential=secret, evidence=[evidence_ref]
         )
     for attempt in range(5):
         if attempt == 0:
@@ -186,7 +221,7 @@ def test_reconciliation_requires_distinct_granted_reviewer(monkeypatch):
         def reject_proposal(selected_effect_id):
             return reject_unexecuted_proposal(
                 selected_effect_id, auditor_credential=auditor_secret,
-                evidence=["proposal not executed"],
+                evidence=[evidence_ref],
             )
 
         def wait_until_blocked(query_pattern, blocker_pid, excluded_pid=None):
@@ -250,7 +285,7 @@ def test_reconciliation_requires_distinct_granted_reviewer(monkeypatch):
         blocker_pid = blocker.execute("SELECT pg_backend_pid()").fetchone()[0]
         rejecting = pool.submit(
             reject_unexecuted_proposal, effect["id"],
-            auditor_credential=auditor_secret, evidence=["reject inert proposal"],
+            auditor_credential=auditor_secret, evidence=[evidence_ref],
         )
         rejecting_pid = wait_until_blocked("INSERT INTO execution_journal%", blocker_pid)
         revoking = pool.submit(
@@ -283,7 +318,7 @@ def test_reconciliation_requires_distinct_granted_reviewer(monkeypatch):
         rejecting = pool.submit(
             reject_unexecuted_proposal, effect["id"],
             auditor_credential=auditor_secret,
-            evidence=["must be denied after grant revocation"],
+            evidence=[evidence_ref],
         )
         wait_until_blocked("SELECT 1 FROM project_grants%", revoker_pid)
     assert revoking.result(timeout=5).status_code == 204
@@ -392,12 +427,14 @@ def test_reconciliation_serializes_with_auditor_credential_revocation(
         }).json()["id"]
         for principal, capability in (
             (worker_id, "work.create"), (worker_id, "work.admit"),
-            (worker_id, "execution.claim"), (auditor_id, "execution.reconcile"),
+            (worker_id, "execution.claim"), (worker_id, "evidence.submit"),
+            (auditor_id, "execution.reconcile"),
         ):
             response = client.post(f"/v1/projects/{project}/grants", headers=ceo, json={
                 "principal_id": principal, "capability": capability,
             })
             assert response.status_code == 201, response.text
+        evidence_ref = _registered_evidence(project, worker_id, worker_token)
         work = client.post(f"/v1/projects/{project}/work", headers=worker, json={
             "title": "Reconcile credential race", "author_id": worker_id,
             "acceptance_criteria": ["inert"],
@@ -416,7 +453,7 @@ def test_reconciliation_serializes_with_auditor_credential_revocation(
             blocker.execute("LOCK TABLE execution_journal IN ACCESS EXCLUSIVE MODE")
             reconciliation = pool.submit(
                 reconcile, execution_id, auditor_credential=auditor_token,
-                evidence=["reviewed inert execution"], disposition=disposition,
+                evidence=[evidence_ref], disposition=disposition,
             )
             deadline = time.monotonic() + 5
             reconciliation_waiting = False
@@ -456,7 +493,7 @@ def test_reconciliation_serializes_with_auditor_credential_revocation(
         with pytest.raises(ReconciliationDenied, match="Active auditor credential required"):
             reconcile(
                 execution_id, auditor_credential=auditor_token,
-                evidence=["retry after revocation"], disposition=disposition,
+                evidence=[evidence_ref], disposition=disposition,
             )
 
 
@@ -498,12 +535,14 @@ def test_execution_reconciliation_serializes_with_grant_revocation(monkeypatch):
         }).json()["id"]
         for principal, capability in (
             (worker_id, "work.create"), (worker_id, "work.admit"),
-            (worker_id, "execution.claim"), (auditor_id, "execution.reconcile"),
+            (worker_id, "execution.claim"), (worker_id, "evidence.submit"),
+            (auditor_id, "execution.reconcile"),
         ):
             response = client.post(f"/v1/projects/{project}/grants", headers=ceo, json={
                 "principal_id": principal, "capability": capability,
             })
             assert response.status_code == 201, response.text
+        evidence_ref = _registered_evidence(project, worker_id, worker_token)
 
         def uncertain_execution(label):
             work_id = client.post(f"/v1/projects/{project}/work", headers=worker, json={
@@ -543,7 +582,7 @@ def test_execution_reconciliation_serializes_with_grant_revocation(monkeypatch):
             blocker_pid = blocker.execute("SELECT pg_backend_pid()").fetchone()[0]
             reconciliation = pool.submit(
                 reconcile, execution_id, auditor_credential=auditor_token,
-                evidence=["reviewed inert execution"], disposition="MARK_FAILED",
+                evidence=[evidence_ref], disposition="MARK_FAILED",
             )
             reconcile_pid = wait_for_blocked_query("INSERT INTO execution_journal%", blocker_pid)
             revocation = pool.submit(
@@ -579,7 +618,7 @@ def test_execution_reconciliation_serializes_with_grant_revocation(monkeypatch):
             revoker_pid = wait_for_blocked_query("DELETE FROM project_grants%", blocker_pid)
             reconciliation = pool.submit(
                 reconcile, execution_id, auditor_credential=auditor_token,
-                evidence=["must be denied after revocation"], disposition="MARK_FAILED",
+                evidence=[evidence_ref], disposition="MARK_FAILED",
             )
             wait_for_blocked_query("SELECT 1 FROM project_grants%", revoker_pid)
         revoked = revocation.result(timeout=5)
