@@ -185,7 +185,7 @@ def test_worker_claim_complete_respects_identity_and_project_state(monkeypatch):
         eid = client.post(f"/v1/work/{wid}/stage-inert", headers=worker).json()["execution_id"]
         with pytest.raises(ExecutionConflict):
             claim(worker_id, credential="wrong", project_id=project_id)
-    with connect_postgres() as db:
+        with connect_postgres() as db:
             db.execute("INSERT INTO project_grants(principal_id,project_id,capability) VALUES (%s,%s,'execution.claim')", (worker_id, project_id))
         lease = claim(worker_id, credential=token, project_id=project_id)
         assert lease is not None and lease["execution_id"] == eid
