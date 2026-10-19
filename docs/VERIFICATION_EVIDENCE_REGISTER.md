@@ -488,3 +488,23 @@ coverage, independent review, or M2 acceptance.
   Remaining high-priority work includes HTTP credential-rotation races,
   project-grant revocation schedules, adversarial runtime recovery, and
   independent security/architecture review.
+
+## HTTP request-context token rotation gap — 2026-10-19
+
+- Code revision: `a2791349e6000bec56d95cfe0ede587bb631573b` on
+  `feat/aao-m0-foundation`.
+- Added a disposable-PostgreSQL route integration test that resolves an
+  individual AGENT reader context, rotates the credential in a separate
+  committed HTTP request, then injects the captured stale context into the
+  actual project-list route. The stale context is denied with 403; a freshly
+  authenticated context sees its granted project. App dependency overrides
+  are removed in `finally` to prevent cross-test leakage.
+- Local checks on this exact code tree: focused test **1 passed**; full suite
+  **66 passed, 0 skipped, 0 warnings** under `-W error`; compileall, Ruff,
+  `pip check`, and diff check passed. Tests ran against the configured
+  explicitly disposable PostgreSQL database.
+- GitHub Actions run for this revision is pending at time of entry. The
+  preceding code revision `e9890cd7845a7b5b2be6359f513647b9db918368` passed
+  CI run `39261323490` with its PostgreSQL suite. This bounded test proves
+  rotation between HTTP dependency resolution and project-list transaction;
+  it does not prove all rotation/revocation schedules or M2 acceptance.
