@@ -14,32 +14,27 @@ awaited. Exact evidence and limits are recorded in
 The current authorization inventory is
 [`PRINCIPAL_AUTHORIZATION_MATRIX.md`](PRINCIPAL_AUTHORIZATION_MATRIX.md); the
 M2 compliance matrix is
-[`COMPLIANCE_MATRIX.md`](COMPLIANCE_MATRIX.md). M2 remains in progress and is
-not accepted. Do not interpret old `[candidate]` or `[BLOCKED]` labels below
-as live issue statuses.
+[`COMPLIANCE_MATRIX.md`](COMPLIANCE_MATRIX.md). The CEO has now established
+M2-A/M2-B/M2-C stage scope in [`SCOPE_DISPOSITION.md`](SCOPE_DISPOSITION.md).
+M2-A is the current durable/inert candidate; it remains unaccepted pending a
+clean migration replay, formal independent review, and competent acceptance.
+Do not interpret old `[candidate]` or `[BLOCKED]` labels below as live issue
+statuses.
 
 ## Current M2 disposition
 
 - **M2-01 — SATISFECHO as an evaluation:** retain PostgreSQL for the inert
   candidate; see [`DURABLE_EXECUTION_EVALUATION.md`](DURABLE_EXECUTION_EVALUATION.md).
   This does not ratify scope or authorize a runtime migration.
-- **M2-02, M2-03, M2-05, M2-06 — PARCIAL:** selected lease/revocation,
-  reconciliation, inert-effect, and denied-action behavior exists and has
-  local evidence. Signed worker attestations, autonomous recovery, provider
-  effects, production-independent stop control, and repeated-event-delivery
-  acceptance remain unproven or intentionally disabled. Do not keep expanding
-  concurrency schedules without a concrete uncovered operation/order.
-- **M2-04 — BLOQUEADO on scope, not technically complete:** sandbox runners
-  with operation-scoped capabilities are explicitly named in this planning
-  seed but are not implemented. The current worker is deliberately inert.
-  The SQLite prototype's `sandbox-queue` route is not a sandbox runner: it
-  accepts no tool/model operation and provides no operation-scoped capability
-  isolation. Its tests do not satisfy or evidence the PostgreSQL M2-04 item.
-  A scope decision is required before treating sandbox execution as either an
-  acceptance requirement or a deferral.
-- **Formal acceptance — PENDIENTE:** the Constitution is a draft; no ratified
-  M2 acceptance contract, qualified independent review, or competent acceptance
-  exists. The prepared acceptance proposal is not a request to enable execution.
+- **M2-02 — M2-A subset SATISFECHO for tested database leases/fencing/quarantine; M2-B/C remainder pending:** signed leases/checkpoints and automated recovery remain unimplemented.
+- **M2-03 — M2-A inert containment SATISFECHO; provider-side ledger/idempotency remains unimplemented and unauthorized:** define future-stage scope before work.
+- **M2-04 — DIFERIDO to M2-B, still PENDIENTE:** capability-scoped sandbox runners are not implemented. The SQLite prototype's `sandbox-queue` route accepts no tool/model operation and provides no operation-scoped capability isolation; it is not a sandbox and does not satisfy M2-04.
+- **M2-05 — M2-A project state fencing SATISFECHO for tested inert paths; independent runtime stop is DIFERIDO to M2-B, production supervision to M2-C.**
+- **M2-06 — M2-A denial/manual quarantine/reconciliation SATISFECHO for tested paths; automated restart recovery and complete repeated-delivery handling remain pending for M2-B/C.**
+- Do not keep expanding concurrency schedules without a concrete uncovered operation/order.
+- **M2-A acceptance — PENDIENTE:** stage scope is recorded, but no qualified
+  independent review or competent M2-A acceptance exists. The acceptance
+  proposal is not a request to enable execution.
 
 This live disposition supersedes the dated implementation-status prose below
 where it differs. Detailed historical notes remain for provenance, not as an

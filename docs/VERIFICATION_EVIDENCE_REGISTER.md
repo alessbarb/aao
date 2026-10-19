@@ -839,3 +839,23 @@ coverage, independent review, or M2 acceptance.
 - This re-verifies the repository candidate at the stated local boundary. It
   is not a formal independent review, CI result, operational recovery proof,
   scope ratification, or M2 acceptance.
+
+## M2-A clean migration replay and suite — 2026-10-19
+
+- Replayed PostgreSQL migrations `001_foundation.sql` through
+  `009_prevent_evidence_truncation.sql`, in order, on a newly created scratch
+  database named with a random `aao_m2a_replay_` suffix. The configured test
+  database was used only as the source of local PostgreSQL connection settings
+  and explicit disposable-mode confirmation; no secret DSN was printed.
+- To exercise the same legacy upgrade path as CI, inserted one synthetic
+  `worker_registrations` row after migration 005 and before 006. The final
+  `schema_migrations` entry was `009_prevent_evidence_truncation`.
+- The full suite ran against that scratch database with
+  `AAO_ENV=test AAO_ENV_FILE=.env.test` and warnings as errors: **80 passed,
+  0 failed, 0 skipped, 0 warnings** in **19.46 s**. The scratch database was
+  terminated/dropped after the run.
+- This was local verification of a fresh schema plus the represented legacy
+  upgrade path, not backup/restore, production deployment, CI, independent
+  review, or M2-A acceptance. The test command used the candidate worktree with
+  documentation-only scope and review-package updates after implementation
+  source `99760c7`; code was unchanged.

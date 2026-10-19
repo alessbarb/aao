@@ -1,68 +1,89 @@
-# M2 acceptance proposal — not submitted for approval
+# M2-A acceptance proposal — awaiting formal independent review
 
-**Status:** candidate evidence packet prepared; **M2 is not accepted**.
-This document does not grant authority, alter the Constitution, confirm an
-AAO project mandate, or authorize production or external execution.
+**Status:** candidate package only; **M2-A is not accepted**. The CEO has
+defined stage scope in [`SCOPE_DISPOSITION.md`](SCOPE_DISPOSITION.md), but has
+not accepted the implementation or residual risks. The decision does not
+authorize models, tools, providers, production deployment, or external effects.
 
-**Implementation candidate proposed for review:**
-`99760c7339323600368e5dbb145b088d83ad0715`.
-**Verification limits:** local explicitly disposable PostgreSQL test run only;
-see [`VERIFICATION_EVIDENCE_REGISTER.md`](VERIFICATION_EVIDENCE_REGISTER.md).
+## Candidate revisions
 
-## Demonstrated at the stated candidate boundary
+- **Implementation source with 80-test evidence:**
+  `99760c7339323600368e5dbb145b088d83ad0715`.
+- **Latest exact-SHA local verification before the scope-document updates:**
+  `dc7e594a690994b3327b78ce0046e8ec4cf1f616` (documentation-only delta from
+  the implementation source). It passed 80 tests, zero failures/skips/warnings,
+  plus compileall, Ruff, `pip check`, and diff checks. See the evidence register.
+- **Review vehicle:** [draft GitHub PR #2](https://github.com/alessbarb/aao/pull/2).
+  At verification, local `HEAD`, `origin/feat/aao-m0-foundation`,
+  `origin/review/m2-inert-candidate`, and the PR head all matched `dc7e594`.
+  Later documentation commits may advance the PR head. The formal reviewer
+  must identify the live PR head SHA and the implementation source SHA
+  separately. No runtime code was changed to reconcile revision references.
 
-- PostgreSQL work/queue state persists; the candidate enforces project-scoped
-  grants and individual AGENT/AUDITOR credentials in the application path.
-- Claims/completions use bounded leases, PostgreSQL-clock expiry and project
-  state generation fencing. Expired work is quarantined rather than retried
-  automatically.
-- Reconciliation is explicit, restricted to an AUDITOR credential and
-  project-scoped capability, and checks evidence references against stored
-  project-scoped bytes. An authorized internal auditor function can inspect
-  those bytes.
-- Effect proposals and rejections are ledger operations only. No provider,
-  model, shell, network or real external action was enabled.
-- Review `APPROVE` and completion to `DONE` remain fail-closed because positive
+## What M2-A evidence demonstrates
+
+- PostgreSQL-backed work and execution state, per-principal AGENT/AUDITOR
+  development credentials, and project-scoped application authorization.
+- Selected real PostgreSQL grant/credential revocation schedules; not an
+  exhaustive claim over every possible interleaving.
+- Durable inert queue staging, atomic claim/completion, database-clock lease
+  expiry, project-state generation fencing, and stale/expired-work quarantine.
+- Explicit manual reconciliation restricted to an active individual AUDITOR
+  credential, project grant, uncertain state and project-scoped evidence.
+- Project-scoped content-addressed evidence bytes, rehash-on-use, and
+  application-level append-only protections.
+- Pause/cancel controls applicable to the inert project/queue boundary; no
+  stale generation may continue as a valid execution lease.
+- Approval and transition to DONE remain fail-closed because verified human
   reviewer independence and evidence sufficiency are not established.
-- The exact candidate source passed 80 local tests with PostgreSQL and
-  warnings-as-errors; compilation, Ruff, dependency consistency and whitespace
-  checks also passed. CI was not awaited.
+- Execution remains inert: no model, shell, network, tool, provider, or real
+  external action is enabled.
+- Local full suite and static checks at the exact SHA listed above; CI is not
+  asserted as part of this evidence.
 
-These are engineering facts within tested paths, not a statement that every
-M2 requirement is satisfied.
+These are bounded implementation and test facts, not formal assurance or
+acceptance.
 
-## Outstanding before any formal M2 acceptance
+## Conditions before M2-A may be presented for acceptance
 
-1. Competent authority must define/confirm M2 acceptance scope; current
-   Constitution is a draft and backlog is a planning seed.
-2. A qualified independent security/architecture reviewer must review the
-   exact SHA and issue a report; same-process subagents do not satisfy this.
-3. Residual risks must be disposed against the accepted scope: development-only
-   CEO identity, human auditor independence, DB-owner bypass, evidence truth
-   and lifecycle, non-RLS project isolation, selected race coverage, and
-   explicit/manual recovery without a scheduler.
-4. If continuous or production operation is in scope, repeatable crash/restart
-   recovery, least-privilege DB role evidence, operational stop control,
-   backup/restore and deployment verification are still required.
+1. **Complete:** migrations 001–009 were replayed in order on a newly created
+   explicitly disposable PostgreSQL database using the CI legacy-row upgrade
+   path; the full suite passed against it and the scratch database was dropped.
+   Exact local evidence is recorded in the verification register.
+2. Obtain a qualified independent security/architecture review of the exact
+   PR head and code candidate. The reviewer must be different from the
+   implementer and provide an attributable report with methods and findings.
+3. Resolve or explicitly disposition review findings within the M2-A boundary.
+4. Present exact-SHA evidence and the residual-risk list below for competent
+   acceptance. The engineering agent must not self-accept M2-A.
 
-## Deferred, not silently accepted
+No reviewer is currently assigned. The available GitHub collaborator listing
+contains only the repository owner; an internal subagent review cannot satisfy
+the formal independence condition.
 
-Real model execution, external tools/providers, production deployment,
-provider-side exactly-once effect guarantees, production 24/7 operation and
-Biopeia integration remain disabled or out of scope. AAO may be its own first
-managed project only after the same applicable mandate/authorization gate as
-any other project.
+## Residual risks requiring explicit acceptance or continued gating
 
-## Proposed eventual decision
+- Development credentials do not prove human identity, signatures, or distinct
+  human organizations; positive approval stays unavailable.
+- Application authorization is not DB RLS/least-privilege role isolation; a
+  database owner/superuser can bypass application checks or trigger guards.
+- Evidence hashes establish byte integrity, not factual truth, authorship,
+  relevance, or human independence; retention/confidentiality policy is not
+  established.
+- Selected lock/race coverage is not exhaustive. Recovery is explicit/manual;
+  no process restart or autonomous recovery controller is claimed in M2-A.
+- No production/deployment, continuous-service, or CI result is claimed here.
 
-After the scope is ratified and the independent report is reviewed, the CEO or
-competent owner may choose one of:
+## Later stages and retained requirements
 
-- **Accept bounded M2 candidate** for a precisely stated inert/local operating
-  scope with enumerated residual-risk dispositions; or
-- **Reject/defer** and direct closure of specific findings.
+M2-B retains sandboxing with operation-scoped capabilities, automated
+operational recovery, runtime-independent controls, and governed execution.
+M2-C retains continuous operation, complete recovery, deployment, supervision,
+isolation, and production controls. Provider-side effects/idempotency remain
+unimplemented and unauthorized; their stage-specific scope must be defined
+before implementation. Requirements are not marked satisfied because they
+were moved to a later stage.
 
-No decision is requested on this draft package alone. A future approval must
-identify the exact SHA, accepted scope, accepted exceptions, operating limits,
-and whether any new authority is granted. No authority for external execution
-is implied.
+Any future M2-A approval must name the exact SHA, bounded operating mode,
+accepted residual risks, exclusions, and acceptance authority. No authority
+for external execution is implied.

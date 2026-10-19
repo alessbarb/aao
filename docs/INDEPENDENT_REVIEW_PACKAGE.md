@@ -1,4 +1,10 @@
-# M2 candidate — independent review package
+# M2-A candidate — independent review package
+
+The CEO's stage-scope disposition is recorded in
+[`SCOPE_DISPOSITION.md`](SCOPE_DISPOSITION.md). This package requests review
+only of M2-A's bounded PostgreSQL-backed, development-identity, inert execution
+candidate. M2-B and M2-C requirements remain in the compliance matrix and are
+not acceptance claims or implementation authorization.
 
 **Implementation candidate:** `99760c7339323600368e5dbb145b088d83ad0715` on
 `feat/aao-m0-foundation`. This is the exact source revision with local test
@@ -10,7 +16,9 @@ This is a prepared package for a qualified independent reviewer. It is not
 itself the requested independent review and does not claim formal acceptance.
 The current review vehicle is the [draft GitHub PR #2](https://github.com/alessbarb/aao/pull/2);
 the PR head binds the exact code and package checkout for each review revision.
-No formal reviewer has been assigned yet.
+No formal reviewer has been assigned yet. Review must be performed by a
+qualified person other than the implementer; internal agent feedback is not
+formal independence evidence.
 
 ## Review questions
 
@@ -28,12 +36,14 @@ No formal reviewer has been assigned yet.
    while controlling privacy, provenance and retention risks?
 6. Is explicit `UNCERTAIN` quarantine/reconciliation sufficient for the
    agreed M2 operating mode, or is scheduler/startup recovery required?
-7. Are there any critical/high defects or false claims that prevent a
-   candidate acceptance recommendation?
+7. Are there any critical/high defects or false claims that prevent an
+   M2-A-only candidate acceptance recommendation? Do not assess later-stage
+   requirements as accepted or authorize their activation.
 
 ## Artifacts to inspect
 
 - `docs/CONSTITUTION.md` (draft; not a confirmed mandate),
+  `docs/SCOPE_DISPOSITION.md` (CEO stage-scope disposition),
   `docs/ENGINEERING_BACKLOG.md` (planning seed),
   `docs/COMPLIANCE_MATRIX.md`, `docs/TECHNICAL_AUDIT.md`,
   `docs/CLOSURE_PLAN.md`, `docs/ACCEPTANCE_PROPOSAL.md`.
