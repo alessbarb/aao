@@ -8,7 +8,7 @@ import os
 import secrets
 from contextlib import contextmanager
 from pathlib import Path
-from typing import Literal
+from typing import Annotated, Literal
 from uuid import uuid4
 
 from aao.environment_settings import load_local_env
@@ -40,7 +40,7 @@ def require_ceo(x_ceo_token: str | None = Header(None)):
 
 
 def require_reviewer(
-    x_auditor_token: str | None = Header(None),
+    x_auditor_token: Annotated[str | None, Header()] = None,
 ):
     from aao.principal_credentials import PrincipalDenied
     try:
