@@ -21,9 +21,11 @@ authorize models, tools, providers, production deployment, or external effects.
   At the pre-fix live check, local `HEAD`, both remote refs and PR head matched
   `b15dea4f69823bcb894cb58eda54dcffdb48d602`. After committing the fixes,
   the current local implementation candidate is
-  `dc084417a2ba683fe4737342f89e9cd1036b38ad`; the new package/code commit must
-  be pushed and live PR refs rechecked before formal review. The review report must identify
-  package and source revisions separately.
+  `dc084417a2ba683fe4737342f89e9cd1036b38ad`; prior package checkpoint
+  `9faef92e1c6d5f7f509f398193d6f7886b5ddbb0` was pushed and rechecked as the
+  live PR head. Current documentation-only changes still need to be pushed
+  and rechecked before formal review. The review report must identify package
+  and source revisions separately.
 
 ## What M2-A evidence demonstrates
 

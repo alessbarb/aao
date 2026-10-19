@@ -55,11 +55,13 @@ subsequently corrected and rechecked. At the current package checkpoint, local
 `HEAD`, `origin/feat/aao-m0-foundation`, `origin/review/m2-inert-candidate`,
 and live PR #2 head all equal
 `4e8fa48e91c1e8ee5b6a375dc61ecf2cf3f457b8` before the current review
-follow-up. PR #2 remains OPEN and DRAFT. The new implementation candidate is
-`dc084417a2ba683fe4737342f89e9cd1036b38ad`; it must be pushed and live PR refs
-rechecked before the final review request pin is considered current. Reviewers
-must pin and report both package and implementation SHAs; no validated code
-history was rewritten.
+follow-up. PR #2 remains OPEN and DRAFT. At verification checkpoint
+`9faef92e1c6d5f7f509f398193d6f7886b5ddbb0`, implementation candidate
+`dc084417a2ba683fe4737342f89e9cd1036b38ad` had been pushed, and local `HEAD`,
+both branch refs, and the live PR head matched. Later documentation-only
+changes must be pushed and refs rechecked before review. The review request
+must pin both package and implementation revisions; no validated code history
+was rewritten.
 
 ## M2-A measurable acceptance criteria
 
