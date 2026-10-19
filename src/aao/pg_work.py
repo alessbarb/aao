@@ -6,10 +6,12 @@ SQLite API. No agent execution or external side effects are enabled.
 import json
 import os
 import secrets
+from pathlib import Path
 from contextlib import contextmanager
 from uuid import uuid4
 
 from fastapi import Depends, FastAPI, Header, HTTPException
+from fastapi.responses import FileResponse
 from pydantic import BaseModel, Field
 
 from aao.planner import Admission, decide_admission
@@ -83,6 +85,12 @@ class GrantRequest(BaseModel):
 
 
 app = FastAPI(title="AAO PostgreSQL development core", version="0.2.0")
+
+
+@app.get("/", include_in_schema=False)
+def workboard_ui():
+    """Serve the workboard from the same origin as the PostgreSQL API."""
+    return FileResponse(Path(__file__).resolve().parents[2] / "frontend" / "index.html")
 
 
 @app.get("/health")
