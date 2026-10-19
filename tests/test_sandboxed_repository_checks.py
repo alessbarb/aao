@@ -105,6 +105,15 @@ def test_fixed_check_runs_inside_bubblewrap_and_returns_candidate_sha(tmp_path: 
 
     if not shutil.which("bwrap"):
         pytest.skip("bubblewrap is required to exercise the Linux sandbox")
+    capability = subprocess.run(
+        ["bwrap", "--unshare-all", "--die-with-parent", "--", "true"],
+        capture_output=True,
+        check=False,
+        timeout=5,
+    )
+    if capability.returncode:
+        reason = capability.stderr.decode("utf-8", errors="replace").strip()
+        pytest.skip(f"host denies bubblewrap namespaces: {reason}")
     _candidate(tmp_path)
 
     result = run_repository_check(tmp_path, "core-unit")
