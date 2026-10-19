@@ -511,3 +511,91 @@ def test_execution_completion_serializes_with_credential_revocation(monkeypatch)
         assert state(execution_id)["status"] == "SUCCEEDED"
         with pytest.raises(ExecutionConflict, match="credential invalid or revoked"):
             complete(execution_id, lease["token"], identity, {"ok": True}, agent_credential=token)
+
+
+@pytest.mark.skipif(
+    not os.getenv("AAO_TEST_POSTGRES_URL") or os.getenv("AAO_TEST_DB_DISPOSABLE") != "yes",
+    reason="Explicit disposable PostgreSQL database required",
+)
+def test_execution_claim_serializes_with_credential_revocation(monkeypatch):
+    from aao.execution_queue import ExecutionConflict, claim, state
+    from aao.postgresql_connection import connect_postgres
+    from aao.work_management_api import app
+
+    monkeypatch.setenv("AAO_POSTGRES_URL", os.environ["AAO_TEST_POSTGRES_URL"])
+    monkeypatch.setenv("AAO_CEO_TOKEN", "claim-credential-revoke-ceo")
+    monkeypatch.setenv("AAO_SANDBOX_QUEUE_ENABLED", "true")
+    ceo = {"X-CEO-Token": "claim-credential-revoke-ceo"}
+    identity = "claim-credential-revoke-" + str(uuid4())
+    with TestClient(app) as client:
+        issued = client.post("/v1/principals/credentials", headers=ceo, json={
+            "principal_id": identity, "kind": "AGENT",
+        })
+        assert issued.status_code == 201, issued.text
+        token = issued.json()["token"]
+        worker = {"X-Agent-Token": token}
+        mandate = client.post("/v1/mandates", headers=ceo, json={
+            "title": "Claim credential revoke " + str(uuid4()),
+            "objective": "Serialize claim and credential revocation",
+        }).json()["id"]
+        assert client.post(f"/v1/mandates/{mandate}/confirm", headers=ceo).status_code == 200
+        project = client.post("/v1/projects", headers=ceo, json={
+            "name": "Claim credential revoke", "mandate_id": mandate,
+        }).json()["id"]
+        for capability in ("work.create", "work.admit", "execution.claim"):
+            response = client.post(f"/v1/projects/{project}/grants", headers=ceo, json={
+                "principal_id": identity, "capability": capability,
+            })
+            assert response.status_code == 201, response.text
+        work = client.post(f"/v1/projects/{project}/work", headers=worker, json={
+            "title": "Claim credential race", "author_id": identity,
+            "acceptance_criteria": ["inert"],
+        }).json()["id"]
+        assert client.post(f"/v1/work/{work}/admit", headers=worker).status_code == 200
+        staged = client.post(f"/v1/work/{work}/stage-inert", headers=worker)
+        assert staged.status_code == 202, staged.text
+        execution_id = staged.json()["execution_id"]
+
+        with ThreadPoolExecutor(max_workers=2) as pool, connect_postgres() as blocker:
+            blocker.execute("LOCK TABLE execution_queue IN ACCESS EXCLUSIVE MODE")
+            claim_future = pool.submit(
+                claim, identity, agent_credential=token, project_id=project,
+            )
+            deadline = time.monotonic() + 5
+            claim_waiting = False
+            while time.monotonic() < deadline:
+                with connect_postgres() as observer:
+                    claim_waiting = observer.execute(
+                        "SELECT EXISTS (SELECT 1 FROM pg_stat_activity "
+                        "WHERE query LIKE 'SELECT q.id FROM execution_queue q JOIN projects p%' "
+                        "AND wait_event_type='Lock')"
+                    ).fetchone()[0]
+                if claim_waiting:
+                    break
+                time.sleep(0.01)
+            assert claim_waiting, "claim did not reach queue after credential authentication"
+
+            revoke_future = pool.submit(
+                client.post, f"/v1/principals/{identity}/revoke", headers=ceo,
+            )
+            deadline = time.monotonic() + 5
+            revoke_waiting = False
+            while time.monotonic() < deadline:
+                with connect_postgres() as observer:
+                    revoke_waiting = observer.execute(
+                        "SELECT EXISTS (SELECT 1 FROM pg_stat_activity "
+                        "WHERE query LIKE 'UPDATE principal_credentials SET enabled=false%' "
+                        "AND wait_event_type='Lock')"
+                    ).fetchone()[0]
+                if revoke_waiting:
+                    break
+                time.sleep(0.01)
+            assert revoke_waiting, "credential revocation did not wait for in-flight claim"
+
+        lease = claim_future.result(timeout=5)
+        revoked = revoke_future.result(timeout=5)
+        assert lease is not None and lease["execution_id"] == execution_id
+        assert revoked.status_code == 200, revoked.text
+        assert state(execution_id)["status"] == "RUNNING"
+        with pytest.raises(ExecutionConflict, match="credential invalid or revoked"):
+            claim(identity, agent_credential=token, project_id=project)

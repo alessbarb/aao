@@ -48,14 +48,16 @@ inside their transaction. The CEO credential is still a single static bearer.
   operation commits, the revocation succeeds and subsequent completion is
   denied. A separate AUDITOR auth/revocation schedule and AGENT auth/rotation
   schedule exercise credential row locks. These are selected controlled lock
-  schedules, not exhaustive or adversarial race coverage.
+  schedules; a queue-claim/credential-revocation schedule now also observes
+  credential revocation wait until claim commits, then denies later claims.
+  They are not exhaustive or adversarial race coverage.
 - Sequential credential revocation tests and unit mocks that assert SQL text
   do not prove real PostgreSQL lock behavior. Several real lock schedules now
   cover work creation, queue claim/completion against grant deletion, and
   queue completion against credential revocation. Other business writes,
-  queue claim against credential revocation, alternative operation/revocation
-  orderings, and hostile schedules remain untested.
-- The current full local suite has 57 tests, including grant-row, auditor
+  alternative operation/revocation orderings, and hostile schedules remain
+  untested.
+- The current full local suite has 58 tests, including grant-row, auditor
   credential-lock, and completion-after-lease-expiry-during-row-lock-wait
   coverage, AGENT authentication/rotation, and selected protected-operation
   revocation schedules. Three

@@ -348,3 +348,16 @@ does not verify the opposite order, claim/credential-revocation schedules, or
 production adversarial concurrency.
 
 CI run `39256075817` passed for code commit `8b99abad1ae996d31284eab002ec827f066fb7a6`, including the PostgreSQL integration suite, compilation, Ruff, and dependency checks.
+
+## Execution claim versus credential revocation
+
+A PostgreSQL integration schedule holds an `ACCESS EXCLUSIVE` lock on
+`execution_queue` after a claim has authenticated the AGENT and checked its
+`execution.claim` grant. The actual CEO credential-revocation route is observed
+waiting on the claim transaction's credential lock. Releasing the queue lock
+allows claim to commit before revocation; the execution is RUNNING, revocation
+succeeds, and a subsequent claim is denied. Five consecutive local reruns
+passed; the full suite passed **58 tests**, with compileall, Ruff, `pip check`,
+and `git diff --check` clean. CI has not yet run for this change. This is one
+controlled claim/revocation schedule; it does not prove alternate lock order,
+concurrent hostile schedules, or production behavior.
