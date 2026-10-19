@@ -92,3 +92,7 @@ The work API now rechecks principal credential state and principal kind under a 
 ## M2 grant-boundary validation — 2026-10-19
 
 Operator ran at `87779b5d8422d33e7f8befbe87c4e4ff307cee52` with Python 3.12.13 and pytest 9.1.1: `python -m compileall -q src tests` succeeded, `python -m ruff check src tests` reported `All checks passed!`, and `AAO_ENV=test AAO_ENV_FILE=.env.test python -m pytest -v -rs -W error` collected and passed **50/50 tests**, 0 failures, 0 skipped, and 0 warnings in **2.43 seconds**. This is a local operator-reported result, including the three additional grant-boundary tests. It demonstrates the implemented test scope only, not an adversarial revocation race or independent security audit. M2 remains open.
+
+## M2 project-read revalidation — pending operator validation
+
+After the 50-test baseline at `87779b5d8422d33e7f8befbe87c4e4ff307cee52`, the project listing route was changed to recheck individual AGENT credential status with `SELECT ... FOR SHARE` in its database transaction, before reading project grants. One unit test covers inactive, absent, wrong-kind, and active principals with a stubbed transaction. **This increment has not yet been tested locally**, and no actual concurrent credential revoke/read race is proven. Full suite, lint, and independent audit are outstanding; M2 remains unaccepted.
