@@ -137,3 +137,28 @@ After the 50-test baseline at `87779b5d8422d33e7f8befbe87c4e4ff307cee52`, the pr
   business mutation, and that repeated adversarial schedules remain absent.
   This is not independent formal security review, auditor acceptance or M2
   closure.
+
+## Unified execution identity — 2026-10-19
+
+- Source revision: `db7494b7e155bb50740d05a6c9c11484445cec43`; CI workflow
+  correction: `585b422eebd9fa55e0bb7ed93f0cd281bad9233b`.
+- Execution claim/completion and the inert worker now require individual AGENT
+  credentials. The legacy verifier and its test have been removed. Migration
+  `006_unified_execution_identity.sql` moves legacy rows to the AGENT
+  credential registry, aborting on principal/digest collisions, then drops
+  `worker_registrations`. CI seeds a fixed non-secret legacy fixture before
+  applying migration 006 and verifies the transferred identity in the
+  disposable PostgreSQL integration suite.
+- Local validation after applying migration 006 to the explicitly designated
+  `aao_test` database: **52 passed**, zero skips/warnings; Ruff, compileall,
+  pip check and `git diff --check` passed. This local database had no seeded
+  legacy row, so data transfer is specifically exercised by CI instead.
+- CI run `39251426719` failed because the fixture was initially seeded after
+  migration 006. The workflow ordering was corrected; run `39251540849` passed
+  on `585b422eebd9fa55e0bb7ed93f0cd281bad9233b`, including the legacy-row
+  transfer fixture, migrations, Ruff, compileall, PostgreSQL tests (**52
+  passed**) and pip check.
+- This proves the migration path for the fixed fixture and the engineering
+  checks at the listed revisions. It is not adversarial security review,
+  broad collision-case testing, production migration approval, or M2
+  acceptance.
