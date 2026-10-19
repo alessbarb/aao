@@ -5,8 +5,8 @@ from datetime import datetime, timezone
 from aao.pg_execution import claim, complete, state
 
 
-def run_one(worker_id: str, credential: str, *, seconds: int = 30) -> dict:
-    lease = claim(worker_id, credential=credential, seconds=seconds)
+def run_one(worker_id: str, credential: str, *, project_id: str, seconds: int = 30) -> dict:
+    lease = claim(worker_id, credential=credential, project_id=project_id, seconds=seconds)
     if lease is None:
         return {"status": "IDLE"}
     execution_id = lease["execution_id"]
