@@ -23,12 +23,11 @@ from urllib.request import Request, urlopen
 
 MANDATE_TITLE = "AAO — Self Development"
 MANDATE_OBJECTIVE = (
-    "Build the minimum functional core for AAO to manage, develop, test, audit, "
-    "and improve its own software as its first project. Deliver the autonomous "
-    "backend and AAO Control Center, with authentic, traceable work under "
-    "bounded authorization."
+    "Build the minimum functional AAO core that can manage, develop, test, "
+    "audit, and improve AAO software as its first project, observable from "
+    "AAO Control Center using authentic shared backend state."
 )
-PROJECT_NAME = "AAO Self Development"
+PROJECT_NAME = "AAO — Self Development"
 GRANTS = (
     "project.read", "work.create", "work.admit", "work.progress", "execution.claim",
 )
@@ -274,12 +273,42 @@ def bootstrap(
     return principal_id, mandate["id"], project["id"], expiry, token_path
 
 
+def configured_local_ceo_token() -> str:
+    """Load the explicitly selected private development dotenv, without echoing it."""
+    if os.environ.get("AAO_ENV", "development").lower() != "development":
+        raise BootstrapError("configured-token bootstrap is restricted to development")
+    if "AAO_CEO_TOKEN" in os.environ:
+        raise BootstrapError(
+            "AAO_CEO_TOKEN is already inherited by this process; refusing ambiguous configuration"
+        )
+    from aao.environment_settings import load_local_env
+
+    loaded = load_local_env()
+    expected = Path(__file__).resolve().parents[1] / ".env.local"
+    if loaded != expected or not expected.is_file() or expected.is_symlink():
+        raise BootstrapError("private .env.local was not selected as the local configuration source")
+    info = expected.stat()
+    if info.st_uid != os.getuid() or stat.S_IMODE(info.st_mode) & 0o077:
+        raise BootstrapError(".env.local must be owned by this user and private")
+    token = os.environ.get("AAO_CEO_TOKEN")
+    if not token:
+        raise BootstrapError("AAO_CEO_TOKEN is absent from the selected local configuration")
+    return token
+
+
 def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("--base-url", default="http://127.0.0.1:8001")
+    parser.add_argument(
+        "--use-local-configured-ceo-token", action="store_true",
+        help="use AAO_CEO_TOKEN from private .env.local without prompting or displaying it",
+    )
     arguments = parser.parse_args()
     try:
-        principal, mandate, project, expiry, token_file = bootstrap(arguments.base_url)
+        local_token = configured_local_ceo_token() if arguments.use_local_configured_ceo_token else None
+        principal, mandate, project, expiry, token_file = bootstrap(
+            arguments.base_url, ceo_token=local_token,
+        )
     except BootstrapError as exc:
         print(f"Bootstrap not completed: {exc}", file=sys.stderr)
         return 1

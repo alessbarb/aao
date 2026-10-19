@@ -71,6 +71,37 @@ def test_bootstrap_reuses_verified_existing_project_without_writes(monkeypatch):
     assert calls == [("GET", "/v1/mandates"), ("GET", "/v1/mandates")]
 
 
+def test_bootstrap_matches_confirmed_runtime_mandate_wording_without_mutation(monkeypatch):
+    """The bootstrap contract must match the CEO-confirmed persisted record."""
+    mandate = mandate_record(
+        project={
+            "id": "project-1",
+            "name": "AAO — Self Development",
+            "state": "ACTIVE",
+        },
+        include_project_event=True,
+    )
+    mandate["objective"] = (
+        "Build the minimum functional AAO core that can manage, develop, test, "
+        "audit, and improve AAO software as its first project, observable from "
+        "AAO Control Center using authentic shared backend state."
+    )
+    calls = []
+
+    def authorized_read(_base_url, path, *, method="GET", **_kwargs):
+        calls.append((method, path))
+        return [mandate]
+
+    monkeypatch.setattr(bootstrap, "request_json", authorized_read)
+    result, project = bootstrap.ensure_mandated_project(
+        "http://127.0.0.1:8001", "non-displayed-test-token",
+    )
+
+    assert result["id"] == "mandate-1"
+    assert project["name"] == "AAO — Self Development"
+    assert calls == [("GET", "/v1/mandates"), ("GET", "/v1/mandates")]
+
+
 def test_request_json_explains_stale_api_method_mismatch(monkeypatch):
     def stale_api(*_args, **_kwargs):
         raise HTTPError("http://127.0.0.1:8001/v1/mandates", 405,
@@ -83,6 +114,18 @@ def test_request_json_explains_stale_api_method_mismatch(monkeypatch):
         assert "restart it from the current checkout" in str(exc)
     else:
         raise AssertionError("expected stale API method mismatch to fail closed")
+
+
+def test_configured_ceo_token_refuses_inherited_override(monkeypatch):
+    monkeypatch.setenv("AAO_ENV", "development")
+    monkeypatch.setenv("AAO_CEO_TOKEN", "inherited-secret")
+    try:
+        bootstrap.configured_local_ceo_token()
+    except bootstrap.BootstrapError as exc:
+        assert "already inherited" in str(exc)
+        assert "inherited-secret" not in str(exc)
+    else:
+        raise AssertionError("expected ambiguous credential source to fail closed")
 
 
 def test_bootstrap_reuses_supplied_ceo_credential_without_prompt(monkeypatch, tmp_path):
