@@ -24,14 +24,33 @@ def journal(db, execution_id: str, kind: str, details: dict):
     )
 
 
+def verify_execution_principal(db, worker_id, credential, agent_credential):
+    if agent_credential is not None:
+        row = db.execute(
+            "SELECT token_digest,enabled FROM principal_credentials "
+            "WHERE principal_id=%s AND kind='AGENT' FOR SHARE", (worker_id,)
+        ).fetchone()
+        if not row or not row[1] or not hmac.compare_digest(
+            digest_token(agent_credential), row[0]
+        ):
+            raise ExecutionConflict("Individual agent credential invalid or revoked")
+        return
+    row = db.execute(
+        "SELECT token_digest,enabled FROM worker_registrations "
+        "WHERE worker_id=%s FOR SHARE", (worker_id,)
+    ).fetchone()
+    if not row or not verify_registered_worker(
+        worker_id, credential, digest=row[0], enabled=row[1]
+    ):
+        raise ExecutionConflict("Worker authentication failed")
+
+
 def claim(worker_id: str, *, credential: str | None = None, project_id: str, seconds: int = 60, now: datetime | None = None, agent_credential: str | None = None):
     if not worker_id or not project_id or seconds < 1:
         raise ExecutionConflict("Worker and positive lease duration required")
     instant = now or datetime.now(timezone.utc)
     with connect_postgres() as db:
-        registration = db.execute("SELECT token_digest,enabled FROM worker_registrations WHERE worker_id=%s FOR SHARE", (worker_id,)).fetchone()
-        if not registration or not verify_registered_worker(worker_id, credential, digest=registration[0], enabled=registration[1]):
-            raise ExecutionConflict("Worker authentication failed")
+        verify_execution_principal(db, worker_id, credential, agent_credential)
         grant = db.execute(
             "SELECT 1 FROM project_grants WHERE principal_id=%s AND project_id=%s "
             "AND capability='execution.claim' "
@@ -73,14 +92,7 @@ def complete(execution_id: str, token: str, worker_id: str, result: dict,
              *, credential: str | None = None, now: datetime | None = None, agent_credential: str | None = None):
     instant = now or datetime.now(timezone.utc)
     with connect_postgres() as db:
-        registration = db.execute(
-            "SELECT token_digest,enabled FROM worker_registrations "
-            "WHERE worker_id=%s FOR SHARE", (worker_id,)
-        ).fetchone()
-        if not registration or not verify_registered_worker(
-            worker_id, credential, digest=registration[0], enabled=registration[1]
-        ):
-            raise ExecutionConflict("Worker authentication failed")
+        verify_execution_principal(db, worker_id, credential, agent_credential)
         execution = db.execute(
             "SELECT project_id FROM execution_queue WHERE id=%s FOR UPDATE",
             (execution_id,),
