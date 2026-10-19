@@ -140,12 +140,38 @@
       if(!activity.length){content.append(empty("No hay eventos registrados para este proyecto."));return}
       const list=el("ol",undefined,"list");for(const event of activity){const item=el("li"),row=el("div",undefined,"row");row.append(el("strong",event.kind),el("time",displayDate(event.created_at),"meta"));item.append(row,el("p","Sujeto: "+event.subject_id,"refs"));list.append(item)}content.append(list);
     }
-    function renderEvidence(){
-      content.append(el("span","Pruebas, auditoría y procedencia","eyebrow"),el("h2","Evidencias"),el("p","Referencias tal como están almacenadas. Una referencia no es validación ni dictamen.","muted"));
-      const rows=board.flatMap(task=>(task.evidence||[]).map(ref=>({task,ref})));
-      if(!rows.length){content.append(empty("No existen referencias de evidencia en las tareas de este proyecto."));}
-      else{const list=el("ul",undefined,"list");for(const {task,ref} of rows){const item=el("li");item.append(el("strong",task.title),el("p",String(ref),"refs"),el("p","Estado de integridad: no verificado por esta vista","meta"));list.append(item)}content.append(list)}
-      content.append(el("aside","La vista de evidencias no expone aún dictámenes auditores verificables por SHA ni resultados de CI remoto. Los checks locales aparecen en el detalle de su ejecución.","banner"));
+    async function renderEvidence(){
+      const projectAtStart=selectedProject;
+      content.append(el("span","Pruebas, auditoría y procedencia","eyebrow"),el("h2","Evidencias"),el("p","Trazabilidad almacenada por tarea: ejecución, referencias, revisiones registradas y PR. Los registros no equivalen a validación.","muted"));
+      if(!board.length){content.append(empty("No hay tareas de las que consultar evidencias."));return}
+      content.append(el("div","Consultando detalles autorizados de las tareas…","empty"));
+      try{
+        const records=await Promise.all(board.map(task=>request("/v1/projects/"+encodeURIComponent(projectAtStart)+"/work/"+encodeURIComponent(task.id))));
+        if(activePage!=="evidence"||selectedProject!==projectAtStart)return;
+        content.replaceChildren(el("span","Pruebas, auditoría y procedencia","eyebrow"),el("h2","Evidencias"),el("p","Trazabilidad almacenada por tarea: ejecución, referencias, revisiones registradas y PR. Los registros no equivalen a validación.","muted"));
+        for(const task of records){
+          const section=panel(task.title);section.append(el("span","Tarea · "+task.status,"state"),el("p","ID de tarea: "+task.id,"refs"));
+          if(task.acceptance_criteria&&task.acceptance_criteria.length){section.append(el("h3","Criterios de aceptación"));const criteria=el("ul",undefined,"list");for(const criterion of task.acceptance_criteria)criteria.append(el("li",String(criterion)));section.append(criteria)}
+          const taskEvidence=task.evidence||[];
+          if(taskEvidence.length){const refs=el("ul",undefined,"list");for(const ref of taskEvidence){const item=el("li");item.append(el("span",String(ref),"refs"),el("p","Referencia almacenada; integridad no verificada por esta vista.","meta"));refs.append(item)}section.append(el("h3","Referencias de evidencia"),refs)}
+          else section.append(el("p","Sin referencias de evidencia registradas.","muted"));
+          section.append(el("h3","Ejecuciones"));
+          if(!task.executions.length)section.append(empty("No hay ejecuciones registradas para esta tarea."));
+          for(const run of task.executions){
+            const item=el("article",undefined,"task-card");item.append(el("strong","Ejecución "+run.id,"refs"),el("p","Estado: "+run.status+" · worker: "+(run.worker_id||"no asignado"),"meta"));
+            if(run.result){item.append(el("p","Check: "+(run.result.check_id||"no registrado")+" · conclusión: "+(run.result.conclusion||"no disponible"),"meta"),el("p","SHA comprobado: "+(run.result.candidate_sha||"no registrado"),"refs"));}
+            section.append(item);
+          }
+          section.append(el("h3","Dictámenes almacenados"));
+          if(!task.reviews.length)section.append(empty("No hay dictamen registrado; la tarea no se considera aprobada."));
+          for(const review of task.reviews){const item=el("article",undefined,"task-card");item.append(el("strong",review.decision),el("p","Auditor: "+review.reviewer_id+" · "+displayDate(review.created_at),"meta"));if(review.evidence&&review.evidence.length){const refs=el("ul",undefined,"list");for(const ref of review.evidence)refs.append(el("li",String(ref),"refs"));item.append(el("h3","Referencias citadas por el auditor"),refs)}item.append(el("p","Independencia y validez del dictamen no certificadas por esta vista.","meta"));section.append(item)}
+          section.append(el("h3","Pull request"));
+          if(task.pull_request){const link=document.createElement("a");link.href=task.pull_request.url;link.target="_blank";link.rel="noopener noreferrer";link.textContent=task.pull_request.url;section.append(link,el("p","SHA publicado: "+task.pull_request.candidate_sha,"refs"));const matched=task.executions.some(run=>run.status==="SUCCEEDED"&&run.result&&run.result.conclusion==="success"&&run.result.candidate_sha===task.pull_request.candidate_sha);section.append(el("p",matched?"Existe una ejecución exitosa registrada para el mismo SHA.":"No consta ejecución exitosa para el SHA de la PR.","meta"));}
+          else section.append(el("p","No hay una PR vinculada en el registro local.","muted"));
+          content.append(section);
+        }
+        content.append(el("aside","Las revisiones aquí mostradas son registros, no una certificación de independencia. La PR remota, CI y la vigencia del SHA no se consultan ni verifican desde esta vista.","banner"));
+      }catch(error){if(activePage=== "evidence"&&selectedProject===projectAtStart){content.replaceChildren(el("div","No se pudieron consultar las evidencias autorizadas: "+error.message,"empty"));}}
     }
     function renderDecisions(){
       content.append(el("span","Autoridad reservada","eyebrow"),el("h2","Decisiones reservadas"));
@@ -154,7 +180,7 @@
       box.append(el("p","No hay endpoint de lectura para una bandeja de decisiones pendiente; no se inventa una lista.","meta"));content.append(box);
     }
     function syncNav(){for(const button of document.querySelectorAll(".nav button")){if(button.dataset.page===activePage)button.setAttribute("aria-current","page");else button.removeAttribute("aria-current")}}
-    function render(){content.replaceChildren();if(!projects.length){renderHome();return}if(activePage==="home")renderHome();else if(activePage==="project")renderProject();else if(activePage==="activity")renderActivity();else if(activePage==="evidence")renderEvidence();else renderDecisions();syncNav()}
+    function render(){content.replaceChildren();if(!projects.length){renderHome();return}if(activePage==="home")renderHome();else if(activePage==="project")renderProject();else if(activePage==="activity")renderActivity();else if(activePage==="evidence")void renderEvidence();else renderDecisions();syncNav()}
     projectSelect.addEventListener("change",()=>{selectedProject=projectSelect.value;selectedTask=null;loadProjectData()});
     document.querySelector("#reload").addEventListener("click",()=>loadProjects().catch(err=>setMessage("No se pudo actualizar: "+err.message,true)));
     authPanel.addEventListener("submit",event=>{event.preventDefault();const token=authInput.value.trim();if(!token)return;readerIdentity=readerKind.value;readerToken=token;readerKind.disabled=true;authInput.value="";disconnectButton.classList.remove("hidden");loadProjects().then(()=>authPanel.classList.add("hidden")).catch(err=>{readerKind.disabled=false;setMessage("No se pudo conectar: "+err.message,true)})});
