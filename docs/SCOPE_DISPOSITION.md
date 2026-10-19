@@ -122,3 +122,7 @@ local candidate and which remain gates.
 No requirement is deleted or marked satisfied solely because it is assigned to
 a later stage. Scope expansion or activation of real external effects requires
 separate authority.
+
+## Autonomous audit governance decision — 2026-10-19
+
+CEO approved GOV-REV-001 v1.1 (`AUTONOMOUS_AUDIT_POLICY.md`). Ordinary M2-A technical audit no longer requires a human reviewer, but functional auditor independence must be demonstrated through separation of authority, evidence and veto. Prior human-reviewer statements in A-10 are superseded for technical review only. A-10 and A-11 remain pending; the CEO retains exclusive reserved powers. This records review policy, not M2-A acceptance or permission to enable external operations.
