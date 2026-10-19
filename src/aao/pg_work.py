@@ -20,6 +20,14 @@ from pydantic import BaseModel, Field
 from aao.planner import Admission, decide_admission
 
 
+def shared_dev_tokens_enabled() -> bool:
+    """Legacy worker/reviewer tokens are forbidden in production."""
+    return (
+        os.getenv("AAO_ENV", "development").lower() in {"development", "test"}
+        and os.getenv("AAO_ALLOW_SHARED_DEV_TOKENS", "true").lower() == "true"
+    )
+
+
 def require_ceo(x_ceo_token: str | None = Header(None)):
     expected = os.getenv("AAO_CEO_TOKEN")
     if not expected:
@@ -35,12 +43,14 @@ def require_reviewer(
 ):
     # Individual credentials are preferred where provisioned. The shared
     # development reviewer token remains a transitional local-only fallback.
-    if x_auditor_token:
+    if x_auditor_token is not None:
         from aao.pg_principals import PrincipalDenied, authenticate
         try:
             return authenticate(x_auditor_token, kind="AUDITOR")
         except PrincipalDenied as exc:
             raise HTTPException(403, "Individual auditor credential rejected") from exc
+    if not shared_dev_tokens_enabled():
+        raise HTTPException(403, "Shared reviewer credentials disabled")
     expected = os.getenv("AAO_REVIEW_TOKEN")
     if not expected:
         raise HTTPException(503, "Reviewer credential not configured")
@@ -61,6 +71,8 @@ def require_worker(
             return authenticate(x_agent_token, kind="AGENT")
         except PrincipalDenied as exc:
             raise HTTPException(403, "Individual agent credential rejected") from exc
+    if not shared_dev_tokens_enabled():
+        raise HTTPException(403, "Shared worker credentials disabled")
     expected = os.getenv("AAO_WORK_TOKEN")
     if not expected:
         raise HTTPException(503, "Worker credential not configured")
@@ -165,12 +177,22 @@ def create_project(payload: ProjectRequest, _: str = Depends(require_ceo)):
     return {"id": pid, "state": "ACTIVE"}
 
 
-def read_principal(x_ceo_token: str | None = Header(None), x_work_token: str | None = Header(None)):
+def read_principal(
+    x_ceo_token: str | None = Header(None),
+    x_work_token: str | None = Header(None),
+    x_agent_token: str | None = Header(None),
+):
     ceo = os.getenv("AAO_CEO_TOKEN")
-    worker = os.getenv("AAO_WORK_TOKEN")
     if ceo and x_ceo_token and secrets.compare_digest(ceo, x_ceo_token):
         return "ceo"
-    if worker and x_work_token and secrets.compare_digest(worker, x_work_token):
+    if x_agent_token is not None:
+        from aao.pg_principals import PrincipalDenied, authenticate
+        try:
+            return authenticate(x_agent_token, kind="AGENT")
+        except PrincipalDenied as exc:
+            raise HTTPException(403, "Individual reader credential rejected") from exc
+    worker = os.getenv("AAO_WORK_TOKEN")
+    if shared_dev_tokens_enabled() and worker and x_work_token and secrets.compare_digest(worker, x_work_token):
         return "development-worker"
     raise HTTPException(403, "Authenticated reader required")
 
