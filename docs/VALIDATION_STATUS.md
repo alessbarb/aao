@@ -28,3 +28,7 @@ This validates the current **test suite and migrations** in the user's local env
 ## Validación local comunicada — 2026-10-19
 
 Operador ejecutó `AAO_ENV=test AAO_ENV_FILE=.env.test python -m pytest -v -rs` con Python 3.12.13, pytest 9.1.1 y PostgreSQL 16.15: **35 passed, 0 failed, 0 skipped, 1 warning, 1.80 s**. Las 8 pruebas PostgreSQL y las 4 pruebas de configuración se ejecutaron, no fueron omitidas. Advertencia: deprecación Starlette/httpx. La evidencia es la salida facilitada por el operador; no constituye revisión independiente ni prueba de seguridad de producción. M2 continúa abierto.
+
+## Verificación del incremento 005 — 2026-10-19
+
+El operador ejecutó la migración `005_principal_credentials.sql` sobre `aao_dev` y `aao_test`: ambas finalizaron con `COMMIT`. La suite `AAO_ENV=test AAO_ENV_FILE=.env.test python -m pytest -v -rs` obtuvo **40 passed, 0 failed, 0 skipped, 1 warning**, en 1.98 segundos, Python 3.12.13 y PostgreSQL 16. La evidencia procede del registro de terminal facilitado por el operador. La advertencia sigue siendo la deprecación Starlette/httpx. Este resultado no autoriza producción ni cierra M2.
