@@ -1,4 +1,4 @@
-from aao.pg_effects import EffectConflict, canonical_digest
+from aao.external_effect_registry import EffectConflict, canonical_digest
 import pytest
 
 

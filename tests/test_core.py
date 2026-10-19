@@ -17,7 +17,7 @@ def test_constitution_blocks_reserved_without_confirmed_ceo():
 
 def test_mandate_and_kanban_gates():
     with tempfile.TemporaryDirectory() as tmp:
-        import aao.main as main
+        import aao.sqlite_api as main
         main.DB_PATH = os.path.join(tmp, "test.db")
         main.CEO_TOKEN = "test-ceo-secret"
         main.WORK_TOKEN = "test-worker-secret"

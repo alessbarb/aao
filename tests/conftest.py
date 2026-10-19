@@ -2,6 +2,6 @@
 
 Does not override existing environment values. Production dotenv is disabled.
 """
-from aao.settings import load_local_env
+from aao.environment_settings import load_local_env
 
 load_local_env()
