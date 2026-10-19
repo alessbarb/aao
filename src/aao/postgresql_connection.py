@@ -3,9 +3,9 @@
 Not enabled in the active SQLite API. Schema creation is a manual development step.
 """
 import os
+from contextlib import contextmanager
 
 from aao.environment_settings import load_local_env
-from contextlib import contextmanager
 
 
 def database_url() -> str:
