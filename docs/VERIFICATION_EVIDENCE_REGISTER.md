@@ -332,3 +332,17 @@ not prove credential revocation races, all queue operations, or hostile
 production schedules.
 
 CI run `39255841351` passed for code commit `773a5270cd25ec812db6272a4a26026d50f7d598`, including PostgreSQL integration tests, compilation, Ruff, and dependency checks.
+
+## Execution completion versus credential revocation
+
+A PostgreSQL integration schedule holds an `ACCESS EXCLUSIVE` lock on
+`execution_journal` after completion has authenticated the AGENT credential and
+reached the journal insert. The actual CEO credential-revocation route is
+observed blocked on the completion transaction's credential row lock. Once the
+journal lock is released, completion commits first, revocation succeeds, and a
+subsequent completion attempt is denied because the credential is revoked.
+Five consecutive local reruns passed; the full suite passed **57 tests**, and
+compileall, Ruff, `pip check`, and `git diff --check` were clean. CI has not yet
+run for this change. This checks one completion/revocation ordering only; it
+does not verify the opposite order, claim/credential-revocation schedules, or
+production adversarial concurrency.
