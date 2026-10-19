@@ -867,3 +867,24 @@ coverage, independent review, or M2 acceptance.
 - `python -m compileall -q src tests`, `python -m ruff check src tests`, `python -m pip check`, and `git diff --check` passed at this revision.
 - Separately, fresh scratch database replay of migrations 001–009 including the synthetic legacy row upgrade path and the full 80-test suite passed at this same source state; scratch DB dropped. The exact run was performed before this evidence-registration-only commit, with no code changes between runs.
 - Live PR `#2` head was initially stale immediately after push, then refreshed to this exact SHA. CI is not asserted or awaited. This remains candidate evidence, not independent review or M2-A acceptance.
+
+## M2-A suspension and credential-boundary fix — 2026-10-19
+
+- Exact implementation candidate: `cbcab10f7010004b8ee12801356a2643f9dc6a79`
+  on `feat/aao-m0-foundation`. The commit adds a CEO-authenticated, audited
+  PostgreSQL project pause/resume/cancel path and denies individual development
+  credentials outside `development`/`test`.
+- Against explicitly disposable local PostgreSQL, the full suite passed:
+  **83 passed, 0 failed, 0 skipped, 0 warnings** in **19.73 s**, with
+  `AAO_ENV=test AAO_ENV_FILE=.env.test python -m pytest -q -rs -W error`.
+  The new integration test verifies unauthenticated suspension denial, allowed
+  and invalid transitions, audit records, and generation advancement.
+- `python -m compileall -q src tests`, `python -m ruff check src tests`,
+  `python -m pip check`, and `git diff --check` passed immediately before the
+  implementation commit. The commit contains the same tested code; changes
+  after testing before commit were documentation only.
+- Migration replay evidence above predates these code-only corrections. The
+  corrections do not change migrations or schema, but the 83-test result is
+  against the configured disposable test database, not a fresh replay of the
+  entire migration chain. CI was not awaited. This is engineering evidence,
+  not independent review or M2-A acceptance.

@@ -7,19 +7,20 @@ authorize models, tools, providers, production deployment, or external effects.
 
 ## Candidate revisions
 
-- **Previously validated implementation source:**
-  `99760c7339323600368e5dbb145b088d83ad0715`. The current candidate adds a
-  production-mode denial for development principal credentials and an audited
-  CEO-authenticated project suspension API; it must be pinned to its own exact
-  SHA after commit and live PR verification.
+- **Implementation candidate:** `cbcab10f7010004b8ee12801356a2643f9dc6a79`,
+  including the production-mode denial for development principal credentials
+  and audited CEO-authenticated project suspension API. The earlier baseline
+  implementation source was `99760c7339323600368e5dbb145b088d83ad0715`.
 - **Prior evidence package:** `b15dea4f69823bcb894cb58eda54dcffdb48d602`
   passed 80 tests and static checks. Following the identified fixes, the current
-  worktree passed 83 tests, zero failures/skips/warnings, plus compileall, Ruff,
-  `pip check`, and diff checks. This result is not yet pinned to a commit SHA.
+  candidate `cbcab10` passed 83 tests, zero failures/skips/warnings, plus
+  compileall, Ruff, `pip check`, and diff checks. Fresh replay of migrations
+  001–009 predates these code-only fixes; they do not change schema.
 - **Review vehicle:** [draft GitHub PR #2](https://github.com/alessbarb/aao/pull/2).
   At the pre-fix live check, local `HEAD`, both remote refs and PR head matched
   `b15dea4f69823bcb894cb58eda54dcffdb48d602`. After committing the fixes,
-  update this package SHA and recheck the live PR head. Review report must
+  local `HEAD` is `cbcab10f7010004b8ee12801356a2643f9dc6a79`; the remote and
+  live PR must be updated/rechecked before formal review. The review report must
   identify package and source revisions separately.
 
 ## What M2-A evidence demonstrates

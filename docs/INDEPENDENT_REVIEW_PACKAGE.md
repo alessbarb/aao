@@ -6,11 +6,11 @@ only of M2-A's bounded PostgreSQL-backed, development-identity, inert execution
 candidate. M2-B and M2-C requirements remain in the compliance matrix and are
 not acceptance claims or implementation authorization.
 
-**Implementation candidate:** `99760c7339323600368e5dbb145b088d83ad0715` on
-`feat/aao-m0-foundation`. This is the exact source revision with local test
-evidence. The review request must separately identify the exact packaging
-revision containing this document and its companion reports; those reports
-were added after the implementation candidate.
+**Implementation candidate:** `cbcab10f7010004b8ee12801356a2643f9dc6a79` on
+`feat/aao-m0-foundation`, with 83-test local evidence recorded in the evidence
+register. The earlier base implementation is `99760c7339323600368e5dbb145b088d83ad0715`.
+The reviewer must separately identify the exact packaging revision containing
+this document and its companion reports.
 
 This is a prepared package for a qualified independent reviewer. It is not
 itself the requested independent review and does not claim formal acceptance.
@@ -85,12 +85,20 @@ formal independence evidence.
 - Recovery quarantine is explicit/helper-driven; no runtime scheduler or
   crash-restart acceptance harness is claimed.
 - At the exact implementation candidate SHA, the local explicitly disposable
-  PostgreSQL run passed 80 tests with warnings as errors; compileall, Ruff,
+  PostgreSQL run passed 83 tests with warnings as errors; compileall, Ruff,
   `pip check`, and diff checks passed. The evidence register records a focused
   grant-revocation/read and grant-revocation/write races, each repeated three
   times. CI was not awaited and no
   production/deployment test was run. The documentation package is a later
   revision; the review request must pin its exact checkout separately.
+- Internal follow-up identified and corrected the missing CEO-authenticated
+  PostgreSQL suspension initiation path and added a fail-closed production
+  environment guard for development credentials. A separate potential P1
+  remains: concurrent proposals using the same absent idempotency key across
+  distinct execution rows can race into a database unique-constraint error.
+  The unique constraint prevents duplicate records; no external effect is
+  possible. Assess whether this inert-ledger API behavior blocks the bounded
+  acceptance, and document the rationale.
 
 ## Required review output
 
