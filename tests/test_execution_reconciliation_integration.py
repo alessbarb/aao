@@ -945,3 +945,94 @@ def test_evidence_read_denied_when_grant_revocation_wins_race(monkeypatch):
         assert revoked.status_code == 204, revoked.text
         with pytest.raises(EvidenceDenied, match="Evidence review capability required"):
             read.result(timeout=5)
+
+
+@pytest.mark.skipif(
+    not os.getenv("AAO_TEST_POSTGRES_URL") or os.getenv("AAO_TEST_DB_DISPOSABLE") != "yes",
+    reason="Explicit disposable PostgreSQL test database required",
+)
+def test_evidence_registration_denied_when_grant_revocation_wins_race(monkeypatch):
+    """An evidence write queued behind grant revocation must leave no record."""
+    import hashlib
+
+    from aao.evidence_registry import EvidenceDenied, register_evidence
+    from aao.postgresql_connection import connect_postgres
+    from aao.work_management_api import app
+
+    monkeypatch.setenv("AAO_POSTGRES_URL", os.environ["AAO_TEST_POSTGRES_URL"])
+    monkeypatch.setenv("AAO_CEO_TOKEN", "evidence-submit-race-ceo")
+    ceo = {"X-CEO-Token": "evidence-submit-race-ceo"}
+    content = b"evidence submitted after grant revocation"
+    digest = hashlib.sha256(content).hexdigest()
+
+    with TestClient(app) as client:
+        agent_id = "evidence-submit-agent-" + str(uuid4())
+        issued = client.post("/v1/principals/credentials", headers=ceo, json={
+            "principal_id": agent_id, "kind": "AGENT",
+        })
+        assert issued.status_code == 201, issued.text
+        agent_token = issued.json()["token"]
+        mandate = client.post("/v1/mandates", headers=ceo, json={
+            "title": "Evidence submit race " + str(uuid4()),
+            "objective": "Serialize evidence submission with grant revocation",
+        }).json()["id"]
+        assert client.post(f"/v1/mandates/{mandate}/confirm", headers=ceo).status_code == 200
+        project = client.post("/v1/projects", headers=ceo, json={
+            "name": "Evidence submit race", "mandate_id": mandate,
+        }).json()["id"]
+        grant = client.post(f"/v1/projects/{project}/grants", headers=ceo, json={
+            "principal_id": agent_id, "capability": "evidence.submit",
+        })
+        assert grant.status_code == 201, grant.text
+
+        def wait_for_blocked_query(pattern, blocker_pid):
+            deadline = time.monotonic() + 5
+            while time.monotonic() < deadline:
+                with connect_postgres() as observer:
+                    row = observer.execute(
+                        "SELECT pid FROM pg_stat_activity WHERE query LIKE %s "
+                        "AND wait_event_type='Lock' "
+                        "AND %s=ANY(pg_blocking_pids(pid)) LIMIT 1",
+                        (pattern, blocker_pid),
+                    ).fetchone()
+                    if row:
+                        return row[0]
+                time.sleep(0.01)
+            raise AssertionError(f"query did not wait on expected lock: {pattern}")
+
+        with ThreadPoolExecutor(max_workers=2) as pool, connect_postgres() as blocker:
+            blocker_pid = blocker.execute("SELECT pg_backend_pid()").fetchone()[0]
+            blocker.execute(
+                "SELECT principal_id FROM project_grants WHERE principal_id=%s "
+                "AND project_id=%s AND capability='evidence.submit' FOR UPDATE",
+                (agent_id, project),
+            )
+            revocation = pool.submit(
+                client.delete,
+                f"/v1/projects/{project}/grants/{agent_id}/evidence.submit",
+                headers=ceo,
+            )
+            revoker_pid = wait_for_blocked_query("DELETE FROM project_grants%", blocker_pid)
+            submission = pool.submit(
+                register_evidence, project, content,
+                agent_id=agent_id, agent_credential=agent_token,
+                media_type="text/plain",
+            )
+            wait_for_blocked_query("SELECT 1 FROM project_grants%", revoker_pid)
+
+        revoked = revocation.result(timeout=5)
+        assert revoked.status_code == 204, revoked.text
+        with pytest.raises(EvidenceDenied, match="Evidence submission grant required"):
+            submission.result(timeout=5)
+        with connect_postgres() as db:
+            artifact = db.execute(
+                "SELECT 1 FROM evidence_artifacts WHERE project_id=%s AND digest=%s",
+                (project, digest),
+            ).fetchone()
+            registration_event = db.execute(
+                "SELECT 1 FROM events WHERE subject_id=%s "
+                "AND kind='evidence.registered' AND details->>'digest'=%s",
+                (project, f"sha256:{digest}"),
+            ).fetchone()
+        assert artifact is None
+        assert registration_event is None
