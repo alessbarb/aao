@@ -3,6 +3,7 @@
 This is a separate development service, not a transparent migration of the
 SQLite API. No agent execution or external side effects are enabled.
 """
+import hashlib
 import json
 import os
 import secrets
@@ -101,6 +102,11 @@ class ReviewRequest(BaseModel):
     evidence: list[str] = Field(min_length=1)
 
 
+class PatchProposalRequest(BaseModel):
+    base_sha: str = Field(pattern=r"^[0-9a-f]{40}$")
+    patch: str = Field(min_length=1, max_length=65_536)
+
+
 class PrincipalCredentialRequest(BaseModel):
     principal_id: str = Field(min_length=1, max_length=128, pattern=r"^[a-zA-Z0-9_-]+$")
     kind: str = Field(pattern=r"^(AGENT|AUDITOR)$")
@@ -108,7 +114,7 @@ class PrincipalCredentialRequest(BaseModel):
 
 class GrantRequest(BaseModel):
     principal_id: str = Field(min_length=1)
-    capability: str = Field(pattern=r"^(?:work\.(?:create|admit|review|progress)|project\.read|execution\.claim|execution\.reconcile|effect\.(?:propose|reconcile)|evidence\.submit)$")
+    capability: str = Field(pattern=r"^(?:work\.(?:create|admit|review|progress)|project\.read|execution\.claim|execution\.reconcile|effect\.(?:propose|reconcile)|evidence\.submit|code\.propose)$")
     expires_at: datetime | None = None
 
     @field_validator("expires_at")
@@ -586,10 +592,40 @@ def board(project_id: str, principal: str = Depends(read_principal)):
                 "evidence": review_row[5], "created_at": review_row[6].isoformat(),
                 "sha_bound": review_row[4] is not None,
             })
+        patch_rows = db.execute(
+            "SELECT p.id,p.work_id,p.proposer_id,p.base_sha,p.patch_sha256,p.changed_paths,p.status,p.created_at "
+            "FROM patch_proposals p WHERE p.project_id=%s ORDER BY p.created_at,p.id",
+            (project_id,),
+        ).fetchall()
+        validation_rows = db.execute(
+            "SELECT v.proposal_id,v.id,v.validator_id,v.candidate_tree,v.created_at "
+            "FROM patch_proposal_validations v JOIN patch_proposals p ON p.id=v.proposal_id "
+            "WHERE p.project_id=%s ORDER BY v.created_at,v.id",
+            (project_id,),
+        ).fetchall()
+        validations_by_proposal: dict[str, list[dict]] = {}
+        for validation_row in validation_rows:
+            validations_by_proposal.setdefault(str(validation_row[0]), []).append({
+                "id": str(validation_row[1]), "validator_id": validation_row[2],
+                "candidate_tree": validation_row[3],
+                "created_at": validation_row[4].isoformat(),
+            })
+        patches_by_work: dict[str, list[dict]] = {}
+        for patch_row in patch_rows:
+            proposal_id = str(patch_row[0])
+            patches_by_work.setdefault(str(patch_row[1]), []).append({
+                "id": proposal_id, "proposer_id": patch_row[2],
+                "base_sha": patch_row[3], "patch_sha256": patch_row[4],
+                "changed_paths": patch_row[5], "status": patch_row[6],
+                "created_at": patch_row[7].isoformat(),
+                "applied": False,
+                "validations": validations_by_proposal.get(proposal_id, []),
+            })
         return [
             {"id": r[0], "title": r[1], "status": r[2],
              "acceptance_criteria": r[3], "evidence": r[4],
-             "executions": r[5], "reviews": reviews_by_work.get(str(r[0]), [])}
+             "executions": r[5], "reviews": reviews_by_work.get(str(r[0]), []),
+             "patch_proposals": patches_by_work.get(str(r[0]), [])}
             for r in rows
         ]
 
@@ -806,6 +842,162 @@ def progress(work_id: str, principal: str = Depends(require_worker)):
         db.execute("UPDATE work_items SET status=%s WHERE id=%s", (next_state, work_id))
         audit(db, work_id, "work.progressed", {"from": status, "to": next_state})
     return {"id": work_id, "status": next_state}
+
+
+@app.post("/v1/work/{work_id}/patch-proposals", status_code=201)
+def propose_patch(
+    work_id: str, payload: PatchProposalRequest,
+    principal: str = Depends(require_worker),
+):
+    """Persist a bounded proposal; validation and application are separate operations."""
+    from aao.patch_proposals import PatchProposalError, inspect_patch
+
+    with tx() as db:
+        work = db.execute(
+            "SELECT project_id,status,author_id FROM work_items WHERE id=%s",
+            (work_id,),
+        ).fetchone()
+        if not work:
+            raise HTTPException(404, "Work not found")
+        project_id, status, author_id = work
+        require_grant(db, principal, project_id, "code.propose")
+        if status != "IN_PROGRESS" or author_id != principal:
+            raise HTTPException(409, "Only the assigned agent may propose a patch for in-progress work")
+        active = db.execute(
+            "SELECT state FROM projects WHERE id=%s", (project_id,),
+        ).fetchone()
+        if not active or active[0] != "ACTIVE":
+            raise HTTPException(409, "Project is not active")
+
+    try:
+        proposal = inspect_patch(payload.patch)
+    except PatchProposalError as exc:
+        raise HTTPException(422, str(exc)) from exc
+
+    proposal_id = str(uuid4())
+    with tx() as db:
+        locked = db.execute(
+            "SELECT project_id,status,author_id FROM work_items WHERE id=%s FOR UPDATE",
+            (work_id,),
+        ).fetchone()
+        if not locked:
+            raise HTTPException(404, "Work not found")
+        current_project, current_status, current_author = locked
+        require_grant(db, principal, current_project, "code.propose")
+        current_active = db.execute(
+            "SELECT state FROM projects WHERE id=%s FOR SHARE", (current_project,),
+        ).fetchone()
+        if (current_project != project_id or current_status != "IN_PROGRESS"
+                or current_author != principal or not current_active
+                or current_active[0] != "ACTIVE"):
+            raise HTTPException(409, "Work authorization or state changed during patch validation")
+        inserted = db.execute(
+            "INSERT INTO patch_proposals(id,work_id,project_id,proposer_id,base_sha,"
+            "patch_sha256,patch_bytes,changed_paths) "
+            "VALUES (%s,%s,%s,%s,%s,%s,%s,%s::jsonb) "
+            "ON CONFLICT (work_id,base_sha,patch_sha256) DO NOTHING RETURNING id",
+            (proposal_id, work_id, project_id, principal, payload.base_sha,
+             proposal["patch_sha256"], payload.patch.encode("utf-8"),
+             json.dumps(proposal["changed_paths"])),
+        ).fetchone()
+        if not inserted:
+            raise HTTPException(409, "Identical patch proposal already exists")
+        audit(db, work_id, "work.patch_proposed", {
+            "proposal_id": proposal_id, "proposer": principal,
+            "base_sha": payload.base_sha,
+            "patch_sha256": proposal["patch_sha256"],
+            "changed_paths": proposal["changed_paths"],
+        })
+    return {
+        "proposal_id": proposal_id, "work_id": work_id,
+        "status": "PROPOSED", "base_sha": payload.base_sha, **proposal,
+        "validated_in_disposable_clone": False,
+        "applied_to_canonical_checkout": False,
+    }
+
+
+@app.post("/v1/work/{work_id}/patch-proposals/{proposal_id}/validate", status_code=201)
+def validate_patch_proposal(
+    work_id: str, proposal_id: str,
+    principal: str = Depends(require_worker),
+):
+    """Apply a stored patch only in a disposable clone and record its tree hash."""
+    from aao.patch_proposals import PatchProposalError, validate_patch
+
+    with tx() as db:
+        row = db.execute(
+            "SELECT p.project_id,p.base_sha,p.patch_sha256,p.patch_bytes,p.changed_paths "
+            "FROM patch_proposals p WHERE p.id=%s AND p.work_id=%s",
+            (proposal_id, work_id),
+        ).fetchone()
+        if not row:
+            raise HTTPException(404, "Patch proposal not found")
+        project_id, base_sha, expected_digest, patch_bytes, changed_paths = row
+        require_grant(db, principal, project_id, "code.propose")
+        work = db.execute(
+            "SELECT status,author_id FROM work_items WHERE id=%s AND project_id=%s",
+            (work_id, project_id),
+        ).fetchone()
+        active = db.execute("SELECT state FROM projects WHERE id=%s", (project_id,)).fetchone()
+        if not work or work[0] != "IN_PROGRESS" or work[1] != principal:
+            raise HTTPException(409, "Only the assigned agent may validate a patch for in-progress work")
+        if not active or active[0] != "ACTIVE":
+            raise HTTPException(409, "Project is not active")
+
+    if hashlib.sha256(patch_bytes).hexdigest() != expected_digest:
+        raise HTTPException(409, "Stored patch integrity check failed")
+    repository = os.getenv("AAO_SELF_DEV_REPOSITORY")
+    if not repository:
+        raise HTTPException(503, "Self-development repository is not configured")
+    try:
+        validation = validate_patch(repository, base_sha, patch_bytes.decode("utf-8"))
+    except (PatchProposalError, UnicodeDecodeError) as exc:
+        raise HTTPException(422, "Stored patch failed isolated validation") from exc
+    if validation["patch_sha256"] != expected_digest or validation["changed_paths"] != changed_paths:
+        raise HTTPException(409, "Stored patch metadata differs from isolated validation")
+
+    with tx() as db:
+        locked = db.execute(
+            "SELECT p.project_id,p.base_sha,p.patch_sha256,w.status,w.author_id "
+            "FROM patch_proposals p JOIN work_items w ON w.id=p.work_id "
+            "WHERE p.id=%s AND p.work_id=%s FOR UPDATE OF w",
+            (proposal_id, work_id),
+        ).fetchone()
+        if not locked:
+            raise HTTPException(404, "Patch proposal not found")
+        current_project, current_base, current_digest, current_status, current_author = locked
+        require_grant(db, principal, current_project, "code.propose")
+        if (current_project != project_id or current_base != base_sha
+                or current_digest != expected_digest or current_status != "IN_PROGRESS"
+                or current_author != principal):
+            raise HTTPException(409, "Patch authorization or state changed during validation")
+        active = db.execute(
+            "SELECT state FROM projects WHERE id=%s FOR SHARE", (current_project,),
+        ).fetchone()
+        if not active or active[0] != "ACTIVE":
+            raise HTTPException(409, "Project is not active")
+        validation_id = str(uuid4())
+        inserted = db.execute(
+            "INSERT INTO patch_proposal_validations(id,proposal_id,validator_id,base_sha,patch_sha256,candidate_tree) "
+            "VALUES (%s,%s,%s,%s,%s,%s) ON CONFLICT (proposal_id,candidate_tree) DO NOTHING RETURNING id",
+            (validation_id, proposal_id, principal, base_sha, expected_digest,
+             validation["candidate_tree"]),
+        ).fetchone()
+        if not inserted:
+            raise HTTPException(409, "Identical patch validation already exists")
+        audit(db, work_id, "work.patch_validated", {
+            "proposal_id": proposal_id, "validation_id": validation_id,
+            "validator": principal, "base_sha": base_sha,
+            "patch_sha256": expected_digest,
+            "candidate_tree": validation["candidate_tree"],
+        })
+    return {
+        "validation_id": validation_id, "proposal_id": proposal_id,
+        "base_sha": base_sha, "patch_sha256": expected_digest,
+        "changed_paths": changed_paths, "candidate_tree": validation["candidate_tree"],
+        "validated_in_disposable_clone": True,
+        "applied_to_canonical_checkout": False,
+    }
 
 
 @app.post("/v1/work/{work_id}/reviews", status_code=201)

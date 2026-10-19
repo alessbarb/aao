@@ -126,6 +126,25 @@
                 node("div",review.created_at,"meta"));
               card.append(audit);
             }
+            const proposals=Array.isArray(task.patch_proposals)?task.patch_proposals:[];
+            if(!proposals.length)card.append(node("div","Sin propuestas de parche registradas","meta"));
+            for(const proposal of proposals){
+              const details=node("details",undefined,"meta");
+              details.append(node("summary","Parche "+proposal.status+" · no aplicado"));
+              details.append(node("div","Agente proponente: "+proposal.proposer_id,"meta"),
+                node("div","SHA base: "+proposal.base_sha,"meta"),
+                node("div","Digest del parche: "+proposal.patch_sha256,"meta"),
+                node("div","Rutas: "+proposal.changed_paths.join(", "),"meta"),
+                node("div",proposal.created_at,"meta"));
+              const validations=Array.isArray(proposal.validations)?proposal.validations:[];
+              if(!validations.length)details.append(node("div","Validación aislada pendiente","meta"));
+              for(const validation of validations){
+                details.append(node("div","Validado por "+validation.validator_id+" · árbol candidato "+validation.candidate_tree,"meta"),
+                  node("div",validation.created_at,"meta"));
+              }
+              details.append(node("div","Aplicación al repositorio: no disponible","meta"));
+              card.append(details);
+            }
             col.append(card)}
           board.append(col)
         }
