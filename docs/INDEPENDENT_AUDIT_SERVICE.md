@@ -52,9 +52,13 @@ Policy fields: `version`, `auditor_id`, `auditor_os_user`, `developer_os_users`,
 
 Run on 2026-10-19 as OS user `alessbarb` with a policy that designates
 `aao-auditor` as auditor and `alessbarb` as developer, so the emitter refused to
-sign. The auditor code was this branch's uncommitted working tree (its
-revision did not match a reviewed one). These are adversarial evidence inputs,
-**not** audit verdicts.
+sign. Auditor code revision `0d46fc50549484d9bbbd4cdb0cfbca68fc18d8e2` (not
+yet independently reviewed); policy digest file SHA-256 `52971349…c118`. These
+are adversarial evidence inputs, **not** audit verdicts. Report file SHA-256:
+PR #10 `834635405a510e91e74eb9f89504593d842e23bba278cd22c7706b401273a443`,
+PR #11 `47d5006ce4168219536612f9581ebd1a92677bbf17fc57f6a158d7d18a57a0d4`;
+reports, evidence and ledger are held outside the repository in the auditing
+session's scratch directory, pending a custody-controlled location.
 
 | PR | Candidate SHA | Base SHA | Sandbox ruff / pytest | Blocking findings | Verdict |
 | --- | --- | --- | --- | --- | --- |
