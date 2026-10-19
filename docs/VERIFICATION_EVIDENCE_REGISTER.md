@@ -301,3 +301,17 @@ validation passed **54 tests**, with compileall, Ruff, pip check and diff check
 clean. GitHub Actions run `39255217942` passed on the same code SHA. This is
 one controlled HTTP mutation/revocation ordering, not broad coverage of all
 protected routes, claim/completion, or adversarial schedules.
+
+## Execution claim versus grant revocation
+
+The current uncommitted test adds a separate PostgreSQL schedule for
+`execution_queue.claim()`: a table lock stalls the claim after it has verified
+and locked `execution.claim` `FOR SHARE`; concurrent deletion through the CEO
+grant-revocation HTTP route is observed waiting on that transaction. Releasing
+the lock lets the claim commit first and the revocation finish second. The test
+then verifies the execution is RUNNING and another claim is denied. Five
+consecutive local reruns passed; the full local suite passed **55 tests** with
+compileall, Ruff, `pip check`, and `git diff --check` clean. No CI run exists
+yet for this change. This validates one claim/revocation schedule only; it does
+not establish behavior for every queue operation, credential revocation, or
+hostile production concurrency.

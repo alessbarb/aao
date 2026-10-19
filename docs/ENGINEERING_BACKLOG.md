@@ -28,8 +28,9 @@ or `[BLOCKED]` labels below as live issue statuses.
    controlled PostgreSQL integration test proves project-grant deletion waits
    for an HTTP work-creation transaction that already holds that grant. Still
    required: repeated/adversarial schedules, other business mutation and queue
-   claim/completion races against revocation/rotation, and review of long-
-   running transaction expiry semantics.
+   claim versus grant-revocation serialization. Still required: completion
+   races against revocation/rotation, repeated/adversarial schedules, and
+   review of long-running transaction expiry semantics.
 3. **Implemented in candidate code and locally validated:** execution/effect
    reconciliation derives the reviewer from a locked individual AUDITOR
    credential inside the transaction, then checks the project grant. Tests
