@@ -23,10 +23,11 @@ or `[BLOCKED]` labels below as live issue statuses.
 2. **Partially implemented and locally validated:** CEO grant revocation is
    audited transactionally; API, execution and reconciliation authorization
    checks lock the matched grant row. PostgreSQL tests cover revocation waiting
-   behind a protected authorization transaction and expiry during lock wait.
-   Still required: repeated/adversarial schedules, real operation mutation and
-   queue claim/completion races, credential rotation races, and review of
-   long-running transaction expiry semantics.
+   behind a protected authorization transaction and expiry during lock wait;
+   an AGENT authentication lock also serializes with token rotation. Still
+   required: repeated/adversarial schedules, full business mutation and queue
+   claim/completion races against revocation/rotation, and review of long-
+   running transaction expiry semantics.
 3. **Implemented in candidate code and locally validated:** execution/effect
    reconciliation derives the reviewer from a locked individual AUDITOR
    credential inside the transaction, then checks the project grant. Tests

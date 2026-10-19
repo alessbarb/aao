@@ -272,3 +272,17 @@ admitted agent without `execution.claim` receives 403, then succeeds after the
 grant is added; staging remains fixed/inert and feature-flagged. Local full
 suite: **52 passed**, no skips/warnings; compileall, Ruff, pip check and diff
 check clean. GitHub Actions run `39254714699` passed on the same code SHA.
+
+## Agent credential rotation serializes with in-transaction authentication
+
+Commit `627a3cdd5fd3bd5936f956e2caa9e8a3ddf511b6` adds a PostgreSQL
+integration schedule that resolves an AGENT token through
+`authenticate_in_transaction()` (holding its credential row `FOR SHARE`), then
+starts a concurrent digest rotation on a separate connection. The test checks
+PostgreSQL reports the rotation blocked until the authenticated transaction
+commits; afterward the old token is rejected and the new token resolves to the
+same principal. Five consecutive local reruns passed; full local validation
+passed **53 tests** with compileall, Ruff, pip check and diff check clean.
+GitHub Actions run `39254963905` passed on the same code SHA. This validates
+credential-row serialization, not a complete queue-claim/completion business
+operation racing rotation or all revoke/rotate schedules.

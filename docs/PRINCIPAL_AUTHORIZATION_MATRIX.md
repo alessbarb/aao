@@ -42,17 +42,19 @@ inside their transaction. The CEO credential is still a single static bearer.
 - API, queue and reconciliation authorization checks hold matching grant
   tuples under `FOR SHARE`; CEO grant deletion serializes behind in-flight
   protected transactions. PostgreSQL tests cover a held-check/revocation race,
-  expiry during a blocked row-lock wait, and AUDITOR credential-authentication
-  serialization against revocation. Other lease and credential-rotation
-  schedules remain untested. A barrier-started proposal/retry test covers the
+  expiry during a blocked row-lock wait, AUDITOR credential-authentication
+  serialization against revocation, and AGENT authentication serialization
+  against credential rotation. Other lease and credential-rotation schedules
+  remain untested. A barrier-started proposal/retry test covers the
   serialized outcomes but not exhaustive lock scheduling.
 - Sequential credential revocation tests and unit mocks that assert SQL text
   do not prove real PostgreSQL lock behavior. Direct transaction-level tests
   now verify grant deletion and auditor credential revocation lock behavior;
   races against full business writes, claims and completion are still needed.
-- The current full local suite has 52 tests, including grant-row, auditor
+- The current full local suite has 53 tests, including grant-row, auditor
   credential-lock, and completion-after-lease-expiry-during-row-lock-wait
-  coverage. Three controlled races between completion and quarantine after
+  coverage, plus one AGENT authentication/rotation lock schedule. Three
+  controlled races between completion and quarantine after
   expiry also finish in `UNCERTAIN`; this is not a broad adversarial schedule
   proof. Effect proposal/retry races are tested as above. A cold PostgreSQL
   restart has been manually verified for one expired lease; broad restart and
