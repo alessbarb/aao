@@ -29,7 +29,18 @@ def require_ceo(x_ceo_token: str | None = Header(None)):
     return "ceo"
 
 
-def require_reviewer(x_review_token: str | None = Header(None)):
+def require_reviewer(
+    x_review_token: str | None = Header(None),
+    x_auditor_token: str | None = Header(None),
+):
+    # Individual credentials are preferred where provisioned. The shared
+    # development reviewer token remains a transitional local-only fallback.
+    if x_auditor_token:
+        from aao.pg_principals import PrincipalDenied, authenticate
+        try:
+            return authenticate(x_auditor_token, kind="AUDITOR")
+        except PrincipalDenied as exc:
+            raise HTTPException(403, "Individual auditor credential rejected") from exc
     expected = os.getenv("AAO_REVIEW_TOKEN")
     if not expected:
         raise HTTPException(503, "Reviewer credential not configured")
