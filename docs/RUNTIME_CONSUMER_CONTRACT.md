@@ -2,7 +2,7 @@
 
 **Status:** integration contract for the current development API; not an
 authorization grant, audit verdict, or production SLA. **API source revision:**
-`f929827885048f0373121358c68238b0ad1effeb` (2026-10-19). This is the source
+`e0cb26f9d7f377b9d0df20b3ee0797da56343040` (2026-10-19). This is the source
 revision described by the contract, not a claim that this document is present
 in that commit.
 
