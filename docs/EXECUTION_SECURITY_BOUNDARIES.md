@@ -1,5 +1,13 @@
 # M2 candidate: execution-state machinery
 
+> **Status note (2026-10-19):** This document began as a SQLite-era snapshot
+> and its historical claims below are not a description of the current
+> PostgreSQL candidate. For current routes, identity checks, lease fencing,
+> controlled race coverage, and residual gaps, use
+> [`PRINCIPAL_AUTHORIZATION_MATRIX.md`](PRINCIPAL_AUTHORIZATION_MATRIX.md)
+> and [`VERIFICATION_EVIDENCE_REGISTER.md`](VERIFICATION_EVIDENCE_REGISTER.md).
+> This note does not upgrade candidate behavior to M2 acceptance.
+
 This module deliberately implements only an **inert durable queue** and journal,
 not an agent runtime or distributed service.
 

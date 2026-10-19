@@ -465,6 +465,20 @@ def review(work_id: str, payload: ReviewRequest, principal: str = Depends(requir
             raise HTTPException(409, "Work not reviewable")
         if principal == author:
             raise HTTPException(403, "Author cannot review own work")
+        executions = db.execute(
+            "SELECT id,status FROM execution_queue WHERE work_id=%s FOR UPDATE",
+            (work_id,),
+        ).fetchall()
+        if any(execution_status != "SUCCEEDED" for _, execution_status in executions):
+            raise HTTPException(409, "Execution must succeed before work review")
+        if db.execute(
+            "SELECT 1 FROM execution_journal j "
+            "JOIN execution_queue q ON q.id=j.execution_id "
+            "WHERE q.work_id=%s AND j.kind='claimed' "
+            "AND j.details->>'worker_id'=%s LIMIT 1",
+            (work_id, principal),
+        ).fetchone():
+            raise HTTPException(403, "Execution worker cannot review own work")
         rid = str(uuid4())
         db.execute("INSERT INTO reviews(id,work_id,reviewer_id,decision,evidence) VALUES (%s,%s,%s,%s,%s::jsonb)", (rid, work_id, principal, payload.decision, json.dumps(payload.evidence)))
         next_state = "VERIFIED" if payload.decision == "APPROVE" else "IN_PROGRESS"

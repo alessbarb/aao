@@ -152,6 +152,7 @@ def test_postgres_review_is_separate_from_author_and_required_for_done(monkeypat
     from aao.work_management_api import app
     monkeypatch.setenv("AAO_POSTGRES_URL", os.environ["AAO_TEST_POSTGRES_URL"])
     monkeypatch.setenv("AAO_CEO_TOKEN", "integration-ceo")
+    monkeypatch.setenv("AAO_SANDBOX_QUEUE_ENABLED", "true")
     ceo = {"X-CEO-Token": "integration-ceo"}
     with TestClient(app) as client:
         agent_id = "agent-" + str(uuid4())
@@ -161,13 +162,25 @@ def test_postgres_review_is_separate_from_author_and_required_for_done(monkeypat
         m = client.post("/v1/mandates", headers=ceo, json={"title": str(uuid4()), "objective": "Review gate test"}).json()["id"]
         client.post(f"/v1/mandates/{m}/confirm", headers=ceo)
         p = client.post("/v1/projects", headers=ceo, json={"name": "Audit smoke", "mandate_id": m}).json()["id"]
-        for who, cap in ((agent_id, "work.create"), (agent_id, "work.admit"), (agent_id, "work.progress"), (auditor_id, "work.review")):
+        for who, cap in ((agent_id, "work.create"), (agent_id, "work.admit"),
+                         (agent_id, "work.progress"), (agent_id, "execution.claim"),
+                         (auditor_id, "work.review")):
             assert client.post(f"/v1/projects/{p}/grants", headers=ceo, json={"principal_id": who, "capability": cap}).status_code == 201
         w = client.post(f"/v1/projects/{p}/work", headers=worker, json={"title": "Review", "author_id": "spoofed", "acceptance_criteria": ["Reviewed"]}).json()["id"]
         assert client.post(f"/v1/work/{w}/progress", headers=worker).status_code == 409
         assert client.post(f"/v1/work/{w}/admit", headers=worker).status_code == 200
+        execution_id = client.post(f"/v1/work/{w}/stage-inert", headers=worker).json()["execution_id"]
+        from aao.execution_queue import claim, complete
+        lease = claim(agent_id, agent_credential=worker["X-Agent-Token"],
+                      project_id=p)
+        assert lease and lease["execution_id"] == execution_id
         assert client.post(f"/v1/work/{w}/progress", headers=worker).json()["status"] == "IN_PROGRESS"
         assert client.post(f"/v1/work/{w}/progress", headers=worker).json()["status"] == "IN_REVIEW"
+        assert client.post(f"/v1/work/{w}/reviews", headers=auditor, json={
+            "decision": "APPROVE", "evidence": ["sha256:review-evidence"],
+        }).status_code == 409
+        complete(execution_id, lease["token"], agent_id, {"ok": True},
+                 agent_credential=worker["X-Agent-Token"])
         assert client.post(f"/v1/work/{w}/progress", headers=worker).status_code == 409
         assert client.post(f"/v1/work/{w}/reviews", headers=worker, json={"decision": "APPROVE", "evidence": ["test"]}).status_code == 403
         assert client.post(f"/v1/work/{w}/reviews", headers=auditor, json={"decision": "APPROVE", "evidence": [""]}).status_code == 422

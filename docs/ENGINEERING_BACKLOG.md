@@ -103,6 +103,12 @@ amendment or CEO-confirmed constitutional rule.
    shortcut.
 7. Obtain adversarial independent security/architecture review and competent
    acceptance. Codex cannot substitute for either.
+8. **Implemented in candidate code and locally focused-test validated:** review
+   waits until every execution for the work is `SUCCEEDED`, then rejects the
+   author and principal IDs present in durable claim history. This narrows
+   self-review risk but cannot establish distinct human identities, validate
+   evidence references, or replace independent review. Expand only with
+   concrete identity/provenance requirements and PostgreSQL race coverage.
 
 This document is a repository bootstrap artifact. **It is not GitHub Issues or GitHub Projects as the operational Kanban.** On M1, import the work definitions into AAO's own database and manage all status transitions there.
 
