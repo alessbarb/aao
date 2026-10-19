@@ -115,3 +115,19 @@ and an opt-in PostgreSQL concurrency test. See [M2 inert worker](docs/M2_INERT_W
 The worker is not scheduled automatically, no AI models are connected, and no
 external effect is performed. Database-backed tests still require a disposable
 PostgreSQL instance. No verified test run or operational acceptance is claimed.
+
+## Local configuration (development-only)
+
+See [Configuration](docs/CONFIGURATION.md). Copy the sanitized
+[environment template](.env.example) to `.env.local` and replace placeholders.
+The Python services now load `.env.local` automatically without overriding
+already-exported process environment variables. To choose `.env.test`, run
+`AAO_ENV=test AAO_ENV_FILE=.env.test python -m pytest -q`.
+
+Docker Compose needs its explicit loader:
+`docker compose --env-file .env.local -f compose.dev.yaml up -d`.
+All local dotenv variants are Git-ignored; only `.env.example` is tracked.
+
+Do not create a fresh database password for an existing Docker volume without
+also rotating it in PostgreSQL. Shared development tokens and dotenv files
+are not suitable for production.
