@@ -162,3 +162,27 @@ After the 50-test baseline at `87779b5d8422d33e7f8befbe87c4e4ff307cee52`, the pr
   checks at the listed revisions. It is not adversarial security review,
   broad collision-case testing, production migration approval, or M2
   acceptance.
+
+## Authenticated execution and effect reconciliation — 2026-10-19
+
+- Revision: `d8a87cb75f392a66e5366547acff2094b817fd6e` on
+  `feat/aao-m0-foundation`.
+- Both PostgreSQL reconciliation helpers now accept an AUDITOR bearer
+  credential, resolve it to an enabled AUDITOR principal under `FOR SHARE`
+  inside the same transaction, then check the project grant. Caller-supplied
+  reviewer IDs are no longer accepted. CEO grant schema now admits the two
+  reconciliation capabilities and associates them with AUDITOR principals.
+- The disposable-PostgreSQL integration suite exercises rejected ungranted
+  auditors, AGENT denial, successful execution retry reconciliation, effect
+  proposal rejection, and a real separate-connection lock wait proving
+  revocation blocks behind the authenticated transaction. After revocation,
+  the old credential is denied.
+- Local exact-tree checks: `python -m compileall -q src tests`, Ruff, full
+  PostgreSQL-gated pytest (**53 passed, 0 skipped, 0 warnings**), `pip check`
+  and `git diff --check` passed.
+- CI run `39252195117` passed its disposable PostgreSQL migrations, static
+  checks, full integration suite (**53 passed**) and `pip check` on this SHA.
+- Remaining limitations: evidence references are not verified; reconciliation
+  has no HTTP endpoint; only one lock schedule is covered; grant/lease/effect
+  retry races, independent security review and competent M2 acceptance remain
+  open. This is not M2 closure.
