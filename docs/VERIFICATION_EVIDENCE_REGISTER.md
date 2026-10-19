@@ -96,3 +96,11 @@ Operator ran at `87779b5d8422d33e7f8befbe87c4e4ff307cee52` with Python 3.12.13 a
 ## M2 project-read revalidation — pending operator validation
 
 After the 50-test baseline at `87779b5d8422d33e7f8befbe87c4e4ff307cee52`, the project listing route was changed to recheck individual AGENT credential status with `SELECT ... FOR SHARE` in its database transaction, before reading project grants. One unit test covers inactive, absent, wrong-kind, and active principals with a stubbed transaction. **This increment has not yet been tested locally**, and no actual concurrent credential revoke/read race is proven. Full suite, lint, and independent audit are outstanding; M2 remains unaccepted.
+
+## B023 baseline repair and local validation — 2026-10-19
+
+- Validated revision: `d080da58d4a8a41749a932d8fdf2c1caec5ac652` on `feat/aao-m0-foundation`.
+- Fixed `B023` in `test_project_listing_rechecks_active_reader_in_transaction` by using a transaction-context-manager factory that binds each loop's selected database instance; no suppression was added.
+- Local checks on that exact revision: `python -m compileall -q src tests` succeeded; `python -m ruff check src tests` passed; `AAO_ENV=test AAO_ENV_FILE=.env.test AAO_TEST_DB_DISPOSABLE=yes python -m pytest -q -rs -W error` completed **51 passed**; `python -m pip check` reported no broken requirements; `git diff --check` passed. Pytest reported no skips or warnings.
+- The PostgreSQL integration cases ran under the explicit disposable-database gate. This is local engineering evidence only; it is not independent security review or M2 acceptance. This run does not demonstrate an actual concurrent revocation race.
+- PR #1 is merged and the branch currently contains this commit beyond its remote-tracking branch. CI for the prior revision `60de4cb7792a3e7a8229f1e9487bdac49f828294` failed; this revision has not yet been pushed and therefore has no CI result here.
