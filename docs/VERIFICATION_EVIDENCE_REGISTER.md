@@ -129,8 +129,11 @@ After the 50-test baseline at `87779b5d8422d33e7f8befbe87c4e4ff307cee52`, the pr
   `python -m pip check` (**No broken requirements found**); `git diff --check`
   passed. These PostgreSQL tests ran under the explicit disposable-database
   gate.
+- GitHub Actions run `39250603339` completed successfully on commit
+  `a56fcca70f872b07734ddf98785bc753d6daf948`, including migrations, compile,
+  Ruff, disposable PostgreSQL tests with warnings as errors and `pip check`.
 - A read-only agent engineering review found no critical lock defect, while
   noting that the test covers a grant-check transaction rather than a complete
   business mutation, and that repeated adversarial schedules remain absent.
   This is not independent formal security review, auditor acceptance or M2
-  closure. CI for this new revision has not yet run.
+  closure.
