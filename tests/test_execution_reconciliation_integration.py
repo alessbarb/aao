@@ -1,6 +1,8 @@
 """PostgreSQL integration tests, opt-in for explicitly disposable databases."""
 import os
+import threading
 import time
+from concurrent.futures import ThreadPoolExecutor
 from uuid import uuid4
 
 import pytest
@@ -74,35 +76,66 @@ def test_reconciliation_requires_distinct_granted_reviewer(monkeypatch):
     with pytest.raises(ReconciliationDenied):
         reconcile(eid, auditor_credential=secret, evidence=["agent cannot review"],
                   disposition="RETRY_CONFIRMED_SAFE")
-    assert reconcile(eid, auditor_credential=auditor_secret,
-                     evidence=["inert-only confirmed"],
-                     disposition="RETRY_CONFIRMED_SAFE") == "QUEUED"
+    from aao.execution_reconciliation import ReconciliationDenied
     from aao.external_effect_reconciliation import EffectReviewDenied, reject_unexecuted_proposal
     from aao.external_effect_registry import EffectConflict, propose
-    with pytest.raises(EffectConflict, match="running execution"):
-        propose(
-            execution_id=eid, idempotency_key="queued-" + str(uuid4()),
-            capability="test.inert", request={"kind": "test-only"},
-        )
-    lease = claim(worker_id, agent_credential=secret, project_id=project)
-    assert lease["execution_id"] == eid
-    proposal = propose(
-        execution_id=eid, idempotency_key="reconcile-" + str(uuid4()),
-        capability="test.inert", request={"kind": "test-only"},
-    )
-    with pytest.raises(EffectReviewDenied):
-        reject_unexecuted_proposal(
-            proposal["id"], auditor_credential=secret, evidence=["agent denied"]
-        )
     with TestClient(app) as client:
         granted = client.post(f"/v1/projects/{project}/grants", headers=ceo, json={
             "principal_id": auditor_id, "capability": "effect.reconcile",
         })
         assert granted.status_code == 201, granted.text
+    barrier = threading.Barrier(2)
+    def race_proposal():
+        barrier.wait(timeout=3)
+        return propose(
+            execution_id=eid, idempotency_key="race-" + str(uuid4()),
+            capability="test.inert", request={"kind": "test-only"},
+        )
+    def race_retry():
+        barrier.wait(timeout=3)
+        return reconcile(
+            eid, auditor_credential=auditor_secret, evidence=["inert-only confirmed"],
+            disposition="RETRY_CONFIRMED_SAFE",
+        )
+    with ThreadPoolExecutor(max_workers=2) as pool:
+        proposed = pool.submit(race_proposal)
+        retried = pool.submit(race_retry)
+        try:
+            proposal = proposed.result(timeout=5)
+        except EffectConflict:
+            proposal = None
+        try:
+            retry_state = retried.result(timeout=5)
+        except ReconciliationDenied:
+            retry_state = None
+    if proposal:
+        assert retry_state is None
+        assert "External effect exists" in str(retried.exception())
+    else:
+        assert retry_state == "QUEUED"
+        with pytest.raises(EffectConflict, match="running execution"):
+            propose(
+                execution_id=eid, idempotency_key="queued-" + str(uuid4()),
+                capability="test.inert", request={"kind": "test-only"},
+            )
+        lease = claim(worker_id, agent_credential=secret, project_id=project)
+        assert lease["execution_id"] == eid
+        proposal = propose(
+            execution_id=eid, idempotency_key="reconcile-" + str(uuid4()),
+            capability="test.inert", request={"kind": "test-only"},
+        )
+    with pytest.raises(EffectReviewDenied):
+        reject_unexecuted_proposal(
+            proposal["id"], auditor_credential=secret, evidence=["agent denied"]
+        )
     assert reject_unexecuted_proposal(
         proposal["id"], auditor_credential=auditor_secret,
         evidence=["proposal not executed"],
     ) == "REJECTED"
+    if retry_state is None:
+        assert reconcile(eid, auditor_credential=auditor_secret,
+                         evidence=["effect rejected"],
+                         disposition="RETRY_CONFIRMED_SAFE") == "QUEUED"
     with TestClient(app) as client:
         assert client.post(f"/v1/principals/{worker_id}/revoke", headers=ceo).status_code == 200
     from aao.execution_queue import ExecutionConflict
