@@ -650,3 +650,19 @@ coverage, independent review, or M2 acceptance.
 - This is a sequential grant-revocation check, not an observed concurrent
   lock schedule; it does not establish general read authorization correctness,
   independent review, or M2 acceptance.
+
+## Project board read serializes with grant revocation — 2026-10-19
+
+- Code revision: `8c5ccf38fa2d011426da20c535668b2b2af7527a` on
+  `feat/aao-m0-foundation`.
+- The request-context route test now also queues CEO deletion of a reader's
+  `project.read` grant while holding the grant tuple. It observes the DELETE
+  waiting on the blocker, then observes the board route's `FOR SHARE` grant
+  query waiting on that DELETE PID. After release, deletion commits and the
+  already-resolved reader context receives HTTP 403 from the board.
+- The focused test passed four consecutive runs. On this exact code revision,
+  compileall, Ruff, the full explicitly disposable PostgreSQL suite (**69
+  passed, 0 skipped, 0 warnings** under `-W error`), `pip check`, and
+  `git diff --check` passed.
+- This is a selected controlled read-authorization schedule, not proof for
+  every read route, hostile concurrency, independent review, or M2 acceptance.

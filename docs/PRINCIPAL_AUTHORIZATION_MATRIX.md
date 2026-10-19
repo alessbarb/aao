@@ -1,7 +1,7 @@
 # Principal authorization matrix
 
 **Scope:** current development API and internal execution/reconciliation
-operations, updated through `5eeea36f99aa7edf7fac31148b41abc9f1626074`.
+operations, updated through `8c5ccf38fa2d011426da20c535668b2b2af7527a`.
 This is an engineering inventory, not a production authorization policy or
 independent security review. The PostgreSQL API and its internal helpers are
 not a claim of M2 acceptance.
@@ -35,7 +35,9 @@ checks and a disposable PostgreSQL route test that captures a context, rotates
 the token before the project-list transaction, and observes denial; a fresh
 context is allowed. That route test also retains the fresh context, revokes its
 `project.read` grant, then observes 403 from the protected board route. This is
-a sequential revocation-before-transaction check, not a concurrent lock race.
+a concurrent test queues grant deletion first, observes the board's grant query
+blocked by that revoker, then confirms deletion commits and the board returns
+403. The same test retains a sequential revoke-before-route check.
 The static CEO bearer is development-only and is
 rejected for CEO authorization outside explicit development/test modes; this
 does not establish a production CEO identity flow. See the latest evidence
