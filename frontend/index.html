@@ -25,14 +25,14 @@
       <div class="brand"><div class="mark" aria-hidden="true">A</div><div><h1>AAO Control Center</h1><span class="muted">Operaciones organizativas · desarrollo local</span></div></div>
       <div class="top-actions"><label class="hidden" for="project">Proyecto</label><select id="project" aria-label="Proyecto"></select><button id="reload" type="button">Actualizar</button><button id="disconnect" type="button" class="hidden">Desconectar</button></div>
     </header>
-    <form id="auth-panel" class="auth-panel hidden" autocomplete="off">
+    <form id="auth-panel" class="auth-panel" autocomplete="off">
       <label for="auth-token">Token CEO de desarrollo
         <input id="auth-token" name="token" type="password" autocomplete="new-password" required>
       </label>
       <button type="submit">Conectar</button>
       <p>La credencial solo se conserva en la memoria de esta pestaña; no se guarda en almacenamiento local.</p>
     </form>
-    <div id="message" role="status" aria-live="polite" class="muted">Conectando con el núcleo local…</div>
+    <div id="message" role="status" aria-live="polite" class="muted">Autenticación requerida para consultar el núcleo local.</div>
     <div class="layout">
       <nav class="nav" aria-label="Navegación principal">
         <button type="button" data-page="home" aria-current="page">Inicio</button>
@@ -41,7 +41,7 @@
         <button type="button" data-page="evidence">Evidencias</button>
         <button type="button" data-page="decisions">Decisiones reservadas</button>
       </nav>
-      <main id="content" tabindex="-1"></main>
+      <main id="content" tabindex="-1"><div class="empty">Introduce una credencial de desarrollo para consultar los datos reales de PostgreSQL.</div></main>
     </div>
   </div>
   <script>
@@ -154,7 +154,7 @@
     authPanel.addEventListener("submit",event=>{event.preventDefault();const token=authInput.value.trim();if(!token)return;ceoToken=token;authInput.value="";disconnectButton.classList.remove("hidden");loadProjects().then(()=>authPanel.classList.add("hidden")).catch(err=>setMessage("No se pudo conectar: "+err.message,true))});
     disconnectButton.addEventListener("click",()=>{ceoToken=null;projects=[];selectedProject=null;board=[];detail=null;activity=[];disconnectButton.classList.add("hidden");authPanel.classList.remove("hidden");render();setMessage("Sesión de desarrollo desconectada.")});
     document.querySelectorAll(".nav button").forEach(button=>button.addEventListener("click",()=>{activePage=button.dataset.page;selectedTask=null;render()}));
-    loadProjects().catch(err=>{projectSelect.replaceChildren();setMessage("No se puede consultar el núcleo: "+err.message,true);content.replaceChildren(el("div","La interfaz no usa datos simulados. Comprueba la API y los permisos antes de reintentar.","empty"))});
+    authPanel.classList.remove("hidden");
   </script>
 </body>
 </html>
