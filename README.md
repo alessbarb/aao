@@ -16,7 +16,7 @@ Not implemented: independent review, production authentication, distributed work
 
 ## Current PostgreSQL development path (19 October 2026)
 
-The sections below preserve the incremental history of the prototype; they must not be read as the present acceptance status. The PostgreSQL-backed development API is `aao.work_management_api:app`, while the separate SQLite prototype remains at `aao.sqlite_api:app`. The PostgreSQL integration suite is `tests/test_postgresql_workflow_integration.py`. Schema migrations `001` through `005` are immutable historical artifacts.
+The sections below preserve the incremental history of the prototype; they must not be read as the present acceptance status. The PostgreSQL-backed development API is `aao.work_management_api:app`, while the separate SQLite prototype remains at `aao.sqlite_api:app`. The PostgreSQL integration suite is `tests/test_project_workflow_integration.py`, `tests/test_execution_leases_integration.py`, `tests/test_execution_reconciliation_integration.py`, and `tests/test_principal_credential_lifecycle_integration.py`. Schema migrations `001` through `005` are immutable historical artifacts.
 
 For the local disposable test database, after configuring the private `.env.test` file and applying the existing migrations:
 
@@ -109,12 +109,12 @@ Read [PostgreSQL runtime setup](docs/POSTGRESQL_RUNTIME_OPERATIONS.md). It requi
 database, then running on localhost. The development identity migration relaxes
 principal FK enforcement and is **not a production schema**.
 
-An opt-in integration test exists in `tests/test_postgresql_workflow_integration.py`.
+An opt-in integration test exists in `tests/test_project_workflow_integration.py`, `tests/test_execution_leases_integration.py`, `tests/test_execution_reconciliation_integration.py`, and `tests/test_principal_credential_lifecycle_integration.py`.
 Use it only on an explicitly disposable database:
 ```sh
 export AAO_TEST_POSTGRES_URL='postgresql://...disposable-test-database'
 export AAO_TEST_DB_DISPOSABLE=yes
-pytest -q tests/test_postgresql_workflow_integration.py
+pytest -q tests/test_project_workflow_integration.py tests/test_execution_leases_integration.py tests/test_execution_reconciliation_integration.py tests/test_principal_credential_lifecycle_integration.py
 ```
 The test creates records and does not delete the database afterwards.
 
