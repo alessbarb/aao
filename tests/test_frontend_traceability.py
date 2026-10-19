@@ -38,3 +38,15 @@ def test_control_center_has_explicit_ephemeral_development_authentication():
     assert "window.prompt" not in page
     assert "localStorage" not in page
     assert "sessionStorage" not in page
+
+
+def test_control_center_clears_read_data_and_identity_after_access_denial():
+    with TestClient(app) as client:
+        response = client.get("/")
+
+    page = response.text
+    assert "function clearReaderSession()" in page
+    assert "if(response.status===401||response.status===403){\n        clearReaderSession();" in page
+    assert "La sesión perdió autorización. Vuelve a identificarte" in page
+    assert "if(readerToken!==token)throw new Error" in page
+    assert "catch(err=>{clearReaderSession();setMessage" in page

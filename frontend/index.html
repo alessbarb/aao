@@ -61,12 +61,13 @@
     function panel(title){const p=el("section",undefined,"panel");p.append(el("h2",title));return p}
     function empty(text){return el("div",text,"empty")}
     function displayDate(value){if(!value)return "Fecha no disponible";const d=new Date(value);return Number.isNaN(d.getTime())?String(value):d.toLocaleString("es-ES")}
+    function clearReaderSession(){readerToken=null;readerIdentity="AGENT";readerKind.value="AGENT";readerKind.disabled=false;authInput.value="";projects=[];selectedProject=null;board=[];detail=null;activity=[];selectedTask=null;activePage="home";disconnectButton.classList.add("hidden");sessionStatus.classList.add("hidden");sessionStatus.textContent="";authPanel.classList.remove("hidden")}
     async function request(path){
       const headers=readerToken?{[readerIdentity==="AUDITOR"?"X-Auditor-Token":"X-Agent-Token"]:readerToken}:{};
       const response=await fetch(path,{credentials:"same-origin",headers});
       if(response.status===401||response.status===403){
-        if(readerToken){readerToken=null;authInput.value="";readerKind.disabled=false;disconnectButton.classList.add("hidden");sessionStatus.classList.add("hidden");sessionStatus.textContent=""}
-        authPanel.classList.remove("hidden");
+        clearReaderSession();
+        content.replaceChildren(empty("La sesión perdió autorización. Vuelve a identificarte para consultar el proyecto."));
         throw new Error("Acceso no autorizado. Introduce una credencial de desarrollo para continuar.");
       }
       if(!response.ok)throw new Error("La API respondió HTTP "+response.status);
@@ -183,8 +184,8 @@
     function render(){content.replaceChildren();if(!projects.length){renderHome();return}if(activePage==="home")renderHome();else if(activePage==="project")renderProject();else if(activePage==="activity")renderActivity();else if(activePage==="evidence")void renderEvidence();else renderDecisions();syncNav()}
     projectSelect.addEventListener("change",()=>{selectedProject=projectSelect.value;selectedTask=null;loadProjectData()});
     document.querySelector("#reload").addEventListener("click",()=>loadProjects().catch(err=>setMessage("No se pudo actualizar: "+err.message,true)));
-    authPanel.addEventListener("submit",event=>{event.preventDefault();const token=authInput.value.trim();if(!token)return;readerIdentity=readerKind.value;readerToken=token;readerKind.disabled=true;authInput.value="";disconnectButton.classList.remove("hidden");loadProjects().then(()=>{authPanel.classList.add("hidden");sessionStatus.textContent="Identidad autenticada · "+(readerIdentity==="AUDITOR"?"auditor":"agente")+" · proyectos según grants";sessionStatus.classList.remove("hidden")}).catch(err=>{readerKind.disabled=false;sessionStatus.classList.add("hidden");setMessage("No se pudo conectar: "+err.message,true)})});
-    disconnectButton.addEventListener("click",()=>{readerToken=null;readerIdentity="AGENT";readerKind.value="AGENT";readerKind.disabled=false;projects=[];selectedProject=null;board=[];detail=null;activity=[];disconnectButton.classList.add("hidden");sessionStatus.classList.add("hidden");sessionStatus.textContent="";authPanel.classList.remove("hidden");render();setMessage("Sesión de lectura desconectada.")});
+    authPanel.addEventListener("submit",event=>{event.preventDefault();const token=authInput.value.trim();if(!token)return;readerIdentity=readerKind.value;readerToken=token;readerKind.disabled=true;authInput.value="";disconnectButton.classList.remove("hidden");loadProjects().then(()=>{if(readerToken!==token)throw new Error("La autorización de lectura dejó de ser válida durante la consulta.");authPanel.classList.add("hidden");sessionStatus.textContent="Identidad autenticada · "+(readerIdentity==="AUDITOR"?"auditor":"agente")+" · proyectos según grants";sessionStatus.classList.remove("hidden")}).catch(err=>{clearReaderSession();setMessage("No se pudo conectar: "+err.message,true)})});
+    disconnectButton.addEventListener("click",()=>{clearReaderSession();render();setMessage("Sesión de lectura desconectada.")});
     document.querySelectorAll(".nav button").forEach(button=>button.addEventListener("click",()=>{activePage=button.dataset.page;selectedTask=null;render()}));
     authPanel.classList.remove("hidden");
   </script>
