@@ -60,3 +60,7 @@ assignment does not count as satisfaction. The technical matrix cannot be
 used to infer operational powers. Planner/admission inputs for capacity,
 budget, risk, and authorization remain simulated; they are not operational
 safeguards or evidence of safe admission.
+
+## Review governance update (CEO approval 2026-10-19)
+
+GOV-REV-001 v1.1 establishes independent autonomous technical assurance. Historical human-review language is superseded for routine technical evaluation. A-10 remains pending because independent audit with separate permissions, evidence protection and enforceable veto has not been demonstrated. A-11 remains pending and reserved decisions are still the CEO's. No risks or M2-A acceptance are approved by this update.
