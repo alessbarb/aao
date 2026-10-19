@@ -8,6 +8,7 @@ import os
 import secrets
 from contextlib import contextmanager
 from pathlib import Path
+from typing import Literal
 from uuid import uuid4
 
 from aao.environment_settings import load_local_env
@@ -95,6 +96,15 @@ class WorkRequest(BaseModel):
 class ReviewRequest(BaseModel):
     decision: str = Field(pattern="^(APPROVE|REJECT)$")
     evidence: list[str] = Field(min_length=1)
+
+
+class RepositoryCheckRequest(BaseModel):
+    check_id: Literal["core-unit"]
+
+
+class PullRequestPublicationRequest(BaseModel):
+    url: str = Field(pattern=r"^https://github\.com/alessbarb/aao/pull/[1-9][0-9]*$")
+    candidate_sha: str = Field(pattern=r"^[0-9a-f]{40}$")
 
 
 class PrincipalCredentialRequest(BaseModel):
@@ -497,6 +507,11 @@ def work_detail(project_id: str, work_id: str, principal: str = Depends(read_pri
             "SELECT id,reviewer_id,decision,evidence,created_at FROM reviews "
             "WHERE work_id=%s ORDER BY created_at,id", (work_id,),
         ).fetchall()
+        pull_request = db.execute(
+            "SELECT details,created_at FROM events WHERE subject_id=%s "
+            "AND kind='work.pull_request_published' ORDER BY created_at DESC LIMIT 1",
+            (work_id,),
+        ).fetchone()
         return {
             "id": task[0], "title": task[1], "status": task[2],
             "author_id": task[3], "acceptance_criteria": task[4],
@@ -507,6 +522,10 @@ def work_detail(project_id: str, work_id: str, principal: str = Depends(read_pri
                            for r in executions],
             "reviews": [{"id": r[0], "reviewer_id": r[1], "decision": r[2],
                          "evidence": r[3], "created_at": r[4]} for r in reviews],
+            "pull_request": ({"url": pull_request[0]["url"],
+                              "candidate_sha": pull_request[0]["candidate_sha"],
+                              "remote_status_verified": pull_request[0]["remote_status_verified"],
+                              "created_at": pull_request[1]} if pull_request else None),
         }
 
 
@@ -643,3 +662,67 @@ def stage_inert(work_id: str, principal: str = Depends(require_worker)):
         )
         audit(db, execution_id, "execution.staged", {"work_id": work_id})
     return {"execution_id": execution_id, "status": "QUEUED"}
+
+
+@app.post("/v1/work/{work_id}/stage-repository-check", status_code=202)
+def stage_repository_check(work_id: str, payload: RepositoryCheckRequest,
+                           principal: str = Depends(require_worker)):
+    """Queue only the fixed, sandboxed test selection; callers cannot pass commands."""
+    if os.getenv("AAO_SANDBOX_QUEUE_ENABLED") != "true":
+        raise HTTPException(503, "Sandbox queue disabled")
+    with tx() as db:
+        work = db.execute("SELECT project_id,status FROM work_items WHERE id=%s FOR UPDATE",
+                          (work_id,)).fetchone()
+        if not work:
+            raise HTTPException(404, "Work not found")
+        project_id, status = work
+        project = db.execute("SELECT state FROM projects WHERE id=%s", (project_id,)).fetchone()
+        if not project or project[0] != "ACTIVE" or status != "IN_PROGRESS":
+            raise HTTPException(409, "Work must be in progress in an active project")
+        require_grant(db, principal, project_id, "work.admit")
+        require_grant(db, principal, project_id, "execution.claim")
+        existing = db.execute("SELECT id,status,input_json FROM execution_queue WHERE work_id=%s",
+                              (work_id,)).fetchone()
+        job = {"type": "aao.repository-check.v1", "check_id": payload.check_id}
+        if existing:
+            if existing[2] != job:
+                raise HTTPException(409, "A different execution is already recorded")
+            return {"execution_id": str(existing[0]), "status": existing[1]}
+        execution_id = str(uuid4())
+        db.execute("INSERT INTO execution_queue(id,work_id,project_id,status,input_json) "
+                   "VALUES (%s,%s,%s,'QUEUED',%s::jsonb)",
+                   (execution_id, work_id, project_id, json.dumps(job)))
+        audit(db, execution_id, "execution.staged",
+              {"work_id": work_id, "executor": job["type"], "check_id": payload.check_id})
+    return {"execution_id": execution_id, "status": "QUEUED"}
+
+
+@app.post("/v1/work/{work_id}/publish-pull-request", status_code=201)
+def publish_pull_request(work_id: str, payload: PullRequestPublicationRequest,
+                         principal: str = Depends(require_worker)):
+    """Record a PR URL only when a successful local check matches its exact SHA."""
+    with tx() as db:
+        work = db.execute("SELECT project_id,status FROM work_items WHERE id=%s FOR UPDATE",
+                          (work_id,)).fetchone()
+        if not work:
+            raise HTTPException(404, "Work not found")
+        project_id, status = work
+        require_grant(db, principal, project_id, "work.progress")
+        if status != "IN_REVIEW":
+            raise HTTPException(409, "Work must be in review before PR publication")
+        result = db.execute("SELECT result_json FROM execution_queue WHERE work_id=%s "
+                            "AND status='SUCCEEDED' ORDER BY created_at DESC LIMIT 1",
+                            (work_id,)).fetchone()
+        if not result or result[0].get("conclusion") != "success" \
+                or result[0].get("candidate_sha") != payload.candidate_sha:
+            raise HTTPException(409, "Successful check for the exact candidate SHA required")
+        existing = db.execute("SELECT id FROM events WHERE subject_id=%s "
+                              "AND kind='work.pull_request_published'", (work_id,)).fetchone()
+        if existing:
+            raise HTTPException(409, "Pull request already recorded for this work")
+        audit(db, work_id, "work.pull_request_published", {
+            "url": payload.url, "candidate_sha": payload.candidate_sha,
+            "recorded_by": principal, "remote_status_verified": False,
+        })
+    return {"work_id": work_id, "url": payload.url, "candidate_sha": payload.candidate_sha,
+            "remote_status_verified": False}
