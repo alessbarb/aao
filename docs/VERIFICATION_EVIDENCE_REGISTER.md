@@ -47,20 +47,19 @@ El operador comunicó una ejecución completa posterior a la incorporación de i
 
 El operador confirmó `git pull --ff-only` hasta `3de90ea` y la ejecución `AAO_ENV=test AAO_ENV_FILE=.env.test python -m pytest -v -rs`: **43 passed, 0 failed, 0 skipped, 1 warning** en 2.29 s, Python 3.12.13. La prueba `test_individual_agent_claim_and_revocation` pasó junto con la nueva prueba del contrato exacto `execution.claim`. Persiste la advertencia de deprecación Starlette/httpx. Esta evidencia es una prueba local comunicada por el operador y no constituye revisión independiente ni autorización de ejecución externa.
 
-## Incremento de restricción de tokens compartidos — validación histórica
+## Shared-token retirement increment — validation
 
-El estado descrito abajo es histórico. En el worktree posterior a `a47c853`,
-se retiró el fallback compartido del API PostgreSQL y se migraron los
-escenarios de integración a credenciales individuales. En el árbol de trabajo
-se ejecutaron compileall, Ruff, pip check, diff check y la suite completa
-contra la base explícitamente desechable indicada por `.env.test` sobre
-`ca1857e8fa387f6834540b70f21bf11202cfc8e3`: **52 passed, 0 skipped, 0
-warnings**. Ruff informó `All checks passed!`, pip check informó `No broken
-requirements found`, y `git diff --check` terminó sin errores. Esta evidencia
-es local y la ejecución GitHub Actions `39252871118` terminó `success` en el
-SHA final `7f7fd63483f5dc467a464db67ef87022e7254dff`. CI valida compileall,
-Ruff, migraciones contra PostgreSQL desechable, integración y `pip check`.
-No es revisión independiente ni aceptación M2.
+The validation status described below is historical. After `a47c853`, the
+PostgreSQL API shared-auth fallback was removed and integration scenarios were
+migrated to individual credentials. On `ca1857e8fa387f6834540b70f21bf11202cfc8e3`,
+compileall, Ruff, pip check, diff check and the full suite ran against the
+explicitly disposable database configured by `.env.test`: **52 passed, 0
+skipped, 0 warnings**. Ruff reported `All checks passed!`, pip check reported
+`No broken requirements found`, and `git diff --check` exited successfully.
+GitHub Actions run `39252871118` completed successfully for commit
+`7f7fd63483f5dc467a464db67ef87022e7254dff`. CI covers compileall, Ruff,
+migrations against disposable PostgreSQL, integration tests and pip check.
+This is not independent review or M2 acceptance.
 
 Tras las 43 pruebas confirmadas, se incorporaron las rutas individuales de
 lectura de proyectos/tableros y el bloqueo de tokens compartidos de workers y
