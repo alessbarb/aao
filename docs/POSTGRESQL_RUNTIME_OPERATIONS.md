@@ -1,7 +1,7 @@
 # PostgreSQL development runtime (M1)
 
 AAO now includes a **separate, actually PostgreSQL-backed API** at
-`aao.pg_work:app`. The original `aao.main:app` remains SQLite-based.
+`aao.work_management_api:app`. The original `aao.sqlite_api:app` remains SQLite-based.
 
 This is a deliberate incremental cutover. It is not a transparent or complete
 migration: use the PostgreSQL endpoint only for development mandates, projects,
@@ -17,7 +17,7 @@ psql "$AAO_POSTGRES_URL" -v ON_ERROR_STOP=1 -f db/postgres/001_foundation.sql
 psql "$AAO_POSTGRES_URL" -v ON_ERROR_STOP=1 -f db/postgres/002_dev_identity.sql
 export AAO_CEO_TOKEN='locally-generated-secret'
 export AAO_WORK_TOKEN='different-locally-generated-secret'
-uvicorn aao.pg_work:app --host 127.0.0.1 --port 8001
+uvicorn aao.work_management_api:app --host 127.0.0.1 --port 8001
 ```
 
 **Do not expose port 8001 beyond loopback.** Both secrets are development
