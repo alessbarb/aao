@@ -65,3 +65,12 @@ revisión.** La referencia verificada continúa siendo la suite de 46 pruebas.
 ## Validación del ciclo de credenciales — 2026-10-19
 
 El operador actualizó hasta la revisión `1006902` y ejecutó `AAO_ENV=test AAO_ENV_FILE=.env.test python -m pytest -v -rs`: **47 passed, 0 failed, 0 skipped, 1 warning** en 2.58 segundos, Python 3.12.13. Pasó `test_ceo_governed_principal_issue_rotate_revoke`, que verifica emisión, rotación, revocación y eventos. Advertencia de deprecación Starlette/httpx. Evidencia local comunicada por el operador; no constituye revisión independiente ni aceptación final de M2.
+
+## Naming refactor — 2026-10-19 (structural changes only)
+
+- Branch: `feat/aao-m0-foundation`; original inspected HEAD: `a58f0f643db82350bcbbc477ac2bb1fae3bdf26a`.
+- Updated the configuration test import and runtime/documentation references to existing responsibility-based names. No applied SQL migration was changed and no external executor was enabled.
+- Repository-level comparison verified that these changes affect the README, the configuration test and operational documentation only.
+- **Validation not yet executed on the amended branch:** pytest collection, full PostgreSQL suite, static analysis, import/link checks and runtime smoke test. The previous `47 passed` result is historical and belongs to commit `1006902c2184fc7fed0f76c677c64ab6599f4669`, not these edits.
+- The large `tests/test_postgresql_workflow_integration.py` suite still groups distinct responsibilities; splitting it safely remains pending and must preserve the disposable database gate.
+- **Acceptance blocked** until local test evidence, inspection of any remaining obsolete references, independent review and competent M2 approval. This note is not an acceptance record.
