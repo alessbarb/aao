@@ -361,3 +361,5 @@ passed; the full suite passed **58 tests**, with compileall, Ruff, `pip check`,
 and `git diff --check` clean. CI has not yet run for this change. This is one
 controlled claim/revocation schedule; it does not prove alternate lock order,
 concurrent hostile schedules, or production behavior.
+
+CI run `39256367714` passed for code commit `20a358b71677a8a132269b89781d843f9c15a936`, including PostgreSQL integration tests, compilation, Ruff, and dependency checks.

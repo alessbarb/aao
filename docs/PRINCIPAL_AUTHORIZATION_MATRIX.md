@@ -1,7 +1,7 @@
 # Principal authorization matrix
 
 **Scope:** current development API and internal execution/reconciliation
-operations, updated through `8189be1a2106f041e6419ef30cddd54ba7602ea8`.
+operations, updated through `20a358b71677a8a132269b89781d843f9c15a936`.
 This is an engineering inventory, not a production authorization policy or
 independent security review. The PostgreSQL API and its internal helpers are
 not a claim of M2 acceptance.
@@ -67,8 +67,8 @@ inside their transaction. The CEO credential is still a single static bearer.
   restart has been manually verified for one expired lease; broad restart and
   crash-recovery schedules remain open.
 - GitHub CI configures a fresh disposable PostgreSQL service and runs the
-  guarded integration suite; run `39256075817` passed on code SHA
-  `8b99abad1ae996d31284eab002ec827f066fb7a6`. Current exact local results and
+  guarded integration suite; run `39256367714` passed on code SHA
+  `20a358b71677a8a132269b89781d843f9c15a936`. Current exact local results and
   prior candidate SHA-specific CI runs are recorded in the evidence register;
   this is not independent review or M2 acceptance.
 - Grant expiry uses `clock_timestamp()` when the locked authorization query is
