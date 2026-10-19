@@ -4,7 +4,7 @@
 Migration 004 provides an explicit worker registration record (disabled by
 default) and an external-effect ledger with unique idempotency keys.
 `worker_auth.py` verifies registered worker credentials and provides an
-explicit opt-in development bootstrap. `pg_effects.py` can **record only**
+explicit opt-in development bootstrap. `external_effect_registry.py` can **record only**
 PROPOSED effects; it contains no execution or approval operation.
 
 ## Safety boundaries
@@ -30,4 +30,4 @@ An opt-in PostgreSQL integration test covers invalid credentials and suspended-p
 
 ## Reconciliation candidate
 
-See [M2 reconciliation](M2_RECONCILIATION.md). The candidate function is intentionally not exposed via API: it currently accepts a caller-supplied reviewer identity and cannot be treated as production authorization. The `execution.reconcile` capability requires an explicit persisted project grant, and no worker is restarted automatically.
+See [M2 reconciliation](EXECUTION_RECOVERY_AND_RECONCILIATION.md). The candidate function is intentionally not exposed via API: it currently accepts a caller-supplied reviewer identity and cannot be treated as production authorization. The `execution.reconcile` capability requires an explicit persisted project grant, and no worker is restarted automatically.
