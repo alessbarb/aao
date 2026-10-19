@@ -1,7 +1,7 @@
 # Principal authorization matrix
 
 **Scope:** current development API and internal execution/reconciliation
-operations, updated through `b804f6a7a307e144cfb4e72d880850de98bfaffe`.
+operations, updated through `23b9787821a193310e6b63e6fa29964ef3f92e2b`.
 This is an engineering inventory, not a production authorization policy or
 independent security review. The PostgreSQL API and its internal helpers are
 not a claim of M2 acceptance.
@@ -80,10 +80,10 @@ register for test status.
   controlled schedules, not exhaustive hostile concurrency coverage.
 - Sequential credential revocation tests and unit mocks that assert SQL text
   do not prove real PostgreSQL lock behavior. Several real lock schedules now
-  cover work creation, queue claim/completion against grant deletion, and
-  queue completion against credential revocation. Other business writes,
-  alternative operation/revocation orderings, reconciliation against grant
-  revocation, and hostile schedules remain untested.
+  cover work creation, queue claim/completion against grant deletion, queue
+  completion against credential revocation, and both reconciliation grant
+  revocation paths in selected orderings. Other business writes, additional
+  dispositions, and hostile schedules remain untested.
 - The full local suite at `a2791349e6000bec56d95cfe0ede587bb631573b` has 66
   tests, including the HTTP token-rotation gap check, grant-row, auditor
   credential-lock, and completion-after-lease-expiry-during-row-lock-wait
