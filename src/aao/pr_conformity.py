@@ -1,6 +1,6 @@
 """Fail-closed conformity gate for an immutable Git revision.
 
-This module verifies signed audit attestations; it does not create auditor identities,
+This module verifies audit attestations signed by a configured key; it does not establish auditor identities,
 review code, or grant promotion authority. Trust roots and reports must be supplied
 outside the candidate checkout by an independently controlled process.
 """
@@ -93,7 +93,7 @@ def evaluate(
     check_results: dict[str, Any],
     implementer_id: str,
 ) -> GateResult:
-    """Evaluate policy, mandatory checks and an independently signed audit report."""
+    """Evaluate trusted policy, mandatory checks and a signed audit report."""
     sha = current_commit(repository)
     reasons: list[str] = []
     repository_root = repository.resolve()
