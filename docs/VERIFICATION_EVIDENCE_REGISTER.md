@@ -73,6 +73,18 @@ check, and diff check passed. GitHub Actions run `39253290548` completed
 successfully on the same SHA. This covers one controlled lock-wait schedule,
 not repeated adversarial race testing or M2 acceptance.
 
+## Completion/quarantine ordering after lease expiry
+
+Commit `9f24450e45f44f128e0de320809b7e6b9f47955b` adds a lease integration
+scenario competing
+completion with `quarantine_expired()` for the same queue row after the
+database-clock deadline. Three consecutive local reruns passed, each asserting
+expired completion is denied and final state is `UNCERTAIN`. The full local
+disposable PostgreSQL suite passed **52 tests** with compileall, Ruff, pip
+check and diff check clean. GitHub Actions run `39253753026` passed on the same
+SHA. This is a bounded controlled schedule, not proof of all
+possible orderings or independent review.
+
 Tras las 43 pruebas confirmadas, se incorporaron las rutas individuales de
 lectura de proyectos/tableros y el bloqueo de tokens compartidos de workers y
 auditores fuera de desarrollo o al establecer
