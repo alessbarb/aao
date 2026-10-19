@@ -110,3 +110,27 @@ After the 50-test baseline at `87779b5d8422d33e7f8befbe87c4e4ff307cee52`, the pr
 - Local checks on that exact revision: `python -m compileall -q src tests` succeeded; `python -m ruff check src tests` passed; `AAO_ENV=test AAO_ENV_FILE=.env.test AAO_TEST_DB_DISPOSABLE=yes python -m pytest -q -rs -W error` completed **51 passed**; `python -m pip check` reported no broken requirements; `git diff --check` passed. Pytest reported no skips or warnings.
 - The PostgreSQL integration cases ran under the explicit disposable-database gate. This is local engineering evidence only; it is not independent security review or M2 acceptance. This run does not demonstrate an actual concurrent revocation race.
 - PR #1 is merged and the branch currently contains this commit beyond its remote-tracking branch. CI for the prior revision `60de4cb7792a3e7a8229f1e9487bdac49f828294` failed; this revision has not yet been pushed and therefore has no CI result here.
+
+## Grant revocation serialization — 2026-10-19
+
+- Revision: `78fd000e65388dbee9fc0aefaa58391ba9541d7c` on
+  `feat/aao-m0-foundation`.
+- Added CEO-only exact grant deletion with an atomic `grant.revoked` event.
+  Protected API reads/writes, queue claim/completion, and reconciliation checks
+  now hold the matched grant tuple under `FOR SHARE`. Grant validity predicates
+  use `clock_timestamp()` rather than PostgreSQL transaction-start `now()`.
+- Added disposable-PostgreSQL tests demonstrating that deletion blocks behind
+  a transaction after `require_grant`, subsequent protected work is denied,
+  and a grant expiring while the check waits behind a row update is denied.
+- Local validation on this exact source tree: `python -m compileall -q src
+  tests`; `python -m ruff check src tests` (**All checks passed**);
+  `AAO_ENV=test AAO_ENV_FILE=.env.test AAO_TEST_DB_DISPOSABLE=yes python -m
+  pytest -q -rs -W error` (**53 passed, 0 skipped, 0 warnings**, 3.66 s);
+  `python -m pip check` (**No broken requirements found**); `git diff --check`
+  passed. These PostgreSQL tests ran under the explicit disposable-database
+  gate.
+- A read-only agent engineering review found no critical lock defect, while
+  noting that the test covers a grant-check transaction rather than a complete
+  business mutation, and that repeated adversarial schedules remain absent.
+  This is not independent formal security review, auditor acceptance or M2
+  closure. CI for this new revision has not yet run.

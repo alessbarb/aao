@@ -2,29 +2,42 @@
 
 ## Current status
 
-Individual project-list reads now revalidate AGENT credential state under
-`FOR SHARE` inside their database transaction; board reads use the same
-transaction-time guard via `require_grant`. The B023 fix and full 51-test local
-validation are recorded at exact commit
-`d080da58d4a8a41749a932d8fdf2c1caec5ac652` in
-`VERIFICATION_EVIDENCE_REGISTER.md`. The implementation still has no proven
-concurrent PostgreSQL revocation race: project-grant rows are not locked in
-the protected request/execution paths, and sequential tests or stubbed SQL
-assertions do not prove lock semantics. Legacy worker registration, provisional
-CEO bearer, untrusted reconciliation reviewer identity and absent independent
+Project-list and board reads revalidate the individual credential and lock
+the matching project grant under `FOR SHARE`. CEO grant deletion is audited in
+the same transaction and waits for protected transactions holding the grant
+row lock. Integration tests demonstrate both revocation serialization and
+expiry while blocked behind a row update at revision
+`78fd000e65388dbee9fc0aefaa58391ba9541d7c`; see
+`VERIFICATION_EVIDENCE_REGISTER.md`. This is bounded engineering evidence,
+not a complete concurrency proof. Legacy worker registration, provisional CEO
+bearer, untrusted reconciliation reviewer identity and absent independent
 security review remain open. M2 is not accepted.
 
 ## Implemented behavior (not accepted as M2)
 
 Individual bearer credentials are initially authenticated before the PostgreSQL work transaction. Previously, project grants only verified the resolved principal identifier and grant, allowing authorization to outlive a concurrent credential revocation.
 
-The require_grant function now verifies the individual credential's enabled state and kind under SELECT FOR SHARE, inside the same transaction as the protected work operation. This serializes against concurrent UPDATE-based revocation and rotation. Review requires AUDITOR; other currently implemented grant capabilities require AGENT. Shared development fallback remains limited to explicitly allowed development identities and capabilities.
+The `require_grant` function verifies the individual credential's enabled
+state and kind, then holds the matching grant row under `SELECT ... FOR SHARE`
+inside the protected transaction. Execution claim/completion and internal
+reconciliation checks also lock their grant rows. CEO grant deletion is the
+current revocation operation and serializes behind those locks. Grant expiry
+checks use database `clock_timestamp()` rather than transaction-start `now()`.
+Review requires AUDITOR; other currently implemented grant capabilities
+require AGENT. Shared development fallback remains limited to explicitly
+allowed development identities and capabilities.
 
 ## Boundaries and remaining risks
 
-- Project listing and board reads now recheck individual credentials under `FOR SHARE`; the grant rows themselves are not locked, so grant revocation/expiry races remain.
+- A PostgreSQL race test verifies that CEO grant deletion waits for an open
+  transaction after `require_grant`, and that subsequent protected work is
+  denied. Another test verifies denial when a grant expires while the check is
+  blocked behind a row lock. These tests are single controlled schedules, not
+  repeated adversarial stress tests.
 - The queue still has legacy worker registrations. Its individual principal path already locks credential rows, but legacy retirement is outstanding.
-- Grant expiry/revocation races and real database concurrent rotation must be tested.
+- Concurrent credential rotation/revocation, grant revocation against queue
+  claim/completion, expiry across long-running operations, and repeated
+  adversarial schedules remain to be tested.
 - CEO authentication remains provisional. No production identity provider, privileged token management, or independent security approval exists.
 - PostgreSQL role isolation, adverse concurrency, audit guarantees and cold-restart recovery remain acceptance gates.
 - External execution and effects remain disabled.
@@ -43,7 +56,6 @@ review nor acceptance of M2.
 Project-list reads for individual agents now revalidate an active AGENT credential under `FOR SHARE` within the same database transaction as the project-scoped listing query. Shared development readers are rechecked against the development-only feature gate. An inactive, missing, or AUDITOR-kind credential is denied before project data is queried. A new isolated unit test covers these states and the SQL boundary. Direct board reads already route through `require_grant`, which checks individual credential state inside its transaction.
 
 The local verification pending at the time of this increment was completed at
-the revision recorded above. Read grants themselves are not locked, and
-project-grant revocation, credential rotation races and database concurrency
-still require adversarial integration tests. The CEO development token is
-provisional. M2 remains open.
+the revision recorded above. This historical project-read checkpoint is
+superseded by the grant-row locking increment cited in the current status. The
+CEO development token remains provisional; M2 remains open.

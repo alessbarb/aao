@@ -16,9 +16,13 @@ or `[BLOCKED]` labels below as live issue statuses.
 1. Retire the `worker_registrations` authentication path and transitional
    shared worker/reviewer credentials without aliases or loss of applicable
    development identities.
-2. Define and enforce grant lifecycle semantics, including transactional
-   grant-row locking/linearization for protected operations and concurrent
-   revocation tests.
+2. **Partially implemented and locally validated:** CEO grant revocation is
+   audited transactionally; API, execution and reconciliation authorization
+   checks lock the matched grant row. PostgreSQL tests cover revocation waiting
+   behind a protected authorization transaction and expiry during lock wait.
+   Still required: repeated/adversarial schedules, real operation mutation and
+   queue claim/completion races, credential rotation races, and review of
+   long-running transaction expiry semantics.
 3. Bind execution/effect reconciliation to authenticated AUDITOR identity and
    transactional authorization before considering any HTTP exposure.
 4. Verify lease expiry, credential/grant revocation, effect proposal/retry,
