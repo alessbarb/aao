@@ -10,6 +10,7 @@ import pytest
 from aao import local_candidate_controller, sandboxed_repository_checks
 from aao.local_candidate_controller import (
     CandidateControllerError,
+    RepositoryCheckError,
     register_candidate,
     request_promotion,
     run_integration_check,
@@ -202,6 +203,33 @@ def test_ref_movement_invalidates_manifest_before_running_checks(
     )
     with pytest.raises(CandidateControllerError, match="target ref moved"):
         run_integration_check(root, record["candidate_id"], state)
+
+
+def test_unavailable_sandbox_check_is_persisted_and_worktree_is_cleaned(
+    tmp_path: Path,
+    repository: tuple[Path, str, str, str],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    root, target, candidate, target_ref = repository
+    state = tmp_path / "state"
+    record = register_candidate(root, target, candidate, state, target_ref=target_ref)
+    worktrees_before = _git(root, "worktree", "list", "--porcelain")
+
+    def unavailable(*_args: object, **_kwargs: object) -> dict[str, object]:
+        raise RepositoryCheckError("sandbox unavailable")
+
+    monkeypatch.setattr("aao.local_candidate_controller.run_repository_check", unavailable)
+    evidence = run_integration_check(root, record["candidate_id"], state)
+
+    assert evidence["conclusion"] == "unavailable"
+    assert evidence["reason"] == "sandbox unavailable"
+    assert evidence["promotion"] == "disabled"
+    assert evidence["independent_audit"] == "not_provided_by_this_controller"
+    assert _git(root, "worktree", "list", "--porcelain") == worktrees_before
+    persisted = json.loads(
+        (state / f"{record['candidate_id']}.integration.json").read_text(encoding="utf-8")
+    )
+    assert persisted["evidence_sha256"] == evidence["evidence_sha256"]
 
 
 def test_promotion_is_unconditionally_blocked() -> None:
