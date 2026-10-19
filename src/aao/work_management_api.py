@@ -15,7 +15,7 @@ from aao.environment_settings import load_local_env
 load_local_env()
 
 from fastapi import Depends, FastAPI, Header, HTTPException
-from fastapi.responses import FileResponse, Response
+from fastapi.responses import FileResponse, JSONResponse, Response
 from pydantic import BaseModel, Field
 
 from aao.planner import Admission, decide_admission
@@ -277,7 +277,7 @@ def projects(principal: str = Depends(read_principal)):
         return [{"id": r[0], "name": r[1], "state": r[2]} for r in rows]
 
 
-@app.post("/v1/projects/{project_id}/grants", status_code=201)
+@app.post("/v1/projects/{project_id}/grants")
 def grant(project_id: str, payload: GrantRequest, _: str = Depends(require_ceo)):
     with tx() as db:
         if not db.execute("SELECT 1 FROM projects WHERE id=%s", (project_id,)).fetchone():
@@ -299,14 +299,22 @@ def grant(project_id: str, payload: GrantRequest, _: str = Depends(require_ceo))
             raise HTTPException(
                 422, f"Capability requires a {required_kind} principal",
             )
-        db.execute(
+        inserted = db.execute(
             "INSERT INTO project_grants(principal_id,project_id,capability) VALUES (%s,%s,%s) "
-            "ON CONFLICT DO NOTHING",
+            "ON CONFLICT DO NOTHING RETURNING project_id",
             (payload.principal_id, project_id, payload.capability),
-        )
-        audit(db, project_id, "grant.created",
-              {"principal_id": payload.principal_id, "capability": payload.capability})
-    return {"project_id": project_id, "capability": payload.capability}
+        ).fetchone()
+        if inserted:
+            audit(db, project_id, "grant.created",
+                  {"principal_id": payload.principal_id, "capability": payload.capability})
+    return JSONResponse(
+        status_code=201 if inserted else 200,
+        content={
+            "project_id": project_id,
+            "capability": payload.capability,
+            "created": bool(inserted),
+        },
+    )
 
 
 @app.delete("/v1/projects/{project_id}/grants/{principal_id}/{capability}", status_code=204)

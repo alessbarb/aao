@@ -76,6 +76,7 @@ def test_postgres_mandate_project_grant_work_admission(monkeypatch):
     reason="Explicit disposable PostgreSQL test database required",
 )
 def test_grant_creation_requires_active_principal_with_matching_kind(monkeypatch):
+    from aao.postgresql_connection import connect_postgres
     from aao.work_management_api import app
 
     monkeypatch.setenv("AAO_POSTGRES_URL", os.environ["AAO_TEST_POSTGRES_URL"])
@@ -116,6 +117,21 @@ def test_grant_creation_requires_active_principal_with_matching_kind(monkeypatch
             "principal_id": auditor, "capability": "work.review",
         })
         assert valid_agent.status_code == valid_auditor.status_code == 201
+        duplicate = client.post(f"/v1/projects/{project}/grants", headers=ceo, json={
+            "principal_id": agent, "capability": "work.create",
+        })
+        assert duplicate.status_code == 200, duplicate.text
+        assert duplicate.json() == {
+            "project_id": project, "capability": "work.create", "created": False,
+        }
+        with connect_postgres() as db:
+            event_count = db.execute(
+                "SELECT count(*) FROM events WHERE subject_id=%s "
+                "AND kind='grant.created' AND details->>'principal_id'=%s "
+                "AND details->>'capability'='work.create'",
+                (project, agent),
+            ).fetchone()[0]
+        assert event_count == 1
         revoked = "revoked-grantee-" + str(uuid4())
         issued = client.post("/v1/principals/credentials", headers=ceo, json={
             "principal_id": revoked, "kind": "AGENT",
