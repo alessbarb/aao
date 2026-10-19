@@ -15,6 +15,7 @@ from fastapi.testclient import TestClient
     reason="Explicit disposable PostgreSQL database required",
 )
 def test_postgres_inert_staging_is_default_off_and_idempotent(monkeypatch):
+    from aao.execution_queue import claim, state
     from aao.work_management_api import app
     monkeypatch.setenv("AAO_POSTGRES_URL", os.environ["AAO_TEST_POSTGRES_URL"])
     monkeypatch.setenv("AAO_CEO_TOKEN", "test-ceo")
@@ -53,6 +54,33 @@ def test_postgres_inert_staging_is_default_off_and_idempotent(monkeypatch):
         again = client.post(f"/v1/work/{wid}/stage-inert", headers=worker)
         assert again.status_code == 202, again.text
         assert first.json()["execution_id"] == again.json()["execution_id"]
+
+        execution_id = first.json()["execution_id"]
+        token = worker["X-Agent-Token"]
+
+    lease = claim(worker_id, agent_credential=token, project_id=pid)
+    assert lease["execution_id"] == execution_id
+    before_replay = state(execution_id)
+    assert before_replay["status"] == "RUNNING"
+    assert before_replay["attempts"] == 1
+    with TestClient(app) as reconnected_client:
+        replay = reconnected_client.post(f"/v1/work/{wid}/stage-inert", headers=worker)
+    assert replay.status_code == 202, replay.text
+    assert replay.json() == {"execution_id": execution_id, "status": "RUNNING"}
+    after_replay = state(execution_id)
+    assert after_replay["attempts"] == before_replay["attempts"]
+    assert after_replay["status"] == "RUNNING"
+    from aao.postgresql_connection import connect_postgres
+    with connect_postgres() as db:
+        rows = db.execute(
+            "SELECT count(*) FROM execution_queue WHERE work_id=%s", (wid,),
+        ).fetchone()[0]
+        journal_entries = db.execute(
+            "SELECT count(*) FROM execution_journal WHERE execution_id=%s "
+            "AND kind='claimed'", (execution_id,),
+        ).fetchone()[0]
+    assert rows == 1
+    assert journal_entries == 1
 
 
 @pytest.mark.skipif(
