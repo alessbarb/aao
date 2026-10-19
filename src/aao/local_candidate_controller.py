@@ -22,7 +22,9 @@ from typing import Any
 from aao.sandboxed_repository_checks import RepositoryCheckError, run_repository_check
 
 _SHA = re.compile(r"^[0-9a-f]{40}$")
-_SCHEMA = "aao.local-candidate.v1"
+_SCHEMA = "aao.local-candidate.v2"
+_MANIFEST_SCHEMA = "aao.candidate-manifest.v1"
+_EVIDENCE_SCHEMA = "aao.local-integration-evidence.v2"
 PROMOTION_ENABLED = False
 
 
@@ -67,6 +69,28 @@ def _resolve_commit(repository: Path, revision: str) -> str:
     return resolved
 
 
+def _resolve_target_ref(repository: Path, target_ref: str, target_sha: str) -> str:
+    if not isinstance(target_ref, str) or not target_ref.startswith("refs/heads/"):
+        raise CandidateControllerError("full refs/heads ref required")
+    try:
+        _git(repository, "check-ref-format", target_ref)
+        resolved = _git(repository, "rev-parse", "--verify", f"{target_ref}^{{commit}}")
+    except CandidateControllerError as exc:
+        raise CandidateControllerError("target ref is invalid or unavailable") from exc
+    if resolved != target_sha:
+        raise CandidateControllerError("target ref moved or does not resolve to target SHA")
+    return target_ref
+
+
+def _candidate_trees(repository: Path, target_sha: str, candidate_sha: str) -> tuple[str, str]:
+    candidate_tree = _git(repository, "rev-parse", "--verify", f"{candidate_sha}^{{tree}}")
+    merge_output = _git(repository, "merge-tree", "--write-tree", target_sha, candidate_sha)
+    result_tree = merge_output.splitlines()[0] if merge_output else ""
+    if not _SHA.fullmatch(candidate_tree) or not _SHA.fullmatch(result_tree):
+        raise CandidateControllerError("Git did not produce valid candidate and result trees")
+    return candidate_tree, result_tree
+
+
 def _state_path(repository: Path, state_directory: str | Path, *, create: bool) -> Path:
     state = Path(state_directory).expanduser().resolve()
     if state == repository or state.is_relative_to(repository):
@@ -106,11 +130,17 @@ def _record_digest(value: dict[str, Any]) -> str:
     return hashlib.sha256(payload).hexdigest()
 
 
+def _candidate_identifier(target_ref: str, target_sha: str, candidate_sha: str) -> str:
+    return hashlib.sha256(f"{target_ref}:{target_sha}:{candidate_sha}".encode()).hexdigest()
+
+
 def register_candidate(
     repository: str | Path,
     target_sha: str,
     candidate_sha: str,
     state_directory: str | Path,
+    *,
+    target_ref: str,
 ) -> dict[str, Any]:
     """Register a target/candidate pair without changing refs or worktrees."""
     root = Path(repository).resolve()
@@ -118,20 +148,41 @@ def register_candidate(
         raise CandidateControllerError("Git repository unavailable")
     target = _resolve_commit(root, target_sha)
     candidate = _resolve_commit(root, candidate_sha)
+    resolved_target_ref = _resolve_target_ref(root, target_ref, target)
+    candidate_tree, result_tree = _candidate_trees(root, target, candidate)
     state = _state_path(root, state_directory, create=True)
-    candidate_id = hashlib.sha256(f"{target}:{candidate}".encode()).hexdigest()
+    candidate_id = _candidate_identifier(resolved_target_ref, target, candidate)
+    manifest = {
+        "schema": _MANIFEST_SCHEMA,
+        "repository": str(root),
+        "target_ref": resolved_target_ref,
+        "target_sha": target,
+        "candidate_sha": candidate,
+        "candidate_tree": candidate_tree,
+        "result_tree": result_tree,
+        "producer": f"aao.local_candidate_controller:uid:{os.geteuid()}",
+    }
+    manifest_path = state / f"{candidate_id}.manifest.json"
+    path = state / f"{candidate_id}.json"
+    if path.exists():
+        raise CandidateControllerError("candidate pair already registered; refusing overwrite")
+    if manifest_path.exists():
+        raise CandidateControllerError("candidate manifest already exists; refusing overwrite")
+    manifest_digest = _write_json(manifest_path, manifest)
     record = {
         "schema": _SCHEMA,
         "candidate_id": candidate_id,
         "repository": str(root),
+        "target_ref": resolved_target_ref,
         "target_sha": target,
         "candidate_sha": candidate,
+        "candidate_tree": candidate_tree,
+        "result_tree": result_tree,
+        "manifest_path": str(manifest_path),
+        "manifest_sha256": manifest_digest,
         "registered_at": datetime.now(UTC).isoformat(),
         "promotion": "disabled",
     }
-    path = state / f"{candidate_id}.json"
-    if path.exists():
-        raise CandidateControllerError("candidate pair already registered; refusing overwrite")
     record["record_sha256"] = _record_digest(record)
     _write_json(path, record)
     return record
@@ -153,6 +204,30 @@ def _load_record(repository: Path, candidate_id: str, state: Path) -> dict[str, 
         raise CandidateControllerError("candidate record belongs to another repository")
     if record.get("candidate_id") != candidate_id:
         raise CandidateControllerError("candidate record identifier mismatch")
+    if candidate_id != _candidate_identifier(
+        record.get("target_ref", ""), record.get("target_sha", ""), record.get("candidate_sha", "")
+    ):
+        raise CandidateControllerError("candidate record tuple does not match identifier")
+    manifest_path = state / f"{candidate_id}.manifest.json"
+    if record.get("manifest_path") != str(manifest_path):
+        raise CandidateControllerError("candidate manifest path mismatch")
+    if manifest_path.is_symlink() or not manifest_path.is_file():
+        raise CandidateControllerError("candidate manifest is not a regular file")
+    try:
+        manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    except (OSError, ValueError) as exc:
+        raise CandidateControllerError("candidate manifest unavailable or malformed") from exc
+    if (
+        manifest.get("schema") != _MANIFEST_SCHEMA
+        or _record_digest(manifest) != record.get("manifest_sha256")
+        or manifest.get("repository") != str(repository)
+        or manifest.get("target_ref") != record.get("target_ref")
+        or manifest.get("target_sha") != record.get("target_sha")
+        or manifest.get("candidate_sha") != record.get("candidate_sha")
+        or manifest.get("candidate_tree") != record.get("candidate_tree")
+        or manifest.get("result_tree") != record.get("result_tree")
+    ):
+        raise CandidateControllerError("candidate manifest integrity check failed")
     return record
 
 
@@ -177,10 +252,10 @@ def run_integration_check(
         raise CandidateControllerError("integration evidence already exists; refusing overwrite")
     target = _resolve_commit(root, record["target_sha"])
     candidate = _resolve_commit(root, record["candidate_sha"])
-    merge_tree = _git(root, "merge-tree", "--write-tree", target, candidate)
-    tree = merge_tree.splitlines()[0] if merge_tree else ""
-    if not re.fullmatch(r"[0-9a-f]{40}", tree):
-        raise CandidateControllerError("Git did not produce a valid integration tree")
+    _resolve_target_ref(root, record["target_ref"], target)
+    candidate_tree, result_tree = _candidate_trees(root, target, candidate)
+    if candidate_tree != record["candidate_tree"] or result_tree != record["result_tree"]:
+        raise CandidateControllerError("candidate manifest tree does not match repository")
     commit_env = {
             "PATH": "/usr/bin:/bin",
             "HOME": "/nonexistent",
@@ -194,7 +269,7 @@ def run_integration_check(
         }
     try:
         synthetic = subprocess.run(
-            ["git", "-C", str(root), "commit-tree", tree, "-p", target, "-p", candidate],
+            ["git", "-C", str(root), "commit-tree", result_tree, "-p", target, "-p", candidate],
             input=f"AAO disposable integration {candidate_id}\n",
             capture_output=True,
             text=True,
@@ -218,10 +293,13 @@ def run_integration_check(
             worktree_added = True
             check = run_repository_check(checkout, check_id)
             result = {
-                "schema": "aao.local-integration-evidence.v1",
+                "schema": _EVIDENCE_SCHEMA,
                 "candidate_id": candidate_id,
                 "target_sha": target,
                 "candidate_sha": candidate,
+                "candidate_tree": candidate_tree,
+                "result_tree": result_tree,
+                "manifest_sha256": record["manifest_sha256"],
                 "integration_sha": integrated_sha,
                 "check_id": check_id,
                 "check": check,
@@ -232,10 +310,13 @@ def run_integration_check(
             }
         except RepositoryCheckError as exc:
             result = {
-                "schema": "aao.local-integration-evidence.v1",
+                "schema": _EVIDENCE_SCHEMA,
                 "candidate_id": candidate_id,
                 "target_sha": target,
                 "candidate_sha": candidate,
+                "candidate_tree": candidate_tree,
+                "result_tree": result_tree,
+                "manifest_sha256": record["manifest_sha256"],
                 "integration_sha": integrated_sha,
                 "check_id": check_id,
                 "conclusion": "unavailable",
@@ -270,6 +351,7 @@ def main() -> int:
     register = commands.add_parser("register", help="record immutable target/candidate commits")
     register.add_argument("--repository", type=Path, required=True)
     register.add_argument("--target-sha", required=True)
+    register.add_argument("--target-ref", required=True)
     register.add_argument("--candidate-sha", required=True)
     register.add_argument("--state-directory", type=Path, required=True)
     check = commands.add_parser("check", help="test the exact pair in a disposable worktree")
@@ -282,7 +364,11 @@ def main() -> int:
     try:
         if args.operation == "register":
             result = register_candidate(
-                args.repository, args.target_sha, args.candidate_sha, args.state_directory
+                args.repository,
+                args.target_sha,
+                args.candidate_sha,
+                args.state_directory,
+                target_ref=args.target_ref,
             )
         elif args.operation == "check":
             result = run_integration_check(

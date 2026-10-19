@@ -25,7 +25,7 @@ def _git(repository: Path, *args: str) -> str:
 
 
 @pytest.fixture
-def repository(tmp_path: Path) -> tuple[Path, str, str]:
+def repository(tmp_path: Path) -> tuple[Path, str, str, str]:
     root = tmp_path / "repo"
     root.mkdir()
     _git(tmp_path, "init", "-q", str(root))
@@ -43,15 +43,45 @@ def repository(tmp_path: Path) -> tuple[Path, str, str]:
     _git(root, "commit", "-qam", "candidate")
     candidate = _git(root, "rev-parse", "HEAD")
     _git(root, "checkout", "-q", base_branch)
-    return root, target, candidate
+    return root, target, candidate, f"refs/heads/{base_branch}"
 
 
 def test_register_and_check_disposable_integration_without_mutating_checkout(
-    tmp_path: Path, repository: tuple[Path, str, str], monkeypatch: pytest.MonkeyPatch
+    tmp_path: Path, repository: tuple[Path, str, str, str], monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    root, target, candidate = repository
+    root, target, candidate, target_ref = repository
     state = tmp_path / "state"
-    record = register_candidate(root, target, candidate, state)
+    record = register_candidate(root, target, candidate, state, target_ref=target_ref)
+    manifest_path = Path(record["manifest_path"])
+    manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    assert set(manifest) == {
+        "schema",
+        "repository",
+        "target_ref",
+        "target_sha",
+        "candidate_sha",
+        "candidate_tree",
+        "result_tree",
+        "producer",
+    }
+    assert manifest["schema"] == "aao.candidate-manifest.v1"
+    assert manifest["repository"] == str(root)
+    assert manifest["target_ref"] == target_ref
+    assert manifest["target_sha"] == target
+    assert manifest["candidate_sha"] == candidate
+    assert manifest["candidate_tree"] == _git(root, "rev-parse", f"{candidate}^{{tree}}")
+    assert manifest["result_tree"] == _git(root, "merge-tree", "--write-tree", target, candidate).splitlines()[0]
+    assert manifest["producer"].startswith("aao.local_candidate_controller:uid:")
+    assert record["manifest_sha256"] == hashlib.sha256(
+        json.dumps(manifest, sort_keys=True, separators=(",", ":"), ensure_ascii=False).encode()
+    ).hexdigest()
+    manifest_path.write_text(json.dumps({**manifest, "result_tree": target}), encoding="utf-8")
+    with pytest.raises(CandidateControllerError, match="manifest integrity check failed"):
+        run_integration_check(root, record["candidate_id"], state)
+    manifest_path.write_text(
+        json.dumps(manifest, sort_keys=True, separators=(",", ":"), ensure_ascii=False),
+        encoding="utf-8",
+    )
     initial_head = _git(root, "rev-parse", "HEAD")
     initial_refs = _git(root, "for-each-ref", "--format=%(refname) %(objectname)")
     seen: dict[str, str] = {}
@@ -67,9 +97,12 @@ def test_register_and_check_disposable_integration_without_mutating_checkout(
     monkeypatch.setattr("aao.local_candidate_controller.run_repository_check", fake_check)
     evidence = run_integration_check(root, record["candidate_id"], state)
 
+    assert evidence["schema"] == "aao.local-integration-evidence.v2"
     assert evidence["conclusion"] == "success"
     assert evidence["candidate_sha"] == candidate
     assert evidence["target_sha"] == target
+    assert evidence["manifest_sha256"] == record["manifest_sha256"]
+    assert evidence["result_tree"] == manifest["result_tree"]
     assert evidence["integration_sha"] == seen["sha"]
     assert len(seen["parent_count"].split()) == 3
     assert seen["check_id"] == "core-unit"
@@ -88,34 +121,45 @@ def test_register_and_check_disposable_integration_without_mutating_checkout(
 
 
 def test_rejects_short_sha_and_candidate_state_inside_repository(
-    tmp_path: Path, repository: tuple[Path, str, str]
+    tmp_path: Path, repository: tuple[Path, str, str, str]
 ) -> None:
-    root, target, candidate = repository
+    root, target, candidate, target_ref = repository
     with pytest.raises(CandidateControllerError, match="full immutable commit SHA"):
-        register_candidate(root, target[:8], candidate, tmp_path / "state")
+        register_candidate(root, target[:8], candidate, tmp_path / "state", target_ref=target_ref)
     with pytest.raises(CandidateControllerError, match="outside the repository"):
-        register_candidate(root, target, candidate, root / ".aao-state")
+        register_candidate(root, target, candidate, root / ".aao-state", target_ref=target_ref)
+    with pytest.raises(CandidateControllerError, match="full refs/heads ref"):
+        register_candidate(root, target, candidate, tmp_path / "invalid-ref-state", target_ref="main")
+    with pytest.raises(CandidateControllerError, match="does not resolve to target SHA"):
+        register_candidate(
+            root,
+            candidate,
+            candidate,
+            tmp_path / "mismatched-ref-state",
+            target_ref=target_ref,
+        )
 
 
 def test_rejects_non_private_existing_state_directory(
-    tmp_path: Path, repository: tuple[Path, str, str]
+    tmp_path: Path, repository: tuple[Path, str, str, str]
 ) -> None:
-    root, target, candidate = repository
+    root, target, candidate, target_ref = repository
     state = tmp_path / "shared-state"
     state.mkdir(mode=0o755)
     state.chmod(0o755)
     with pytest.raises(CandidateControllerError, match="must be private"):
-        register_candidate(root, target, candidate, state)
+        register_candidate(root, target, candidate, state, target_ref=target_ref)
 
 
 def test_rejects_duplicate_record_tampering_and_unallowlisted_check(
-    tmp_path: Path, repository: tuple[Path, str, str], monkeypatch: pytest.MonkeyPatch
+    tmp_path: Path, repository: tuple[Path, str, str, str], monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    root, target, candidate = repository
+    root, target, candidate, target_ref = repository
     state = tmp_path / "state"
-    record = register_candidate(root, target, candidate, state)
+    record = register_candidate(root, target, candidate, state, target_ref=target_ref)
+    assert record["schema"] == "aao.local-candidate.v2"
     with pytest.raises(CandidateControllerError, match="already registered"):
-        register_candidate(root, target, candidate, state)
+        register_candidate(root, target, candidate, state, target_ref=target_ref)
     path = state / f"{record['candidate_id']}.json"
     payload = json.loads(path.read_text(encoding="utf-8"))
     payload["candidate_sha"] = target
@@ -128,6 +172,27 @@ def test_rejects_duplicate_record_tampering_and_unallowlisted_check(
         run_integration_check(root, record["candidate_id"], state)
     with pytest.raises(CandidateControllerError, match="fixed core-unit"):
         run_integration_check(root, record["candidate_id"], state, check_id="arbitrary")
+
+
+def test_ref_movement_invalidates_manifest_before_running_checks(
+    tmp_path: Path,
+    repository: tuple[Path, str, str, str],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    root, target, candidate, target_ref = repository
+    state = tmp_path / "state"
+    record = register_candidate(root, target, candidate, state, target_ref=target_ref)
+    current_branch = target_ref.removeprefix("refs/heads/")
+    _git(root, "checkout", "-q", current_branch)
+    (root / "target-change.txt").write_text("moved\n", encoding="utf-8")
+    _git(root, "add", "target-change.txt")
+    _git(root, "commit", "-qm", "move target ref")
+    monkeypatch.setattr(
+        "aao.local_candidate_controller.run_repository_check",
+        lambda *_args, **_kwargs: pytest.fail("must reject before running checks"),
+    )
+    with pytest.raises(CandidateControllerError, match="target ref moved"):
+        run_integration_check(root, record["candidate_id"], state)
 
 
 def test_promotion_is_unconditionally_blocked() -> None:
