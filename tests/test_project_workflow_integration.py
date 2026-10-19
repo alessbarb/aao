@@ -582,3 +582,91 @@ def test_grant_expiring_while_lock_waiting_is_denied(monkeypatch):
             assert waiting, "grant check did not wait for the held row lock"
             time.sleep(1.1)
         assert check.result(timeout=5) == "denied"
+
+
+@pytest.mark.skipif(
+    not os.getenv("AAO_TEST_POSTGRES_URL") or os.getenv("AAO_TEST_DB_DISPOSABLE") != "yes",
+    reason="Explicit disposable PostgreSQL database required",
+)
+def test_registered_repository_check_requires_task_selection_before_queue_claim(monkeypatch):
+    from aao.execution_queue import claim
+    from aao.work_management_api import app
+
+    monkeypatch.setenv("AAO_POSTGRES_URL", os.environ["AAO_TEST_POSTGRES_URL"])
+    monkeypatch.setenv("AAO_CEO_TOKEN", "capability-check-ceo")
+    monkeypatch.setenv("AAO_SANDBOX_QUEUE_ENABLED", "true")
+    ceo = {"X-CEO-Token": "capability-check-ceo"}
+    with TestClient(app) as client:
+        identity = "check-agent-" + str(uuid4())
+        issued = client.post("/v1/principals/credentials", headers=ceo, json={
+            "principal_id": identity, "kind": "AGENT",
+        })
+        assert issued.status_code == 201, issued.text
+        agent = {"X-Agent-Token": issued.json()["token"]}
+        mandate = client.post("/v1/mandates", headers=ceo, json={
+            "title": "Repository check " + str(uuid4()), "objective": "Test bounded repo check",
+        }).json()["id"]
+        assert client.post(f"/v1/mandates/{mandate}/confirm", headers=ceo).status_code == 200
+        project = client.post("/v1/projects", headers=ceo, json={
+            "name": "Repository check", "mandate_id": mandate,
+        }).json()["id"]
+        for capability in ("work.create", "work.admit", "execution.claim", "project.read"):
+            assert client.post(f"/v1/projects/{project}/grants", headers=ceo, json={
+                "principal_id": identity, "capability": capability,
+            }).status_code == 201
+        work = client.post(f"/v1/projects/{project}/work", headers=agent, json={
+            "title": "Run registered core checks", "author_id": identity,
+            "acceptance_criteria": ["Exact fixed check is executed in sandbox"],
+        }).json()["id"]
+        registered = client.post(f"/v1/projects/{project}/capabilities", headers=agent, json={
+            "capability_id": "aao.repository-check", "version": "1.0.0",
+            "capability_type": "cli_script", "provenance": {"kind": "repository"},
+            "contract": {
+                "purpose": "Run fixed allow-listed core tests",
+                "entrypoint": "aao.sandboxed_repository_checks:core-unit",
+                "inputs": ["fixed core-unit check id"],
+                "outputs": ["test result and exact candidate SHA"],
+                "platform": "Linux with bubblewrap",
+            },
+            "required_permissions": ["execution.claim"], "risks": ["local test code runs"],
+            "dependencies": [], "tests": ["tests/test_sandboxed_repository_checks.py"],
+            "compatibility": {}, "evidence": ["repo source"],
+        })
+        assert registered.status_code == 201, registered.text
+        evaluation = client.post(
+            f"/v1/projects/{project}/capability-evaluations", headers=agent,
+            json={
+                "task_id": work,
+                "options": [
+                    {"choice": choice, "fit": fit, "security": fit, "cost": fit,
+                     "time": fit, "tokens": fit, "maintenance": fit}
+                    for choice, fit in (("reuse", 5), ("adapt", 3), ("build", 1))
+                ],
+                "rationale": "Reuse the checked-in fixed sandbox instead of building a new tool.",
+                "evidence": ["tests/test_sandboxed_repository_checks.py"],
+                "capability_id": "aao.repository-check", "version": "1.0.0",
+            },
+        )
+        assert evaluation.status_code == 201, evaluation.text
+        assert evaluation.json()["recommendation"] == "reuse"
+        assert client.post(f"/v1/work/{work}/admit", headers=agent).status_code == 200
+        request = {"capability_id": "aao.repository-check", "version": "1.0.0",
+                   "check_id": "core-unit"}
+        not_selected = client.post(
+            f"/v1/work/{work}/stage-repository-check", headers=agent,
+            json={**request, "capability_id": "other"},
+        )
+        assert not_selected.status_code == 409
+        staged = client.post(
+            f"/v1/work/{work}/stage-repository-check", headers=agent, json=request,
+        )
+        assert staged.status_code == 202, staged.text
+        lease = claim(identity, agent_credential=issued.json()["token"], project_id=project)
+        assert lease["input"] == {
+            "type": "aao.repository-check.v1", "check_id": "core-unit",
+            "capability_id": "aao.repository-check", "version": "1.0.0",
+        }
+        board = client.get(f"/v1/projects/{project}/board", headers=agent)
+        execution = board.json()[0]["executions"][0]
+        assert execution["id"] == staged.json()["execution_id"]
+        assert execution["status"] == "RUNNING"

@@ -143,6 +143,12 @@ class CapabilityEvaluationRequest(BaseModel):
     version: str | None = Field(default=None, max_length=64)
 
 
+class RepositoryCheckRequest(BaseModel):
+    capability_id: str = Field(min_length=1, max_length=128, pattern=r"^[a-zA-Z0-9._-]+$")
+    version: str = Field(min_length=1, max_length=64)
+    check_id: str = Field(pattern=r"^core-unit$")
+
+
 app = FastAPI(title="AAO PostgreSQL development core", version="0.2.0")
 _CEO_PRINCIPAL = object()
 
@@ -462,12 +468,18 @@ def board(project_id: str, principal: str = Depends(read_principal)):
         if principal is not _CEO_PRINCIPAL:
             require_grant(db, principal, project_id, "project.read")
         rows = db.execute(
-            "SELECT id,title,status,acceptance_criteria,evidence FROM work_items "
-            "WHERE project_id=%s ORDER BY id", (project_id,),
+            "SELECT w.id,w.title,w.status,w.acceptance_criteria,w.evidence,"
+            "COALESCE((SELECT json_agg(json_build_object('id',q.id,'status',q.status,"
+            "'worker_id',q.worker_id,'attempts',q.attempts,'created_at',q.created_at,"
+            "'result',q.result_json) ORDER BY q.created_at,q.id) FROM execution_queue q "
+            "WHERE q.work_id=w.id),'[]'::json) "
+            "FROM work_items w "
+            "WHERE w.project_id=%s ORDER BY w.id", (project_id,),
         ).fetchall()
         return [
             {"id": r[0], "title": r[1], "status": r[2],
-             "acceptance_criteria": r[3], "evidence": r[4]} for r in rows
+             "acceptance_criteria": r[3], "evidence": r[4],
+             "executions": r[5]} for r in rows
         ]
 
 
@@ -766,3 +778,70 @@ def stage_inert(work_id: str, principal: str = Depends(require_worker)):
         )
         audit(db, execution_id, "execution.staged", {"work_id": work_id})
     return {"execution_id": execution_id, "status": "QUEUED"}
+
+
+@app.post("/v1/work/{work_id}/stage-repository-check", status_code=202)
+def stage_repository_check(
+    work_id: str, payload: RepositoryCheckRequest,
+    principal: str = Depends(require_worker),
+):
+    """Stage only the fixed repository-check tool selected from this project's registry."""
+    if os.getenv("AAO_SANDBOX_QUEUE_ENABLED") != "true":
+        raise HTTPException(503, "Sandbox queue disabled")
+    job = {
+        "type": "aao.repository-check.v1", "check_id": payload.check_id,
+        "capability_id": payload.capability_id, "version": payload.version,
+    }
+    with tx() as db:
+        work = db.execute(
+            "SELECT project_id,status FROM work_items WHERE id=%s FOR UPDATE",
+            (work_id,),
+        ).fetchone()
+        if not work:
+            raise HTTPException(404, "Work not found")
+        project_id, status = work
+        project = db.execute(
+            "SELECT state FROM projects WHERE id=%s FOR SHARE", (project_id,),
+        ).fetchone()
+        if not project or project[0] != "ACTIVE" or status != "READY":
+            raise HTTPException(409, "Work not ready in active project")
+        require_grant(db, principal, project_id, "work.admit")
+        require_grant(db, principal, project_id, "execution.claim")
+        capability = db.execute(
+            "SELECT capability_type,status,contract->>'entrypoint' "
+            "FROM capability_versions WHERE project_id=%s AND capability_id=%s "
+            "AND version=%s FOR SHARE",
+            (project_id, payload.capability_id, payload.version),
+        ).fetchone()
+        if (not capability or capability[0] != "cli_script"
+                or capability[1] != "registered_local"
+                or capability[2] != "aao.sandboxed_repository_checks:core-unit"):
+            raise HTTPException(409, "Selected repository-check capability is unavailable")
+        evaluation = db.execute(
+            "SELECT 1 FROM events WHERE subject_id=%s AND kind='capability.evaluated' "
+            "AND details->>'capability_id'=%s AND details->>'version'=%s "
+            "AND details->>'recommendation' IN ('reuse','adapt') LIMIT 1",
+            (work_id, payload.capability_id, payload.version),
+        ).fetchone()
+        if not evaluation:
+            raise HTTPException(409, "Capability must be selected for this task before staging")
+        existing = db.execute(
+            "SELECT id,status,input_json FROM execution_queue WHERE work_id=%s",
+            (work_id,),
+        ).fetchone()
+        if existing:
+            if existing[2] != job:
+                raise HTTPException(409, "A different execution is already recorded")
+            return {"execution_id": str(existing[0]), "status": existing[1]}
+        execution_id = str(uuid4())
+        db.execute(
+            "INSERT INTO execution_queue(id,work_id,project_id,status,input_json) "
+            "VALUES (%s,%s,%s,'QUEUED',%s::jsonb)",
+            (execution_id, work_id, project_id, json.dumps(job)),
+        )
+        audit(db, execution_id, "execution.staged", {
+            "work_id": work_id, "capability_id": payload.capability_id,
+            "version": payload.version, "check_id": payload.check_id,
+        })
+    return {"execution_id": execution_id, "status": "QUEUED",
+            "capability_id": payload.capability_id, "version": payload.version}
