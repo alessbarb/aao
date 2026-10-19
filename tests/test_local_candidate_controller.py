@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import hashlib
 import json
 import subprocess
 from pathlib import Path
@@ -79,6 +80,11 @@ def test_register_and_check_disposable_integration_without_mutating_checkout(
     assert len(_git(root, "worktree", "list", "--porcelain").split("worktree ")) == 2
     saved = json.loads((state / f"{record['candidate_id']}.integration.json").read_text())
     assert saved["integration_sha"] == evidence["integration_sha"]
+    digest_payload = {key: value for key, value in saved.items() if key != "evidence_sha256"}
+    canonical = json.dumps(digest_payload, sort_keys=True, separators=(",", ":"), ensure_ascii=False).encode()
+    assert saved["evidence_sha256"] == hashlib.sha256(canonical).hexdigest()
+    with pytest.raises(CandidateControllerError, match="evidence already exists"):
+        run_integration_check(root, record["candidate_id"], state)
 
 
 def test_rejects_short_sha_and_candidate_state_inside_repository(

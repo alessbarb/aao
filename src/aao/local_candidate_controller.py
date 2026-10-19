@@ -83,12 +83,21 @@ def _state_path(repository: Path, state_directory: str | Path, *, create: bool) 
 def _write_json(path: Path, value: dict[str, Any]) -> str:
     payload = json.dumps(value, sort_keys=True, separators=(",", ":"), ensure_ascii=False).encode()
     digest = hashlib.sha256(payload).hexdigest()
-    flags = os.O_WRONLY | os.O_CREAT | os.O_EXCL
-    descriptor = os.open(path, flags, 0o600)
-    with os.fdopen(descriptor, "wb") as stream:
-        stream.write(payload)
-        stream.flush()
-        os.fsync(stream.fileno())
+    descriptor, temporary_name = tempfile.mkstemp(prefix=f".{path.name}.", dir=path.parent)
+    temporary = Path(temporary_name)
+    try:
+        with os.fdopen(descriptor, "wb") as stream:
+            stream.write(payload)
+            stream.flush()
+            os.fsync(stream.fileno())
+        os.link(temporary, path)
+        directory = os.open(path.parent, os.O_RDONLY | os.O_DIRECTORY)
+        try:
+            os.fsync(directory)
+        finally:
+            os.close(directory)
+    finally:
+        temporary.unlink(missing_ok=True)
     return digest
 
 
@@ -163,6 +172,9 @@ def run_integration_check(
     root = Path(repository).resolve()
     state = _state_path(root, state_directory, create=False)
     record = _load_record(root, candidate_id, state)
+    evidence_path = state / f"{candidate_id}.integration.json"
+    if evidence_path.exists():
+        raise CandidateControllerError("integration evidence already exists; refusing overwrite")
     target = _resolve_commit(root, record["target_sha"])
     candidate = _resolve_commit(root, record["candidate_sha"])
     merge_tree = _git(root, "merge-tree", "--write-tree", target, candidate)
@@ -240,9 +252,6 @@ def run_integration_check(
                     raise CandidateControllerError(
                         "integration check finished but disposable worktree cleanup failed"
                     ) from exc
-    evidence_path = state / f"{candidate_id}.integration.json"
-    if evidence_path.exists():
-        raise CandidateControllerError("integration evidence already exists; refusing overwrite")
     result["evidence_sha256"] = _record_digest(result)
     _write_json(evidence_path, result)
     return result
