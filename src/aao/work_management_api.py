@@ -253,6 +253,23 @@ def grant(project_id: str, payload: GrantRequest, _: str = Depends(require_ceo))
     with tx() as db:
         if not db.execute("SELECT 1 FROM projects WHERE id=%s", (project_id,)).fetchone():
             raise HTTPException(404, "Project not found")
+        principal = db.execute(
+            "SELECT kind,enabled FROM principal_credentials "
+            "WHERE principal_id=%s FOR SHARE", (payload.principal_id,),
+        ).fetchone()
+        if not principal:
+            raise HTTPException(404, "Principal not found")
+        if not principal[1]:
+            raise HTTPException(409, "Principal credential is disabled")
+        required_kind = (
+            "AUDITOR" if payload.capability in {
+                "work.review", "execution.reconcile", "effect.reconcile",
+            } else "AGENT"
+        )
+        if principal[0] != required_kind:
+            raise HTTPException(
+                422, f"Capability requires a {required_kind} principal",
+            )
         db.execute(
             "INSERT INTO project_grants(principal_id,project_id,capability) VALUES (%s,%s,%s) "
             "ON CONFLICT DO NOTHING",

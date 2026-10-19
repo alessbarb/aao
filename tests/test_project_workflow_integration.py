@@ -75,6 +75,63 @@ def test_postgres_mandate_project_grant_work_admission(monkeypatch):
     not os.getenv("AAO_TEST_POSTGRES_URL") or os.getenv("AAO_TEST_DB_DISPOSABLE") != "yes",
     reason="Explicit disposable PostgreSQL test database required",
 )
+def test_grant_creation_requires_active_principal_with_matching_kind(monkeypatch):
+    from aao.work_management_api import app
+
+    monkeypatch.setenv("AAO_POSTGRES_URL", os.environ["AAO_TEST_POSTGRES_URL"])
+    monkeypatch.setenv("AAO_CEO_TOKEN", "grant-kind-ceo")
+    ceo = {"X-CEO-Token": "grant-kind-ceo"}
+    with TestClient(app) as client:
+        agent = "grant-agent-" + str(uuid4())
+        auditor = "grant-auditor-" + str(uuid4())
+        assert client.post("/v1/principals/credentials", headers=ceo, json={
+            "principal_id": agent, "kind": "AGENT",
+        }).status_code == 201
+        assert client.post("/v1/principals/credentials", headers=ceo, json={
+            "principal_id": auditor, "kind": "AUDITOR",
+        }).status_code == 201
+        mandate = client.post("/v1/mandates", headers=ceo, json={
+            "title": "Grant validation " + str(uuid4()),
+            "objective": "Reject grants inconsistent with principal authority",
+        }).json()["id"]
+        assert client.post(f"/v1/mandates/{mandate}/confirm", headers=ceo).status_code == 200
+        project = client.post("/v1/projects", headers=ceo, json={
+            "name": "Grant validation", "mandate_id": mandate,
+        }).json()["id"]
+
+        for principal, capability, status in (
+            ("absent-principal", "work.create", 404),
+            (agent, "work.review", 422),
+            (auditor, "work.create", 422),
+        ):
+            response = client.post(f"/v1/projects/{project}/grants", headers=ceo, json={
+                "principal_id": principal, "capability": capability,
+            })
+            assert response.status_code == status, response.text
+
+        valid_agent = client.post(f"/v1/projects/{project}/grants", headers=ceo, json={
+            "principal_id": agent, "capability": "work.create",
+        })
+        valid_auditor = client.post(f"/v1/projects/{project}/grants", headers=ceo, json={
+            "principal_id": auditor, "capability": "work.review",
+        })
+        assert valid_agent.status_code == valid_auditor.status_code == 201
+        revoked = "revoked-grantee-" + str(uuid4())
+        issued = client.post("/v1/principals/credentials", headers=ceo, json={
+            "principal_id": revoked, "kind": "AGENT",
+        })
+        assert issued.status_code == 201, issued.text
+        assert client.post(f"/v1/principals/{revoked}/revoke", headers=ceo).status_code == 200
+        disabled_grant = client.post(f"/v1/projects/{project}/grants", headers=ceo, json={
+            "principal_id": revoked, "capability": "work.create",
+        })
+        assert disabled_grant.status_code == 409, disabled_grant.text
+
+
+@pytest.mark.skipif(
+    not os.getenv("AAO_TEST_POSTGRES_URL") or os.getenv("AAO_TEST_DB_DISPOSABLE") != "yes",
+    reason="Explicit disposable PostgreSQL test database required",
+)
 def test_postgres_review_is_separate_from_author_and_required_for_done(monkeypatch):
     from aao.work_management_api import app
     monkeypatch.setenv("AAO_POSTGRES_URL", os.environ["AAO_TEST_POSTGRES_URL"])

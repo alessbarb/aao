@@ -41,7 +41,9 @@ amendment or CEO-confirmed constitutional rule.
    review and migration/runtime operational risks remain open.
 2. **Partially implemented and locally validated:** CEO grant revocation is
    audited transactionally; API, execution and reconciliation authorization
-   checks lock the matched grant row. PostgreSQL tests cover revocation waiting
+   checks lock the matched grant row. Grant issuance now also locks and checks
+   that the principal exists, is enabled, and has the role required by the
+   requested capability. PostgreSQL tests cover revocation waiting
    behind a protected authorization transaction and expiry during lock wait;
    an AGENT authentication lock also serializes with token rotation. A
    controlled PostgreSQL integration test proves project-grant deletion waits

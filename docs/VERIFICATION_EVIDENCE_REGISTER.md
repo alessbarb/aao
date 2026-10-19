@@ -379,3 +379,16 @@ revocation schedule, not retry disposition, alternate ordering, evidence
 validity, or adversarial production scheduling.
 
 CI run `39256749706` passed for code commit `a198d0f78707080147c62820846ea0feae79a00d`, including PostgreSQL integration tests, compilation, Ruff, and dependency checks.
+
+## Grant issuance validates live principal and capability role
+
+The CEO grant endpoint now checks the referenced principal credential inside
+the grant transaction, holds its row `FOR SHARE`, rejects unknown and disabled
+identities, and enforces AUDITOR-only review/reconciliation capabilities versus
+AGENT capabilities. A PostgreSQL integration test verifies absent principal
+(404), both role-mismatch directions (422), disabled principal (409), and valid
+Agent/Auditor grants (201). Three consecutive focused reruns passed; the full
+suite passed **60 tests**, with compileall, Ruff, `pip check`, and
+`git diff --check` clean. CI has not run for this change. This does not address
+constitutional CEO approval, delegation limits, revoking already-issued
+capabilities, or independent grant review.
