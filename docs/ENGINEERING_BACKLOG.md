@@ -173,3 +173,7 @@ This document is a repository bootstrap artifact. **It is not GitHub Issues or G
 4. External access restricted to approved workspaces and tool capabilities.
 5. Any high residual risk or constitutionally reserved action waits for CEO confirmation.
 6. No actual Biopeia project execution before CEO confirms an exact deployment mandate.
+
+AAO may be operated as its own first project, subject to the same explicit
+mandate and project authorization gates as any other project. Biopeia is not a
+required first deployment and must not become a core dependency.

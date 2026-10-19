@@ -1,6 +1,6 @@
 # Autonomous AI Organization (AAO)
 
-An independently governed, private, multi-project AI organization. AAO is **not** Biopeia-specific; Biopeia is intended to be its first authorized project.
+An independently governed, private, multi-project AI organization. AAO is **not** Biopeia-specific. AAO may itself be the first project it manages; Biopeia is an optional future project, not a dependency or presumed first deployment. Any project, including AAO's own development, still requires the applicable mandate and authorization.
 
 ## Current status — 2026-10-19
 
