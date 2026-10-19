@@ -81,3 +81,19 @@ available through the old internal queue API. All external effects remain off.
 
 The new negative unit tests and integration behavior require validation by the
 operator before M2 can be accepted.
+
+## Credential lifecycle — candidate for local validation
+
+The development PostgreSQL API now exposes CEO-authorized operations:
+`POST /v1/principals/credentials` (issue),
+`POST /v1/principals/{id}/rotate` and
+`POST /v1/principals/{id}/revoke`. Issuance accepts the principal identifier
+and kind (`AGENT` or `AUDITOR`); the service generates a high-entropy token
+and returns it **only in the issuance/rotation response**, storing only SHA-256
+of the token. Rotating invalidates the prior token; revocation sets
+`enabled=false`. All three actions append event records excluding tokens.
+This is development administration, not a hardened production identity
+provider or independent authorization to execute any project work.
+
+The new integration regression checks CEO-only issuance, duplicate denial,
+rotation, revocation and audit events. It has **not been validated locally**.
