@@ -64,8 +64,9 @@ amendment or CEO-confirmed constitutional rule.
    orderings, and review of long-running transaction expiry semantics. The
    AUDITOR review route now has controlled PostgreSQL schedules showing an
    authorized rejection commit before concurrent credential revocation and
-   project-grant deletion; this does not cover every review ordering or
-   exhaustive races. HTTP
+   project-grant deletion; stale pre-revocation request contexts are also
+   denied by the route's in-transaction credential/grant rechecks. This does
+   not cover every review ordering or exhaustive races. HTTP
    request contexts now retain the presented token digest and compare it again
    under `FOR SHARE` in protected reads and writes. A PostgreSQL integration
    test captures a project-list context, rotates its token before the route

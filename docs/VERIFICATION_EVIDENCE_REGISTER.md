@@ -719,3 +719,18 @@ coverage, independent review, or M2 acceptance.
 - These are selected protected-operation-first schedules; they do not prove
   exhaustive revocation ordering, human identity, independent review, or M2
   acceptance.
+
+## Review route rejects stale authorization contexts after revocation — 2026-10-19
+
+- Code revision: `edc0e42` on `feat/aao-m0-foundation`.
+- The integration test supplies the review route with a previously authenticated
+  request context, then revokes either the AUDITOR credential or project
+  `work.review` grant before the route transaction. In both cases, its
+  in-transaction recheck returns 403 and no review is inserted.
+- Both controlled cases passed three consecutive focused runs. The full
+  explicitly disposable PostgreSQL suite passed **71 tests, 0 skipped, 0
+  warnings** under `-W error`; Ruff, compileall, `pip check`, and
+  `git diff --check` passed locally. CI was not awaited per operator
+  instruction.
+- This verifies these stale-context denials only; it is not exhaustive
+  revocation-ordering coverage, independent review, or M2 acceptance.
