@@ -4,11 +4,10 @@ Requires an isolated disposable database with 001 and 002 applied.
 Run with AAO_TEST_POSTGRES_URL and AAO_TEST_DB_DISPOSABLE=yes.
 """
 import os
+from datetime import UTC
 from uuid import uuid4
 
 import pytest
-from datetime import UTC
-
 from fastapi.testclient import TestClient
 
 
