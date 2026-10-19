@@ -233,7 +233,8 @@ def test_review_rejection_serializes_with_auditor_revocation(monkeypatch, revoca
     """An in-flight rejection commits before its credential or grant is revoked."""
     import aao.work_management_api as work_api
     from aao.postgresql_connection import connect_postgres
-    from aao.work_management_api import app
+    from aao.principal_credentials import digest_token
+    from aao.work_management_api import AuthenticatedPrincipal, app
 
     monkeypatch.setenv("AAO_POSTGRES_URL", os.environ["AAO_TEST_POSTGRES_URL"])
     monkeypatch.setenv("AAO_CEO_TOKEN", "review-revoke-ceo")
@@ -336,9 +337,16 @@ def test_review_rejection_serializes_with_auditor_revocation(monkeypatch, revoca
         assert review_response.status_code == 201, review_response.text
         assert review_response.json()["status"] == "IN_PROGRESS"
         assert revoke_response.status_code == revoke_status, revoke_response.text
-        denied = client.post(f"/v1/work/{work}/reviews", headers={
-            "X-Auditor-Token": auditor_token,
-        }, json={"decision": "REJECT", "evidence": ["stale credential"]})
+        stale_context = AuthenticatedPrincipal(
+            auditor_id, digest_token(auditor_token), "AUDITOR",
+        )
+        app.dependency_overrides[work_api.require_reviewer] = lambda: stale_context
+        try:
+            denied = client.post(f"/v1/work/{work}/reviews", json={
+                "decision": "REJECT", "evidence": ["stale authorization context"],
+            })
+        finally:
+            app.dependency_overrides.pop(work_api.require_reviewer, None)
         assert denied.status_code == 403
 
 
