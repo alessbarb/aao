@@ -449,3 +449,61 @@ def test_individual_auditor_credential_is_bound_to_review(monkeypatch):
                 (allowed.json()["review_id"],),
             ).fetchone()
             assert actual[0] == auditor_id
+
+
+@pytest.mark.skipif(
+    not os.getenv("AAO_TEST_POSTGRES_URL") or os.getenv("AAO_TEST_DB_DISPOSABLE") != "yes",
+    reason="Explicit disposable PostgreSQL database required",
+)
+def test_individual_agent_scoped_creation_and_revocation(monkeypatch):
+    """Individual agent cannot write across projects and revocation is immediate."""
+    from aao.pg_work import app
+    from aao.pg_principals import digest_token
+    from aao.postgres import connect_postgres
+
+    monkeypatch.setenv("AAO_POSTGRES_URL", os.environ["AAO_TEST_POSTGRES_URL"])
+    monkeypatch.setenv("AAO_CEO_TOKEN", "agent-scope-ceo")
+    monkeypatch.setenv("AAO_WORK_TOKEN", "agent-scope-shared-worker")
+    ceo = {"X-CEO-Token": "agent-scope-ceo"}
+    identity = "agent-" + str(uuid4())
+    secret = "agent-secret-" + str(uuid4())
+    agent = {"X-Agent-Token": secret}
+    with connect_postgres() as db:
+        db.execute(
+            "INSERT INTO principal_credentials(principal_id,kind,token_digest,enabled) "
+            "VALUES (%s,'AGENT',%s,true)", (identity, digest_token(secret))
+        )
+    with TestClient(app) as client:
+        projects = []
+        for i in range(2):
+            mid = client.post("/v1/mandates", headers=ceo, json={
+                "title": f"Individual agent {i} {uuid4()}",
+                "objective": "Project isolation",
+            }).json()["id"]
+            assert client.post(f"/v1/mandates/{mid}/confirm", headers=ceo).status_code == 200
+            pid = client.post("/v1/projects", headers=ceo, json={
+                "name": f"Agent scope {i}", "mandate_id": mid
+            }).json()["id"]
+            projects.append(pid)
+        allowed, forbidden = projects
+        assert client.post(f"/v1/projects/{allowed}/grants", headers=ceo, json={
+            "principal_id": identity, "capability": "work.create",
+        }).status_code == 201
+        payload = {"title": "Individual action", "author_id": "spoof-attempt",
+                   "acceptance_criteria": ["Persisted"]}
+        invalid = client.post(f"/v1/projects/{allowed}/work",
+                              headers={"X-Agent-Token": "incorrect", "X-Work-Token": "agent-scope-shared-worker"},
+                              json=payload)
+        assert invalid.status_code == 403
+        assert client.post(f"/v1/projects/{forbidden}/work",
+                           headers=agent, json=payload).status_code == 403
+        accepted = client.post(f"/v1/projects/{allowed}/work",
+                               headers=agent, json=payload)
+        assert accepted.status_code == 201, accepted.text
+        work_id = accepted.json()["id"]
+        with connect_postgres() as db:
+            author = db.execute("SELECT author_id FROM work_items WHERE id=%s", (work_id,)).fetchone()
+            assert author[0] == identity
+            db.execute("UPDATE principal_credentials SET enabled=false WHERE principal_id=%s", (identity,))
+        assert client.post(f"/v1/projects/{allowed}/work",
+                           headers=agent, json=payload).status_code == 403
