@@ -1,5 +1,8 @@
 """Minimal AAO API: CEO-confirmed mandates, projects and evidence-gated Kanban."""
 import json
+
+from aao.settings import load_local_env
+load_local_env()
 import os
 from contextlib import asynccontextmanager
 from pathlib import Path
