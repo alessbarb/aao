@@ -9,6 +9,8 @@ from uuid import uuid4
 
 from aao.postgres import connect_postgres
 from aao.worker_auth import verify_registered_worker
+from aao.pg_principals import digest_token
+import hmac
 
 
 class ExecutionConflict(ValueError):
@@ -22,7 +24,7 @@ def journal(db, execution_id: str, kind: str, details: dict):
     )
 
 
-def claim(worker_id: str, *, credential: str | None = None, project_id: str, seconds: int = 60, now: datetime | None = None):
+def claim(worker_id: str, *, credential: str | None = None, project_id: str, seconds: int = 60, now: datetime | None = None, agent_credential: str | None = None):
     if not worker_id or not project_id or seconds < 1:
         raise ExecutionConflict("Worker and positive lease duration required")
     instant = now or datetime.now(timezone.utc)
@@ -68,7 +70,7 @@ def claim(worker_id: str, *, credential: str | None = None, project_id: str, sec
 
 
 def complete(execution_id: str, token: str, worker_id: str, result: dict,
-             *, credential: str | None = None, now: datetime | None = None):
+             *, credential: str | None = None, now: datetime | None = None, agent_credential: str | None = None):
     instant = now or datetime.now(timezone.utc)
     with connect_postgres() as db:
         registration = db.execute(
