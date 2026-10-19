@@ -74,3 +74,9 @@ El operador actualizó hasta la revisión `1006902` y ejecutó `AAO_ENV=test AAO
 - **Validation not yet executed on the amended branch:** pytest collection, full PostgreSQL suite, static analysis, import/link checks and runtime smoke test. The previous `47 passed` result is historical and belongs to commit `1006902c2184fc7fed0f76c677c64ab6599f4669`, not these edits.
 - The large `tests/test_postgresql_workflow_integration.py` suite still groups distinct responsibilities; splitting it safely remains pending and must preserve the disposable database gate.
 - **Acceptance blocked** until local test evidence, inspection of any remaining obsolete references, independent review and competent M2 approval. This note is not an acceptance record.
+
+## PostgreSQL test responsibility split — 2026-10-19
+
+- The 12 previously passing PostgreSQL integration scenarios were redistributed without deliberate behavioral changes into `test_project_workflow_integration.py` (4), `test_execution_leases_integration.py` (3), `test_execution_reconciliation_integration.py` (1), and `test_principal_credential_lifecycle_integration.py` (4).
+- Each scenario retains its individual opt-in disposable PostgreSQL database guard. The original monolithic file has been removed; its historical test evidence remains associated with the previous revision.
+- **Validation on the resulting HEAD is pending:** full pytest suite and Ruff lint. No new proof of passing tests is asserted by this split.
