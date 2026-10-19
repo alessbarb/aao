@@ -37,9 +37,11 @@ advance PR #2's head, so a formal reviewer must use the live PR head SHA and
 identify it in the review report. Do not rewrite the validated implementation
 history to make the SHAs appear equal. After the scope package was committed,
 local `HEAD`, `origin/feat/aao-m0-foundation`, `origin/review/m2-inert-candidate`,
-and live PR #2 all matched `acb85a268b3ec32630e858512058d970ae970191`.
-The implementation source remains `99760c7339323600368e5dbb145b088d83ad0715`;
-there were only documentation changes after it.
+and live PR #2 matched `acb85a268b3ec32630e858512058d970ae970191`; a later
+evidence-registration-only documentation commit advanced them to
+`0c1c990520d105cf7e16349903f112f485426118`. That is the latest pinned review
+package at this writing. The implementation source remains
+`99760c7339323600368e5dbb145b088d83ad0715`; no runtime code changed after it.
 
 ## M2-A measurable acceptance criteria
 

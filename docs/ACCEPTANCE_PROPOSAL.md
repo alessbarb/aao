@@ -9,16 +9,18 @@ authorize models, tools, providers, production deployment, or external effects.
 
 - **Implementation source with 80-test evidence:**
   `99760c7339323600368e5dbb145b088d83ad0715`.
-- **Latest exact-SHA local verification before the scope-document updates:**
-  `dc7e594a690994b3327b78ce0046e8ec4cf1f616` (documentation-only delta from
-  the implementation source). It passed 80 tests, zero failures/skips/warnings,
-  plus compileall, Ruff, `pip check`, and diff checks. See the evidence register.
+- **Latest verification package with a full-suite run:**
+  `acb85a268b3ec32630e858512058d970ae970191`, 80 passed, zero failures/skips/warnings,
+  plus compileall, Ruff, `pip check`, and diff checks. A later documentation-only
+  evidence-registration revision `0c1c990520d105cf7e16349903f112f485426118`
+  records that run and is the currently pinned PR package. The live PR head must
+  be rechecked at review time; no runtime code changed after the implementation source.
 - **Review vehicle:** [draft GitHub PR #2](https://github.com/alessbarb/aao/pull/2).
-  At verification, local `HEAD`, `origin/feat/aao-m0-foundation`,
-  `origin/review/m2-inert-candidate`, and the PR head all matched `dc7e594`.
-  Later documentation commits may advance the PR head. The formal reviewer
-  must identify the live PR head SHA and the implementation source SHA
-  separately. No runtime code was changed to reconcile revision references.
+  At the latest live check, local `HEAD`, `origin/feat/aao-m0-foundation`,
+  `origin/review/m2-inert-candidate`, and the PR head matched
+  `0c1c990520d105cf7e16349903f112f485426118`. The formal reviewer must recheck
+  the live PR head and identify it separately from the implementation source SHA.
+  No runtime code was changed to reconcile revision references.
 
 ## What M2-A evidence demonstrates
 
