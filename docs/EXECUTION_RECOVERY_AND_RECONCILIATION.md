@@ -28,8 +28,8 @@ auditor-credential-revocation tests are still required.
 Tests of database-level reconciliation require an isolated PostgreSQL instance.
 
 ## Next gates
-- Concurrent auditor-credential and grant revocation tests for both
-  reconciliation dispositions, including the retry path.
+- Concurrent auditor-credential revocation schedules now cover both
+  `MARK_FAILED` and `RETRY_CONFIRMED_SAFE`; grant-revocation races remain open.
 - Credential/grant revocation schedules and hostile ordering tests for effect
   proposal; current proposal checks have selected non-concurrent denial cases
   and three focused runs of a controlled execution-row-lock proposal/completion

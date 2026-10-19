@@ -33,7 +33,7 @@ inside their transaction. The CEO credential is still a single static bearer.
 | Operation | Identity / capability check | Transaction boundary | Known boundary |
 | --- | --- | --- | --- |
 | `execution_queue.claim()` / `complete()` | Individual AGENT credential; requires unexpired `execution.claim` project grant | Credential and grant are checked with `FOR SHARE`; queue/project rows are locked. | Migration 006 transfers legacy identities and drops the old registry. Lease expiry is computed and checked with PostgreSQL `clock_timestamp()`; a real database-lock-wait test covers delayed completion. Other lease/revocation schedules remain open. |
-| `execution_reconciliation.reconcile()` | Active AUDITOR bearer credential resolves reviewer in-transaction; unexpired `execution.reconcile` grant; AGENT credentials denied | Locks credential, queue/project and grant rows | No HTTP endpoint. Evidence references are not verified; `MARK_FAILED`/auditor-credential revocation has one controlled schedule, but `RETRY_CONFIRMED_SAFE`/revocation remains untested. |
+| `execution_reconciliation.reconcile()` | Active AUDITOR bearer credential resolves reviewer in-transaction; unexpired `execution.reconcile` grant; AGENT credentials denied | Locks credential, queue/project and grant rows | No HTTP endpoint. Evidence references are not verified; controlled auditor-credential revocation schedules cover both `MARK_FAILED` and `RETRY_CONFIRMED_SAFE`; grant revocation and hostile schedules remain open. |
 | `external_effect_registry.propose()` | Active individual AGENT credential must match `worker_id`; requires `effect.propose` grant | In one transaction, locks credential, execution/project, then grant; requires active project, `RUNNING`, matching worker and lease token, and a lease not expired by DB clock | Records only; never executes. Appends `effect.proposed` journal event with proposer identity and request digest. No external adapter is enabled. |
 | `external_effect_reconciliation.reject_unexecuted_proposal()` | Active AUDITOR bearer credential resolves reviewer in-transaction; unexpired `effect.reconcile` grant; AGENT credentials denied | Locks credential, effect/queue and grant rows | Evidence references are not verified; internal helper only. No external effect is executed. |
 
@@ -50,9 +50,10 @@ inside their transaction. The CEO credential is still a single static bearer.
   schedule exercise credential row locks. These are selected controlled lock
   schedules; a queue-claim/credential-revocation schedule now also observes
   credential revocation wait until claim commits, then denies later claims.
-  Reconciliation's `MARK_FAILED` disposition has also been observed committing
-  before an in-flight auditor credential revocation; the revoked auditor is
-  denied on a subsequent attempt. Effect proposal now requires the worker's
+  Reconciliation's `MARK_FAILED` and `RETRY_CONFIRMED_SAFE` dispositions have
+  each been observed committing before an in-flight auditor credential
+  revocation; the revoked auditor is denied on a subsequent attempt. Effect
+  proposal now requires the worker's
   active credential, explicit `effect.propose` grant and live lease. Three
   local focused reruns exercised a controlled execution-row-lock schedule: the
   test observed proposal blocked while completion competed; completion
@@ -63,8 +64,8 @@ inside their transaction. The CEO credential is still a single static bearer.
   do not prove real PostgreSQL lock behavior. Several real lock schedules now
   cover work creation, queue claim/completion against grant deletion, and
   queue completion against credential revocation. Other business writes,
-  alternative operation/revocation orderings, retry reconciliation against
-  credential revocation, and hostile schedules remain untested.
+  alternative operation/revocation orderings, reconciliation against grant
+  revocation, and hostile schedules remain untested.
 - The current full local suite has 60 tests, including grant-row, auditor
   credential-lock, and completion-after-lease-expiry-during-row-lock-wait
   coverage, AGENT authentication/rotation, and selected protected-operation

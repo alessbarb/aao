@@ -423,5 +423,20 @@ disposable PostgreSQL service, then passed compileall, Ruff, the
 warnings-as-errors unit/integration suite, and `pip check`. This is engineering evidence,
 not independent security/architecture review or M2 acceptance. Remaining
 gates include adversarial credential/grant revocation schedules for proposal,
-retry reconciliation versus auditor credential revocation, and independent
-review.
+reconciliation-versus-grant-revocation schedules, and independent review.
+
+## Reconciliation retry and auditor revocation schedule
+
+The test change parameterizes
+`test_reconciliation_serializes_with_auditor_credential_revocation` across
+`MARK_FAILED` and `RETRY_CONFIRMED_SAFE`. Both controlled PostgreSQL schedules
+observed reconciliation blocked at its journal write while auditor credential
+revocation waited, then observed the disposition commit first and a later
+attempt rejected for the revoked credential. This checks one lock ordering for
+each disposition; grant revocation, reverse ordering, and adversarial
+repetitions remain unverified.
+
+Local verification: focused reconciliation integration file passed **3 tests**;
+full disposable PostgreSQL suite passed **61 tests**, zero skips or warnings;
+compileall, Ruff, `pip check`, and `git diff --check` succeeded. Exact test SHA
+and CI run are to be recorded after commit and CI completion.

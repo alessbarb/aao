@@ -216,7 +216,13 @@ def test_reconciliation_requires_distinct_granted_reviewer(monkeypatch):
     not os.getenv("AAO_TEST_POSTGRES_URL") or os.getenv("AAO_TEST_DB_DISPOSABLE") != "yes",
     reason="Explicit disposable PostgreSQL database required",
 )
-def test_reconciliation_serializes_with_auditor_credential_revocation(monkeypatch):
+@pytest.mark.parametrize(
+    ("disposition", "expected_state"),
+    [("MARK_FAILED", "FAILED"), ("RETRY_CONFIRMED_SAFE", "QUEUED")],
+)
+def test_reconciliation_serializes_with_auditor_credential_revocation(
+    monkeypatch, disposition, expected_state,
+):
     from aao.execution_queue import claim, quarantine_expired, state
     from aao.execution_reconciliation import ReconciliationDenied, reconcile
     from aao.postgresql_connection import connect_postgres
@@ -273,7 +279,7 @@ def test_reconciliation_serializes_with_auditor_credential_revocation(monkeypatc
             blocker.execute("LOCK TABLE execution_journal IN ACCESS EXCLUSIVE MODE")
             reconciliation = pool.submit(
                 reconcile, execution_id, auditor_credential=auditor_token,
-                evidence=["reviewed inert execution"], disposition="MARK_FAILED",
+                evidence=["reviewed inert execution"], disposition=disposition,
             )
             deadline = time.monotonic() + 5
             reconciliation_waiting = False
@@ -306,12 +312,12 @@ def test_reconciliation_serializes_with_auditor_credential_revocation(monkeypatc
                 time.sleep(0.01)
             assert revocation_waiting, "auditor revocation did not wait for reconciliation"
 
-        assert reconciliation.result(timeout=5) == "FAILED"
+        assert reconciliation.result(timeout=5) == expected_state
         revoked = revocation.result(timeout=5)
         assert revoked.status_code == 200, revoked.text
-        assert state(execution_id)["status"] == "FAILED"
+        assert state(execution_id)["status"] == expected_state
         with pytest.raises(ReconciliationDenied, match="Active auditor credential required"):
             reconcile(
                 execution_id, auditor_credential=auditor_token,
-                evidence=["retry after revocation"], disposition="MARK_FAILED",
+                evidence=["retry after revocation"], disposition=disposition,
             )
