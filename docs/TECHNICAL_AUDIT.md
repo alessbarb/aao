@@ -1,0 +1,135 @@
+# M2 candidate technical audit
+
+**Assessment basis:** code and documents at
+`99760c7339323600368e5dbb145b088d83ad0715`, plus local verification recorded
+in [`VERIFICATION_EVIDENCE_REGISTER.md`](VERIFICATION_EVIDENCE_REGISTER.md).
+This is a repository-authored engineering assessment prepared for review, not
+a completed formal independent review. It uses the
+draft Constitution and planning backlog as provisional traceability sources;
+neither currently defines a ratified M2 acceptance contract.
+
+## Findings
+
+### P0 — Formal acceptance boundary is undefined
+
+`docs/CONSTITUTION.md` describes itself as a draft engineering interpretation,
+not a CEO-confirmed mandate. `docs/ENGINEERING_BACKLOG.md` calls itself an
+initial planning seed. Its M2 entries include broad ambitions (sandbox runners,
+signed leases/checkpoints, stop controls, repeated crash delivery) without
+objective acceptance tests or a declared deployment boundary. Therefore the
+repository supports a technical candidate review, but cannot prove that all
+approved M2 requirements are satisfied. No code change can resolve this
+authority gap.
+
+### P0 — CEO and auditor human identities are not established
+
+The development API uses a static CEO bearer only in explicit development/test
+modes. AGENT/AUDITOR credentials are individual application identities, but
+there is no verified binding to distinct humans, constitutional signatures,
+auditor appointment, or independent approval ceremony. The system correctly
+keeps positive work approval fail-closed. Do not treat a principal ID or a
+passing test as a human identity proof.
+
+### P0 — Application authorization is not a database security boundary
+
+Operations check individual credentials and grants under PostgreSQL row locks;
+selected revocation schedules observe real blocking behavior. However, no
+PostgreSQL role isolation or RLS is established. A direct SQL/code actor with
+privileges can bypass application checks. Migrations 008/009 also use triggers
+that a database owner could disable or drop. Restricting the DB role and
+separating administrative ownership needs an accepted runtime threat model.
+
+### P0 — Recovery remains explicit, not autonomous
+
+The durable queue records leases and expiry; `quarantine_expired()` moves stale
+leases to `UNCERTAIN`, and reconciliation is explicit. There is no startup or
+periodic recovery scheduler and no integrated autonomous worker supervisor.
+The manual cold-restart observation is bounded historical evidence, not a
+repeatable crash/restart acceptance harness. This is appropriate for a
+non-operational candidate but incomplete for any claim of continuously
+recovering execution.
+
+### P0 — Integrity does not establish evidentiary validity
+
+Artifacts now have project-scoped SHA-256 addressing, rehash-on-use, bounded
+size/reference count, and application capability checks. Internal `read_evidence`
+allows a granted individual AUDITOR credential to inspect bytes. Neither the
+hash nor the identity credential proves factual truth, human authorship,
+independence, or sufficiency for a disposition. Evidence is stored as database
+`bytea`; data classification, retention, backup, and confidentiality policy
+remain unspecified. Positive approval stays disabled.
+
+### P1 — Selected PostgreSQL race tests are strong evidence, not exhaustive
+
+Integration tests use separate connections and observed lock blockers for
+selected project-grant deletion, credential revocation/rotation, queue
+claim/completion, review, effect proposal/rejection, and reconciliation
+orderings. The exact set is described in the authorization matrix and evidence
+register. Not every operation/order, lease-expiry-under-long-transaction
+policy, database-owner action, or hostile schedule has been tested. Avoid
+absolute atomicity or exhaustive-race claims.
+
+### P1 — Schema rollout and runtime operations need exact environment evidence
+
+Migrations 008/009 are descriptive and the local disposable test database was
+advanced under an explicit disposable guard. CI configuration was updated to
+apply them but CI was not run or awaited. No production migration, backup
+restore, least-privilege database role, or deployed-service verification is
+claimed.
+
+## Architectural dispositions
+
+- Keep the worker and effect adapter inert. Provider-side exactly-once behavior
+  cannot be validated without an authorized external system and is deferred.
+- The separate SQLite prototype's `sandbox-queue` endpoint must not be treated
+  as the PostgreSQL execution boundary or as M2-04 evidence. Its admission
+  inputs include simulated `authorized`, dependency, capacity, budget and risk
+  values, and it implements no operation-scoped sandbox isolation. Keep it
+  explicitly non-operational; do not route real work through it.
+- Keep `APPROVE` and `VERIFIED -> DONE` fail-closed until independent human
+  identity, inspectable evidence and an approved review policy exist.
+- Treat AAO as eligible to be its own first managed project, not as an implicit
+  project record or mandate. It must enter the same CEO-confirmed workflow.
+- Do not implement production CEO authentication, constitutional revision,
+  live effects, or irreversible operation under this technical delegation.
+
+## Internal review inputs
+
+Read-only architecture, IAM/adversarial, database/concurrency, and evidence
+design subagent reviews were used to find issues and improve the candidate.
+They ran in the same process context and are **not** the formal independent
+review required for acceptance.
+
+At review checkout `62422b15fc69261262bdeaa0aaccd5c5cd6f1cdc`, additional
+read-only IAM/evidence, durable-execution, and scope/documentation passes found
+no concrete authorization bypass or lease/fencing defect in the reviewed
+candidate paths, and no material contradiction among the current M2 reports.
+They reaffirmed the recorded limits: no production CEO identity, independent
+human reviewer proof, automated process-restart recovery, or autonomous
+recovery controller. These passes inspected source and tests but did not
+execute tests; they are internal reviews, not independent assurance.
+
+### Follow-up findings at `b15dea4` and engineering disposition
+
+- **M2-A suspension initiation gap — corrected in candidate worktree.** The
+  PostgreSQL path had generation fencing but no authorized HTTP operation to
+  initiate pause/resume/cancel. Added a CEO-authenticated, audited state
+  transition route and PostgreSQL integration coverage. This corrects the
+  evidence gap for the inert project control; it does not provide an independent
+  stop controller for an active runtime.
+- **Development credential environment boundary — corrected in candidate
+  worktree.** Individual AGENT/AUDITOR verification now fails closed outside
+  `development` and `test`, including transaction-time credential checks used
+  by evidence and reconciliation helpers. Production human identity is still
+  not implemented or claimed.
+- **Concurrent idempotency-key collision across distinct executions — corrected
+  in candidate worktree.** Proposal insertion now uses the unique constraint as
+  the arbitration point and re-reads the winner, returning a stable conflict for
+  a key bound to a different execution. A PostgreSQL test runs two distinct
+  execution proposals concurrently with one absent key and asserts one proposal
+  plus one domain conflict, with no raw unique-constraint failure. This is
+  idempotent inert-ledger behavior only; no external effect can occur.
+
+These source changes had a worktree full-suite/static run recorded in the
+verification register; commit and exact-SHA evidence are required before the
+candidate is treated as reviewable.

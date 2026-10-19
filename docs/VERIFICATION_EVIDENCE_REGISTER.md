@@ -1,0 +1,949 @@
+# AAO verification evidence register — append-only snapshots
+
+Each entry records evidence and status at its stated revision/time. Earlier
+"pending" or "not verified" statements describe those checkpoints only and
+are superseded where a later entry says validation was completed. Current
+acceptance remains unproven unless explicitly supported by competent review;
+the latest local engineering run is not independent review or M2 acceptance.
+
+## Environment
+- Branch: `feat/aao-m0-foundation`
+- Revision validated: `d6abac3ba6361094dfda7b1976b4e9741c1cc35c`
+- Python: 3.12.13; pytest: 9.1.1
+- PostgreSQL: 16-alpine, Docker Compose development configuration; isolated database `aao_test`
+- Migrations: 001, 002, 003, 004 completed with COMMIT and 12 tables listed
+
+## Evidence supplied by local operator
+- Initial `python -m pytest -q`: 23 passed, 6 skipped, one Starlette/httpx deprecation warning.
+- First PostgreSQL integration run: 3 passed / 3 failed (unscoped queue claims).
+- Second PostgreSQL integration run: 5 passed / 1 failed (global expired lease quarantine count).
+- Final `python -m pytest -v -rs tests/test_postgres_integration.py`: **6 passed**, one deprecation warning, 1.16 s.
+- Final `python -m pytest -q`: **29 passed**, one deprecation warning, 1.48 s.
+- Development FastAPI application booted and served root and project API HTTP 200; PostgreSQL service itself not yet demonstrated running via Uvicorn.
+
+## Meaning and boundaries
+This validates the current **test suite and migrations** in the user's local environment. It does not prove complete recovery under crashes, denial of cross-project reads, real operator/authenticated auditor identities, independent audit signatures, external-effect idempotence, or readiness for autonomous actions. SQLite and PostgreSQL runtime entrypoints remain separate. CI is deferred per owner instruction.
+
+## Next required evidence
+1. Real cold-restart of PostgreSQL and rerun selected recovery/concurrency tests.
+2. Fail-closed project read isolation and authorization tests.
+3. Lifecycle and identity for independently attested auditors and workers.
+4. Full PostgreSQL service startup and browser health smoke.
+5. Explicit owner acceptance after relevant independent security review.
+
+## Validación local comunicada — 2026-10-19
+
+Operador ejecutó `AAO_ENV=test AAO_ENV_FILE=.env.test python -m pytest -v -rs` con Python 3.12.13, pytest 9.1.1 y PostgreSQL 16.15: **35 passed, 0 failed, 0 skipped, 1 warning, 1.80 s**. Las 8 pruebas PostgreSQL y las 4 pruebas de configuración se ejecutaron, no fueron omitidas. Advertencia: deprecación Starlette/httpx. La evidencia es la salida facilitada por el operador; no constituye revisión independiente ni prueba de seguridad de producción. M2 continúa abierto.
+
+## Verificación del incremento 005 — 2026-10-19
+
+El operador ejecutó la migración `005_principal_credentials.sql` sobre `aao_dev` y `aao_test`: ambas finalizaron con `COMMIT`. La suite `AAO_ENV=test AAO_ENV_FILE=.env.test python -m pytest -v -rs` obtuvo **40 passed, 0 failed, 0 skipped, 1 warning**, en 1.98 segundos, Python 3.12.13 y PostgreSQL 16. La evidencia procede del registro de terminal facilitado por el operador. La advertencia sigue siendo la deprecación Starlette/httpx. Este resultado no autoriza producción ni cierra M2.
+
+## Validación local adicional — 2026-10-19
+
+El operador comunicó una ejecución completa posterior a la incorporación de identidades individuales de agentes: `AAO_ENV=test AAO_ENV_FILE=.env.test python -m pytest -v -rs`: **41 passed, 0 failed, 0 skipped, 1 warning**, duración 2.10 s. Esto valida el caso de aislamiento y revocación de la API de desarrollo incluido en la revisión `b1b9125`, no una identidad unificada del ejecutor ni garantías de producción.
+
+## Validación del contrato `execution.claim` — 2026-10-19
+
+El operador confirmó `git pull --ff-only` hasta `3de90ea` y la ejecución `AAO_ENV=test AAO_ENV_FILE=.env.test python -m pytest -v -rs`: **43 passed, 0 failed, 0 skipped, 1 warning** en 2.29 s, Python 3.12.13. La prueba `test_individual_agent_claim_and_revocation` pasó junto con la nueva prueba del contrato exacto `execution.claim`. Persiste la advertencia de deprecación Starlette/httpx. Esta evidencia es una prueba local comunicada por el operador y no constituye revisión independiente ni autorización de ejecución externa.
+
+## Shared-token retirement increment — validation
+
+The validation status described below is historical. After `a47c853`, the
+PostgreSQL API shared-auth fallback was removed and integration scenarios were
+migrated to individual credentials. On `ca1857e8fa387f6834540b70f21bf11202cfc8e3`,
+compileall, Ruff, pip check, diff check and the full suite ran against the
+explicitly disposable database configured by `.env.test`: **52 passed, 0
+skipped, 0 warnings**. Ruff reported `All checks passed!`, pip check reported
+`No broken requirements found`, and `git diff --check` exited successfully.
+GitHub Actions run `39252871118` completed successfully for commit
+`7f7fd63483f5dc467a464db67ef87022e7254dff`. CI covers compileall, Ruff,
+migrations against disposable PostgreSQL, integration tests and pip check.
+This is not independent review or M2 acceptance.
+
+## PostgreSQL-clock lease expiry and delayed completion
+
+At `02603d680520e034dce2908f575038411c6e73df`, lease issue, completion
+expiry validation, and quarantine compare against PostgreSQL `clock_timestamp()`;
+the API no longer accepts caller-supplied timestamps for these decisions. The
+full local disposable-database suite passed **52 tests, 0 skipped, 0
+warnings**. The delayed-completion integration scenario was also run three
+additional times individually and passed each time. Compileall, Ruff, pip
+check, and diff check passed. GitHub Actions run `39253290548` completed
+successfully on the same SHA. This covers one controlled lock-wait schedule,
+not repeated adversarial race testing or M2 acceptance.
+
+## Completion/quarantine ordering after lease expiry
+
+Commit `9f24450e45f44f128e0de320809b7e6b9f47955b` adds a lease integration
+scenario competing
+completion with `quarantine_expired()` for the same queue row after the
+database-clock deadline. Three consecutive local reruns passed, each asserting
+expired completion is denied and final state is `UNCERTAIN`. The full local
+disposable PostgreSQL suite passed **52 tests** with compileall, Ruff, pip
+check and diff check clean. GitHub Actions run `39253753026` passed on the same
+SHA. This is a bounded controlled schedule, not proof of all
+possible orderings or independent review.
+
+Tras las 43 pruebas confirmadas, se incorporaron las rutas individuales de
+lectura de proyectos/tableros y el bloqueo de tokens compartidos de workers y
+auditores fuera de desarrollo o al establecer
+`AAO_ALLOW_SHARED_DEV_TOKENS=false`. Se añadieron pruebas negativas.
+**No se ha ejecutado todavía la nueva suite en el ordenador del operador.**
+
+## Validación de autenticación transitoria — 2026-10-19
+
+El operador actualizó mediante `git pull --ff-only` hasta `cb65222` y ejecutó `AAO_ENV=test AAO_ENV_FILE=.env.test python -m pytest -v -rs` con Python 3.12.13: **46 passed, 0 failed, 0 skipped, 1 warning** en 2.45 s. Las tres pruebas negativas nuevas de tokens compartidos y credenciales individuales superaron la suite, así como la integración ampliada de lectura de proyectos/tableros. La advertencia sigue siendo Starlette/httpx. Esta evidencia procede del operador y no sustituye auditoría independiente ni aprobación de M2.
+
+## M2 ciclo gobernado de credenciales — pendiente de validación
+
+Se añadieron rutas de desarrollo de emisión, rotación y revocación de
+credenciales individuales protegidas por el token CEO provisional. Los tokens
+se generan aleatoriamente y solo se persisten como resúmenes; hay pruebas de
+control de autoridad, duplicados, invalidación por rotación, revocación y
+registros de eventos. **No hay todavía salida de ejecución local para esta
+revisión.** La referencia verificada continúa siendo la suite de 46 pruebas.
+
+## Validación del ciclo de credenciales — 2026-10-19
+
+El operador actualizó hasta la revisión `1006902` y ejecutó `AAO_ENV=test AAO_ENV_FILE=.env.test python -m pytest -v -rs`: **47 passed, 0 failed, 0 skipped, 1 warning** en 2.58 segundos, Python 3.12.13. Pasó `test_ceo_governed_principal_issue_rotate_revoke`, que verifica emisión, rotación, revocación y eventos. Advertencia de deprecación Starlette/httpx. Evidencia local comunicada por el operador; no constituye revisión independiente ni aceptación final de M2.
+
+## Naming refactor — 2026-10-19 (structural changes only)
+
+- Branch: `feat/aao-m0-foundation`; original inspected HEAD: `a58f0f643db82350bcbbc477ac2bb1fae3bdf26a`.
+- Updated the configuration test import and runtime/documentation references to existing responsibility-based names. No applied SQL migration was changed and no external executor was enabled.
+- Repository-level comparison verified that these changes affect the README, the configuration test and operational documentation only.
+- **Validation not yet executed on the amended branch:** pytest collection, full PostgreSQL suite, static analysis, import/link checks and runtime smoke test. The previous `47 passed` result is historical and belongs to commit `1006902c2184fc7fed0f76c677c64ab6599f4669`, not these edits.
+- The large `tests/test_postgresql_workflow_integration.py` suite still groups distinct responsibilities; splitting it safely remains pending and must preserve the disposable database gate.
+- **Acceptance blocked** until local test evidence, inspection of any remaining obsolete references, independent review and competent M2 approval. This note is not an acceptance record.
+
+## PostgreSQL test responsibility split — 2026-10-19
+
+- The 12 previously passing PostgreSQL integration scenarios were redistributed without deliberate behavioral changes into `test_project_workflow_integration.py` (4), `test_execution_leases_integration.py` (3), `test_execution_reconciliation_integration.py` (1), and `test_principal_credential_lifecycle_integration.py` (4).
+- Each scenario retains its individual opt-in disposable PostgreSQL database guard. The original monolithic file has been removed; its historical test evidence remains associated with the previous revision.
+- **Validation on the resulting HEAD is pending:** full pytest suite and Ruff lint. No new proof of passing tests is asserted by this split.
+
+## Verified structural baseline and HTTPX2 deprecation resolution — 2026-10-19
+
+Operator supplied terminal output for commit `5fe0b4b86d999b020e928e0bd4e8375e5c0dc7c9` on Python 3.12.13. Local `python -m pip install -e '.[dev,postgres]'` installed `httpx2==2.14.0`; `python -m pip check` reported no broken requirements, `python -m ruff check src tests` passed, and `AAO_ENV=test AAO_ENV_FILE=.env.test python -m pytest -v -rs -W error` completed **47 passed, 0 failed, 0 skipped, 0 warnings in 3.30 seconds**. Thus the naming restructure and test-suite split have a verified local functional/static baseline, and the previous Starlette HTTPX deprecation no longer occurs under warnings-as-errors. This is operator-reported evidence only; no independent architecture/security review was performed, and M2 is not accepted.
+
+## M2 transaction-time principal guard — candidate (not yet validated)
+
+The work API now rechecks principal credential state and principal kind under a PostgreSQL row lock inside `require_grant` before checking a project grant. The earlier separate authentication could otherwise allow a revoked credential to keep using its resolved identity in a subsequent transaction. Three unit test cases cover inactive/missing/wrong-kind principals, allowed identities and disallowed shared fallback. See `PRINCIPAL_AUTHORITY_AND_REVOCATION_BOUNDARIES.md` for scope and remaining unprotected read routes. No local tests have been run on this change; the previous 47 passing tests belong to `5fe0b4b86d999b020e928e0bd4e8375e5c0dc7c9`. Independent security review and M2 acceptance remain pending.
+
+## M2 grant-boundary validation — 2026-10-19
+
+Operator ran at `87779b5d8422d33e7f8befbe87c4e4ff307cee52` with Python 3.12.13 and pytest 9.1.1: `python -m compileall -q src tests` succeeded, `python -m ruff check src tests` reported `All checks passed!`, and `AAO_ENV=test AAO_ENV_FILE=.env.test python -m pytest -v -rs -W error` collected and passed **50/50 tests**, 0 failures, 0 skipped, and 0 warnings in **2.43 seconds**. This is a local operator-reported result, including the three additional grant-boundary tests. It demonstrates the implemented test scope only, not an adversarial revocation race or independent security audit. M2 remains open.
+
+## M2 project-read revalidation — superseded by validation below
+
+After the 50-test baseline at `87779b5d8422d33e7f8befbe87c4e4ff307cee52`, the project listing route was changed to recheck individual AGENT credential status with `SELECT ... FOR SHARE` in its database transaction, before reading project grants. One unit test covers inactive, absent, wrong-kind, and active principals with a stubbed transaction. The pending local validation stated here has since been completed; see the B023 baseline repair entry below. No actual concurrent credential revoke/read race is proven, and M2 remains unaccepted.
+
+## B023 baseline repair and local validation — 2026-10-19
+
+- Validated revision: `d080da58d4a8a41749a932d8fdf2c1caec5ac652` on `feat/aao-m0-foundation`.
+- Fixed `B023` in `test_project_listing_rechecks_active_reader_in_transaction` by using a transaction-context-manager factory that binds each loop's selected database instance; no suppression was added.
+- Local checks on that exact revision: `python -m compileall -q src tests` succeeded; `python -m ruff check src tests` passed; `AAO_ENV=test AAO_ENV_FILE=.env.test AAO_TEST_DB_DISPOSABLE=yes python -m pytest -q -rs -W error` completed **51 passed**; `python -m pip check` reported no broken requirements; `git diff --check` passed. Pytest reported no skips or warnings.
+- The PostgreSQL integration cases ran under the explicit disposable-database gate. This is local engineering evidence only; it is not independent security review or M2 acceptance. This run does not demonstrate an actual concurrent revocation race.
+- PR #1 is merged and the branch currently contains this commit beyond its remote-tracking branch. CI for the prior revision `60de4cb7792a3e7a8229f1e9487bdac49f828294` failed; this revision has not yet been pushed and therefore has no CI result here.
+
+## Grant revocation serialization — 2026-10-19
+
+- Revision: `78fd000e65388dbee9fc0aefaa58391ba9541d7c` on
+  `feat/aao-m0-foundation`.
+- Added CEO-only exact grant deletion with an atomic `grant.revoked` event.
+  Protected API reads/writes, queue claim/completion, and reconciliation checks
+  now hold the matched grant tuple under `FOR SHARE`. Grant validity predicates
+  use `clock_timestamp()` rather than PostgreSQL transaction-start `now()`.
+- Added disposable-PostgreSQL tests demonstrating that deletion blocks behind
+  a transaction after `require_grant`, subsequent protected work is denied,
+  and a grant expiring while the check waits behind a row update is denied.
+- Local validation on this exact source tree: `python -m compileall -q src
+  tests`; `python -m ruff check src tests` (**All checks passed**);
+  `AAO_ENV=test AAO_ENV_FILE=.env.test AAO_TEST_DB_DISPOSABLE=yes python -m
+  pytest -q -rs -W error` (**53 passed, 0 skipped, 0 warnings**, 3.66 s);
+  `python -m pip check` (**No broken requirements found**); `git diff --check`
+  passed. These PostgreSQL tests ran under the explicit disposable-database
+  gate.
+- GitHub Actions run `39250603339` completed successfully on commit
+  `a56fcca70f872b07734ddf98785bc753d6daf948`, including migrations, compile,
+  Ruff, disposable PostgreSQL tests with warnings as errors and `pip check`.
+- A read-only agent engineering review found no critical lock defect, while
+  noting that the test covers a grant-check transaction rather than a complete
+  business mutation, and that repeated adversarial schedules remain absent.
+  This is not independent formal security review, auditor acceptance or M2
+  closure.
+
+## Unified execution identity — 2026-10-19
+
+- Source revision: `db7494b7e155bb50740d05a6c9c11484445cec43`; CI workflow
+  correction: `585b422eebd9fa55e0bb7ed93f0cd281bad9233b`.
+- Execution claim/completion and the inert worker now require individual AGENT
+  credentials. The legacy verifier and its test have been removed. Migration
+  `006_unified_execution_identity.sql` moves legacy rows to the AGENT
+  credential registry, aborting on principal/digest collisions, then drops
+  `worker_registrations`. CI seeds a fixed non-secret legacy fixture before
+  applying migration 006 and verifies the transferred identity in the
+  disposable PostgreSQL integration suite.
+- Local validation after applying migration 006 to the explicitly designated
+  `aao_test` database: **52 passed**, zero skips/warnings; Ruff, compileall,
+  pip check and `git diff --check` passed. This local database had no seeded
+  legacy row, so data transfer is specifically exercised by CI instead.
+- CI run `39251426719` failed because the fixture was initially seeded after
+  migration 006. The workflow ordering was corrected; run `39251540849` passed
+  on `585b422eebd9fa55e0bb7ed93f0cd281bad9233b`, including the legacy-row
+  transfer fixture, migrations, Ruff, compileall, PostgreSQL tests (**52
+  passed**) and pip check.
+- This proves the migration path for the fixed fixture and the engineering
+  checks at the listed revisions. It is not adversarial security review,
+  broad collision-case testing, production migration approval, or M2
+  acceptance.
+
+## Authenticated execution and effect reconciliation — 2026-10-19
+
+- Revision: `d8a87cb75f392a66e5366547acff2094b817fd6e` on
+  `feat/aao-m0-foundation`.
+- Both PostgreSQL reconciliation helpers now accept an AUDITOR bearer
+  credential, resolve it to an enabled AUDITOR principal under `FOR SHARE`
+  inside the same transaction, then check the project grant. Caller-supplied
+  reviewer IDs are no longer accepted. CEO grant schema now admits the two
+  reconciliation capabilities and associates them with AUDITOR principals.
+- The disposable-PostgreSQL integration suite exercises rejected ungranted
+  auditors, AGENT denial, successful execution retry reconciliation, effect
+  proposal rejection, and a real separate-connection lock wait proving
+  revocation blocks behind the authenticated transaction. After revocation,
+  the old credential is denied.
+- Local exact-tree checks: `python -m compileall -q src tests`, Ruff, full
+  PostgreSQL-gated pytest (**53 passed, 0 skipped, 0 warnings**), `pip check`
+  and `git diff --check` passed.
+- CI run `39252195117` passed its disposable PostgreSQL migrations, static
+  checks, full integration suite (**53 passed**) and `pip check` on this SHA.
+- Remaining limitations: evidence references are not verified; reconciliation
+  has no HTTP endpoint; only one lock schedule is covered; grant/lease/effect
+  retry races, independent security review and competent M2 acceptance remain
+  open. This is not M2 closure.
+
+## Effect proposal/retry serialization
+
+Commit `62ef676a67851d976f6d327800d46b247bdea956` locks the execution row
+before checking/inserting an effect proposal and accepts a new proposal only
+while that execution is `RUNNING`. This serializes proposal admission against
+the retry transaction's execution-row lock: a prior proposal is visible to the
+retry check; a retry that commits first leaves a queued execution, for which a
+new proposal is denied. Local disposable PostgreSQL validation passed **52
+tests** with compileall, Ruff, pip check and diff check clean. GitHub Actions
+run `39253994700` passed on the same code SHA. This verifies the implemented
+admission boundary, not every possible proposal/retry schedule and not any
+external effect execution.
+
+## Concurrent effect proposal versus safe retry
+
+Commit `919ce2118a37dd65763516748979494ce6f96e61` adds a barrier-started
+PostgreSQL race between `propose()` and `RETRY_CONFIRMED_SAFE`. The test asserts
+the serialized outcomes: if proposal admission wins, retry is denied because
+an effect exists; if retry wins, the execution is queued and proposal is denied.
+The race scenario passed ten consecutive local reruns, and the full disposable
+PostgreSQL suite passed **52 tests** with compileall, Ruff, pip check and diff
+check clean. GitHub Actions run `39254352077` passed on the same code SHA.
+These are bounded controlled tests, not exhaustive scheduling or adversarial
+review; no external effect was executed.
+
+## Cold PostgreSQL restart with an expired execution lease
+
+On the current code checkpoint `5d64de31429748d3150a919dedc10ae27428b640`,
+I created a separate disposable `postgres:16-alpine` container, applied
+migrations 001-006, staged and claimed one inert execution with a one-second
+lease, then restarted that PostgreSQL container. The database retained the
+execution as `RUNNING` with one attempt. After reconnecting, one call to
+`quarantine_expired()` moved it to `UNCERTAIN`; the persisted journal contained
+`claimed` then `quarantined`, and the attempt count remained one. The temporary
+container was removed afterward. This demonstrates single-instance database
+restart persistence and explicit expired-lease quarantine, not automatic
+recovery, a process crash during transaction commit, failover, or repeated
+restart schedules. No production database or external effect was used.
+
+## Inert queue staging requires execution authority
+
+Commit `9f6f3e3dc80967e794104ca8c97e347cb50637bd` changes
+`POST /v1/work/{id}/stage-inert` to require both `work.admit` and
+`execution.claim`, with both active AGENT credential and grant checks held in
+the staging transaction. The PostgreSQL integration test confirms an otherwise
+admitted agent without `execution.claim` receives 403, then succeeds after the
+grant is added; staging remains fixed/inert and feature-flagged. Local full
+suite: **52 passed**, no skips/warnings; compileall, Ruff, pip check and diff
+check clean. GitHub Actions run `39254714699` passed on the same code SHA.
+
+## Agent credential rotation serializes with in-transaction authentication
+
+Commit `627a3cdd5fd3bd5936f956e2caa9e8a3ddf511b6` adds a PostgreSQL
+integration schedule that resolves an AGENT token through
+`authenticate_in_transaction()` (holding its credential row `FOR SHARE`), then
+starts a concurrent digest rotation on a separate connection. The test checks
+PostgreSQL reports the rotation blocked until the authenticated transaction
+commits; afterward the old token is rejected and the new token resolves to the
+same principal. Five consecutive local reruns passed; full local validation
+passed **53 tests** with compileall, Ruff, pip check and diff check clean.
+GitHub Actions run `39254963905` passed on the same code SHA. This validates
+credential-row serialization, not a complete queue-claim/completion business
+operation racing rotation or all revoke/rotate schedules.
+
+## Project-grant revocation versus a protected HTTP write
+
+Commit `3168ec3ba14cd7093dc34c435db7bdcc466bb32f` adds an integration test
+that deliberately blocks an HTTP work-creation request at its final INSERT
+using a table lock, after the request has authenticated and acquired its
+project grant `FOR SHARE`. It then starts the actual grant-revocation HTTP
+route on another thread and verifies PostgreSQL reports revocation blocked by
+the work request's backend. Releasing the table lock allows the work write to
+commit first; revocation then succeeds, and the test verifies both the durable
+work row and absent grant. Five consecutive local reruns passed; full local
+validation passed **54 tests**, with compileall, Ruff, pip check and diff check
+clean. GitHub Actions run `39255217942` passed on the same code SHA. This is
+one controlled HTTP mutation/revocation ordering, not broad coverage of all
+protected routes, claim/completion, or adversarial schedules.
+
+## Execution claim versus grant revocation
+
+Commit `4df66bb35a55a20c47a991e5edb13977c9faf8f3` adds a separate PostgreSQL schedule for
+`execution_queue.claim()`: a table lock stalls the claim after it has verified
+and locked `execution.claim` `FOR SHARE`; concurrent deletion through the CEO
+grant-revocation HTTP route is observed waiting on that transaction. Releasing
+the lock lets the claim commit first and the revocation finish second. The test
+then verifies the execution is RUNNING and another claim is denied. Five
+consecutive local reruns passed; the full local suite passed **55 tests** with
+compileall, Ruff, `pip check`, and `git diff --check` clean. GitHub Actions run
+`39255590963` passed on the same code SHA. This validates one claim/revocation schedule only; it does
+not establish behavior for every queue operation, credential revocation, or
+hostile production concurrency.
+
+## Execution completion versus grant revocation
+
+The new integration schedule claims an inert execution, then holds an
+`ACCESS EXCLUSIVE` lock on `execution_journal` so completion pauses at its
+journal insert after locking the execution, active project, AGENT credential,
+and `execution.claim` grant. The actual CEO grant-revocation route is observed
+waiting on that transaction. Releasing the lock allows completion to commit
+before revocation; afterward, the test confirms `SUCCEEDED` and verifies another
+completion attempt is denied for the missing grant. Five consecutive local
+reruns passed; the full suite passed **56 tests**, and compileall, Ruff,
+`pip check`, and `git diff --check` were clean. CI has not yet run for this
+change. This is one controlled claim-completion/revocation ordering and does
+not prove credential revocation races, all queue operations, or hostile
+production schedules.
+
+CI run `39255841351` passed for code commit `773a5270cd25ec812db6272a4a26026d50f7d598`, including PostgreSQL integration tests, compilation, Ruff, and dependency checks.
+
+## Execution completion versus credential revocation
+
+A PostgreSQL integration schedule holds an `ACCESS EXCLUSIVE` lock on
+`execution_journal` after completion has authenticated the AGENT credential and
+reached the journal insert. The actual CEO credential-revocation route is
+observed blocked on the completion transaction's credential row lock. Once the
+journal lock is released, completion commits first, revocation succeeds, and a
+subsequent completion attempt is denied because the credential is revoked.
+Five consecutive local reruns passed; the full suite passed **57 tests**, and
+compileall, Ruff, `pip check`, and `git diff --check` were clean. CI has not yet
+run for this change. This checks one completion/revocation ordering only; it
+does not verify the opposite order, claim/credential-revocation schedules, or
+production adversarial concurrency.
+
+CI run `39256075817` passed for code commit `8b99abad1ae996d31284eab002ec827f066fb7a6`, including the PostgreSQL integration suite, compilation, Ruff, and dependency checks.
+
+## Execution claim versus credential revocation
+
+A PostgreSQL integration schedule holds an `ACCESS EXCLUSIVE` lock on
+`execution_queue` after a claim has authenticated the AGENT and checked its
+`execution.claim` grant. The actual CEO credential-revocation route is observed
+waiting on the claim transaction's credential lock. Releasing the queue lock
+allows claim to commit before revocation; the execution is RUNNING, revocation
+succeeds, and a subsequent claim is denied. Five consecutive local reruns
+passed; the full suite passed **58 tests**, with compileall, Ruff, `pip check`,
+and `git diff --check` clean. CI has not yet run for this change. This is one
+controlled claim/revocation schedule; it does not prove alternate lock order,
+concurrent hostile schedules, or production behavior.
+
+CI run `39256367714` passed for code commit `20a358b71677a8a132269b89781d843f9c15a936`, including PostgreSQL integration tests, compilation, Ruff, and dependency checks.
+
+## Reconciliation versus auditor credential revocation
+
+A PostgreSQL integration test creates an expired inert execution, quarantines
+it, then blocks the actual `execution_reconciliation.reconcile()` transaction
+at its journal insert after authentication and authorization. Concurrent CEO
+revocation is observed waiting on the AUDITOR credential row. Releasing the
+journal lock allows the reconciliation to mark the execution FAILED before
+revocation commits; afterward the revoked auditor credential cannot reconcile
+again. Three consecutive local reruns passed; the full suite passed **59
+tests**, with compileall, Ruff, `pip check`, and `git diff --check` clean. CI
+has not yet run for this change. This covers one `MARK_FAILED`/credential-
+revocation schedule, not retry disposition, alternate ordering, evidence
+validity, or adversarial production scheduling.
+
+CI run `39256749706` passed for code commit `a198d0f78707080147c62820846ea0feae79a00d`, including PostgreSQL integration tests, compilation, Ruff, and dependency checks.
+
+## Grant issuance validates live principal and capability role
+
+The CEO grant endpoint now checks the referenced principal credential inside
+the grant transaction, holds its row `FOR SHARE`, rejects unknown and disabled
+identities, and enforces AUDITOR-only review/reconciliation capabilities versus
+AGENT capabilities. A PostgreSQL integration test verifies absent principal
+(404), both role-mismatch directions (422), disabled principal (409), and valid
+Agent/Auditor grants (201). Three consecutive focused reruns passed; the full
+suite passed **60 tests**, with compileall, Ruff, `pip check`, and
+`git diff --check` clean. CI has not run for this change. This does not address
+constitutional CEO approval, delegation limits, revoking already-issued
+capabilities, or independent grant review.
+
+CI run `39257126986` passed for code commit `d891bacba49e2b4e291971f7ab23758a5ba73c00`, including the disposable PostgreSQL suite, compilation, Ruff, and dependency checks.
+
+## Bind external-effect proposals to the active executor lease
+
+The implementation is at code commit
+`424016daabda4f2cb0cd337be449b71d687d4cac`; the controlled proposal/completion
+lock-schedule test is at `22f7310822c2ca3bfe59b8e2ccbb9d8dbc856b0d`.
+`external_effect_registry.propose()` requires an active individual AGENT
+credential matching the execution worker, an explicit project `effect.propose`
+grant, an active project, and the current unexpired lease token for a RUNNING
+execution. The transaction records the proposer ID and request digest in the
+execution journal. It does not execute an external action. The old
+proposal/retry concurrency test was removed because those operations require
+mutually exclusive execution states; a controlled proposal/completion
+integration schedule replaced it. The test held the execution row, observed
+the proposal blocked on the database lock, and released it while completion
+competed for the same execution.
+
+Local verification used the explicitly disposable PostgreSQL test database:
+`python -m compileall -q src tests` succeeded; `python -m ruff check src tests`
+reported all checks passed; the full suite passed **60 tests**, with zero
+failures, skips, or warnings; `python -m pip check` reported no broken
+requirements; and `git diff --check` was clean. The focused reconciliation
+integration file passed **2 tests in three consecutive reruns**. GitHub CI run
+`39258084851` passed for the implementation SHA, and run `39258576394` passed
+for the test SHA. CI applied the schema to a fresh
+disposable PostgreSQL service, then passed compileall, Ruff, the
+warnings-as-errors unit/integration suite, and `pip check`. This is engineering evidence,
+not independent security/architecture review or M2 acceptance. Remaining
+gates include adversarial credential/grant revocation schedules for proposal,
+reconciliation-versus-grant-revocation schedules, and independent review.
+
+## Reconciliation retry and auditor revocation schedule
+
+The test change at
+`9247f7a3e8708efcbddce6652ab5f56d13bb1aa4` parameterizes
+`test_reconciliation_serializes_with_auditor_credential_revocation` across
+`MARK_FAILED` and `RETRY_CONFIRMED_SAFE`. Both controlled PostgreSQL schedules
+observed reconciliation blocked at its journal write while auditor credential
+revocation waited, then observed the disposition commit first and a later
+attempt rejected for the revoked credential. This checks one lock ordering for
+each disposition; grant revocation, reverse ordering, and adversarial
+repetitions remain unverified.
+
+Local verification: focused reconciliation integration file passed **3 tests**;
+full disposable PostgreSQL suite passed **61 tests**, zero skips or warnings;
+compileall, Ruff, `pip check`, and `git diff --check` succeeded. GitHub CI run
+`39258935861` passed for this exact test SHA with a disposable PostgreSQL
+service, compileall, Ruff, warnings-as-errors suite, and `pip check`.
+
+
+## Effect proposal replay and rejection lock ordering
+
+The uncommitted candidate change makes effect rejection lock the execution and
+project before locking the effect row, matching proposal replay's execution-
+before-effect order. Replaying an idempotency key after rejection now fails
+closed instead of reporting a rejected effect as active. A controlled
+PostgreSQL test holds the execution row and starts replay and rejection as
+separate transactions; it verifies serialized completion and fail-closed replay.
+The schedule repeats five times per test run. This addresses a plausible lock
+ordering risk; no deadlock was previously reproduced.
+
+Local verification on the current uncommitted worktree: compileall succeeded;
+Ruff passed; the full disposable PostgreSQL suite passed **61 tests** with no
+skips or warnings; `pip check` and `git diff --check` passed. The focused
+reconciliation integration file passed **3 tests**. This evidence is not yet
+associated with a commit SHA or CI run and does not close grant-revocation race
+coverage, independent review, or M2 acceptance.
+
+## CEO development-bearer production denial
+
+- Revision: `9339a1da24e17599422fd62227107f46302bf88e` on
+  `feat/aao-m0-foundation`.
+- `require_ceo()` now fails closed with HTTP 503 outside explicit
+  `development`/`test` modes. `read_principal()` no longer recognizes the
+  static CEO token in those environments. A typo or whitespace-surrounded
+  production mode therefore cannot enable the development bearer.
+- Unit/API tests cover `production`, ` PRODUCTION `, and an unrecognized
+  environment mode, direct administration and reader dependencies, one CEO
+  mutation route, and project-list access. These tests use a test literal only;
+  they do not read or print a configured secret.
+- Local validation on the committed tree: `python -m compileall -q src tests`
+  succeeded; `python -m ruff check src tests` passed; the full explicit
+  disposable-PostgreSQL suite passed **64 tests, 0 skips, 0 warnings** with
+  `-W error`; `python -m pip check` reported no broken requirements; and
+  `git diff --check` passed.
+- GitHub Actions run `39260684020` completed successfully for this exact SHA.
+  CI applied migrations to a fresh disposable PostgreSQL service and passed
+  compileall, Ruff, the warnings-as-errors integration/unit suite, and
+  `pip check`. This change disables the provisional CEO bearer outside explicit
+  development/test modes; it does not implement production CEO identity,
+  signed approval, or M2 acceptance.
+  Remaining high-priority work includes HTTP credential-rotation races,
+  project-grant revocation schedules, adversarial runtime recovery, and
+  independent security/architecture review.
+
+## HTTP request-context token rotation gap — 2026-10-19
+
+- Code revision: `a2791349e6000bec56d95cfe0ede587bb631573b` on
+  `feat/aao-m0-foundation`.
+- Added a disposable-PostgreSQL route integration test that resolves an
+  individual AGENT reader context, rotates the credential in a separate
+  committed HTTP request, then injects the captured stale context into the
+  actual project-list route. The stale context is denied with 403; a freshly
+  authenticated context sees its granted project. App dependency overrides
+  are removed in `finally` to prevent cross-test leakage.
+- Local checks on this exact code tree: focused test **1 passed**; full suite
+  **66 passed, 0 skipped, 0 warnings** under `-W error`; compileall, Ruff,
+  `pip check`, and diff check passed. Tests ran against the configured
+  explicitly disposable PostgreSQL database.
+- GitHub Actions run `39261728929` passed for this exact code revision. CI
+  applied migrations to a fresh disposable PostgreSQL service and completed
+  compileall, Ruff, the warnings-as-errors unit/integration suite and `pip
+  check`. This bounded test proves
+  rotation between HTTP dependency resolution and project-list transaction;
+  it does not prove all rotation/revocation schedules or M2 acceptance.
+
+## Project-state generation fences execution leases — 2026-10-19
+
+- Code revision: `b1478f53dd591a0c2bda3b300d94984566d4e35d` on
+  `feat/aao-m0-foundation`.
+- Migration 007 binds each claim to a database-owned project state generation.
+  Completion and effect proposal deny stale generations; authorized retry
+  reconciliation clears the old generation before a fresh claim. The trigger
+  advances only on an actual state transition and prevents callers from
+  forging the generation value. Migration 001-005 remain unchanged.
+- PostgreSQL integration tests cover a real pause transaction blocking on the
+  project row while completion waits, pause/resume invalidation of the old
+  lease, stale effect-proposal denial, expiry quarantine, and authorized
+  reconciliation followed by a fresh claim. The controlled pause/complete
+  lock schedule passed four consecutive runs.
+- Local validation against the explicitly disposable `aao_test` database:
+  full suite **67 passed, 0 skipped, 0 warnings** under `-W error`; compileall,
+  Ruff, `pip check`, and `git diff --check` passed. Migration 007 was applied
+  to `aao_test`; the database name was checked without displaying its URL.
+- GitHub Actions run `39263409618` passed on exact source/documentation SHA
+  `ff4c0bf976896190c42f8b1861a49dada4c4649d`. CI applied migrations 001-007
+  to a fresh disposable PostgreSQL service, then passed compileall, Ruff, the
+  warnings-as-errors unit/integration suite, and `pip check`. These checks
+  cover bounded PostgreSQL schedules and migration application, not
+  exhaustive race schedules, production recovery, external effect
+  cancellation, independent review, or M2 acceptance.
+
+## Review requires completed execution and excludes recorded claimant — 2026-10-19
+
+- Code revision: `68fe0fd12fba43ddfbaa6a1b01257fdc4dbca7a1` on
+  `feat/aao-m0-foundation`.
+- The review route locks execution rows for the work and returns 409 unless
+  every associated execution is `SUCCEEDED`. It also rejects reviewer IDs
+  recorded in durable `claimed` journal entries. This is principal-ID-level
+  separation only; distinct IDs do not prove distinct humans, and evidence
+  references remain unverified.
+- The focused PostgreSQL workflow test verifies review denial while execution
+  is running and approval eligibility after successful completion. The full
+  explicitly disposable PostgreSQL suite passed **67 tests, 0 skips, 0
+  warnings** under `-W error`; compileall, Ruff, `pip check`, and `git diff
+  --check` passed. CI was intentionally not awaited per operator direction.
+- This bounded local evidence is not adversarial concurrency coverage,
+  independent review, or M2 acceptance.
+
+## Effect proposal serializes with authorization revocation — 2026-10-19
+
+- Code revision: `b804f6a7a307e144cfb4e72d880850de98bfaffe` on
+  `feat/aao-m0-foundation`.
+- A disposable-PostgreSQL integration test demonstrates both protected-write
+  first orderings with separate connections and observed blocker PIDs: an
+  effect proposal holds the `effect.propose` grant while grant deletion waits;
+  and a proposal holds the AGENT credential while credential revocation waits.
+  In both cases proposal commits, revocation succeeds, and subsequent proposal
+  is denied. Inverse schedules queue grant deletion and credential revocation
+  before the competing authorization query; each revocation is observed ahead
+  of that query, commits, and causes the proposal to be denied. Observer SQL
+  filters for the expected blocking PID to avoid unrelated-waiter selection.
+  No external effect is executed.
+- The proposal-first and revocation-first schedules each passed four focused
+  runs. The exact candidate tree passed the full suite:
+  **68 passed, 0 skipped, 0 warnings** under `-W error`; compileall, Ruff,
+  `pip check`, and `git diff --check` passed. `pip check` reported no broken
+  requirements.
+- A focused read-only IAM review found the asserted lock chains and query
+  patterns consistent with the source and no concrete flaw in either ordering.
+  This is not formal independent security review, exhaustive race proof, or M2
+  acceptance. CI was not awaited per operator direction.
+
+## Execution reconciliation serializes with grant revocation — 2026-10-19
+
+- Code revision: `0164e4624dcf851b3cd5f0944c98c8d9ab971307` on
+  `feat/aao-m0-foundation`.
+- A disposable-PostgreSQL integration test covers both orderings for the
+  `execution.reconcile` grant and `MARK_FAILED`: with reconciliation holding
+  its grant and waiting at the journal write, grant deletion is observed
+  blocked by that transaction and reconciliation commits first; with deletion
+  queued first on the grant row, the reconciliation grant query is observed
+  blocked by the revoker, deletion commits, and reconciliation is denied.
+  The test checks the resulting execution states (`FAILED` and `UNCERTAIN`)
+  and performs no external action.
+- The focused test passed four consecutive runs before final assertions and
+  passed again with those assertions. On this exact code revision,
+  `python -m compileall -q src tests`, `python -m ruff check src tests`, the
+  full explicitly disposable PostgreSQL suite (**69 passed, 0 skipped, 0
+  warnings** under `-W error`), `python -m pip check`, and `git diff --check`
+  passed. CI was not awaited per operator direction.
+- This is bounded evidence for `execution.reconcile` grant deletion and one
+  disposition, not coverage of `effect.reconcile`, all dispositions, hostile
+  schedules, independent security review, or M2 acceptance.
+
+## Effect reconciliation serializes with grant revocation — 2026-10-19
+
+- Code revision: `03bf547e6db60de7b3dd60ec392862dd4faa68d6` on
+  `feat/aao-m0-foundation`.
+- The disposable-PostgreSQL effect workflow now observes both
+  `effect.reconcile` grant-deletion orderings. With rejection at its journal
+  write, deletion is observed waiting on that operation and the rejection
+  commits first. With deletion queued first on the grant row, the auditor's
+  grant lookup is observed waiting on the revoker; deletion commits, rejection
+  is denied, and the effect remains `PROPOSED`. No external effect is invoked.
+- The focused workflow test passed four consecutive runs. On this exact code
+  revision, compileall, Ruff, the full explicitly disposable PostgreSQL suite
+  (**69 passed, 0 skipped, 0 warnings** under `-W error`), `pip check`, and
+  `git diff --check` passed. CI was not awaited per operator direction.
+- This proves selected controlled schedules for both reconciliation grants,
+  not hostile/exhaustive scheduling, evidence-reference validation, formal
+  independent review, or M2 acceptance.
+
+## Reconciliation race observers verify expected blocker — 2026-10-19
+
+- Code revision: `23b9787821a193310e6b63e6fa29964ef3f92e2b` on
+  `feat/aao-m0-foundation`.
+- A read-only review identified that one PostgreSQL race-test helper accepted
+  any lock blocker despite receiving an expected PID. The helper now requires
+  that PID in `pg_blocking_pids()`, including effect rejection behind an
+  already-queued proposal. This strengthens the observation of the claimed
+  orderings; it does not alter runtime behavior.
+- The execution- and effect-reconciliation grant-race tests passed three
+  consecutive runs each after the correction. On this exact code revision,
+  compileall, Ruff, the full explicitly disposable PostgreSQL suite (**69
+  passed, 0 skipped, 0 warnings** under `-W error`), `pip check`, and
+  `git diff --check` passed. CI was not awaited per operator direction.
+- The review was an internal read-only specialist pass, not formal independent
+  security review. Selected controlled schedules do not prove exhaustive
+  race safety or M2 acceptance.
+
+## Protected board denies a revoked project reader — 2026-10-19
+
+- Code revision: `5eeea36f99aa7edf7fac31148b41abc9f1626074` on
+  `feat/aao-m0-foundation`.
+- The existing PostgreSQL request-context integration test now reuses a fresh
+  authenticated AGENT context after deleting its `project.read` grant, then
+  calls the protected board route and observes HTTP 403. This verifies that
+  the route checks current database authorization rather than trusting the
+  previously resolved dependency context.
+- On this exact code revision, the focused test passed; compileall, Ruff, the
+  full explicitly disposable PostgreSQL suite (**69 passed, 0 skipped, 0
+  warnings** under `-W error`), `pip check`, and `git diff --check` passed.
+- This is a sequential grant-revocation check, not an observed concurrent
+  lock schedule; it does not establish general read authorization correctness,
+  independent review, or M2 acceptance.
+
+## Project board read serializes with grant revocation — 2026-10-19
+
+- Code revision: `8c5ccf38fa2d011426da20c535668b2b2af7527a` on
+  `feat/aao-m0-foundation`.
+- The request-context route test now also queues CEO deletion of a reader's
+  `project.read` grant while holding the grant tuple. It observes the DELETE
+  waiting on the blocker, then observes the board route's `FOR SHARE` grant
+  query waiting on that DELETE PID. After release, deletion commits and the
+  already-resolved reader context receives HTTP 403 from the board.
+- The focused test passed four consecutive runs. On this exact code revision,
+  compileall, Ruff, the full explicitly disposable PostgreSQL suite (**69
+  passed, 0 skipped, 0 warnings** under `-W error`), `pip check`, and
+  `git diff --check` passed.
+- This is a selected controlled read-authorization schedule, not proof for
+  every read route, hostile concurrency, independent review, or M2 acceptance.
+
+## Work approvals and completion fail closed — 2026-10-19
+
+- Code revision: `789932a` (`Fail closed on unverified work approvals`) on
+  `feat/aao-m0-foundation`.
+- `APPROVE` is rejected before persistence in both development APIs until
+  reviewer independence and evidence references can be independently
+  verified. `REJECT` remains available and returns work to `IN_PROGRESS`.
+  `VERIFIED` to `DONE` is blocked even when an older unverified approval row
+  exists. Existing terminal `DONE` records were not rewritten; their historical
+  validity is not established by this change.
+- The disposable-PostgreSQL workflow test and SQLite core test verify rejected
+  approvals create no approval row, rejection behavior, and denial of
+  completion through a legacy approval row. The full suite passed **69 tests,
+  0 skipped, 0 warnings** under `-W error`. Compileall, Ruff, `pip check`, and
+  `git diff --check` passed locally. CI was not awaited per operator
+  instruction.
+- This is a fail-closed development boundary, not proof of auditor identity,
+  evidence validity, independent review, retrospective validation of DONE
+  records, or M2 acceptance.
+
+## Review rejection serializes with auditor credential revocation — 2026-10-19
+
+- Code revision: `c0a1aa7` on `feat/aao-m0-foundation`.
+- A disposable-PostgreSQL integration test pauses the actual review route after
+  its in-transaction AUDITOR credential and `work.review` grant checks. With a
+  separate connection, CEO credential revocation is observed blocked by the
+  review transaction's backend PID. After release, rejection commits, revocation
+  succeeds, and a later review attempt with the revoked token is denied.
+- The controlled schedule passed three consecutive focused runs. The full
+  explicitly disposable PostgreSQL suite passed **70 tests, 0 skipped, 0
+  warnings** under `-W error`; compileall, Ruff, `pip check`, and
+  `git diff --check` passed locally. CI was not awaited per operator
+  instruction.
+- This covers one protected-operation-first ordering for `REJECT`; it is not
+  exhaustive auditor-revocation coverage, independent review, or M2 acceptance.
+
+## Review rejection serializes with auditor grant deletion — 2026-10-19
+
+- Code revision: `39c8b23` on `feat/aao-m0-foundation`.
+- The review-route concurrency test now exercises both an AUDITOR credential
+  revocation and project `work.review` grant deletion. In each schedule, the
+  route has completed its in-transaction authorization checks before the
+  revoker starts; PostgreSQL reports the revocation statement blocked by the
+  review transaction PID. Rejection commits, revocation commits afterward,
+  and a subsequent request is denied.
+- Both schedules passed three consecutive focused runs. The full explicitly
+  disposable PostgreSQL suite passed **71 tests, 0 skipped, 0 warnings** under
+  `-W error`; Ruff, compileall, `pip check`, and `git diff --check` passed
+  locally. CI was not awaited per operator instruction.
+- These are selected protected-operation-first schedules; they do not prove
+  exhaustive revocation ordering, human identity, independent review, or M2
+  acceptance.
+
+## Review route rejects stale authorization contexts after revocation — 2026-10-19
+
+- Code revision: `edc0e42` on `feat/aao-m0-foundation`.
+- The integration test supplies the review route with a previously authenticated
+  request context, then revokes either the AUDITOR credential or project
+  `work.review` grant before the route transaction. In both cases, its
+  in-transaction recheck returns 403 and no review is inserted.
+- Both controlled cases passed three consecutive focused runs. The full
+  explicitly disposable PostgreSQL suite passed **71 tests, 0 skipped, 0
+  warnings** under `-W error`; Ruff, compileall, `pip check`, and
+  `git diff --check` passed locally. CI was not awaited per operator
+  instruction.
+- This verifies these stale-context denials only; it is not exhaustive
+  revocation-ordering coverage, independent review, or M2 acceptance.
+
+## Content-addressed reconciliation evidence and authorized inspection — 2026-10-19
+
+- Exact source revision: `c3b944f07e1b94b52d3268575ff72c820d7c4824` on
+  `feat/aao-m0-foundation`.
+- Added migrations 008/009 for project-scoped content-addressed evidence and
+  UPDATE/DELETE/TRUNCATE denial triggers. Agent submission is individually
+  authenticated and grant-checked; reconciliation resolves and re-hashes
+  references; an individually authenticated auditor with a reconciliation
+  grant can inspect artifact bytes through the internal Python interface.
+- Local disposable-PostgreSQL database migration application was guarded by
+  test mode, the explicit disposable flag, and configured test DSN. The DSN was
+  not emitted. The full command
+  `AAO_ENV=test AAO_ENV_FILE=.env.test python -m pytest -q -rs -W error`
+  passed **78 tests, 0 failures, 0 skips, 0 warnings** in **19.55 s**.
+- `python -m compileall -q src tests`, `python -m ruff check src tests`,
+  `python -m pip check`, and `git diff --check` all passed on the same source
+  tree immediately before commit. CI was not run or awaited per operator
+  direction.
+- This proves only the tested local behavior. It does not prove evidence truth,
+  human authorship, reviewer independence, owner-resistant immutability,
+  production permissions, or M2 acceptance. A PostgreSQL owner can disable
+  triggers; there is no HTTP artifact interface. No formal independent review
+  was obtained.
+
+## Evidence inspection authorization negatives — 2026-10-19
+
+- Exact source revision: `88ec4264d655e6d25ec2b8f6859019a411a797fa` on
+  `feat/aao-m0-foundation`; this adds negative integration assertions that an
+  AGENT cannot use auditor artifact inspection and an AUDITOR without the
+  requested project capability cannot inspect evidence.
+- The full explicitly disposable PostgreSQL suite passed **78 tests, 0
+  failures, 0 skips, 0 warnings** in **19.54 s** under `-W error`. Compilation,
+  Ruff, `pip check`, and `git diff --check` also passed immediately before
+  commit. CI was not awaited per operator direction.
+- This adds denial coverage only; it does not prove human independence,
+  evidence truth, all read/submit/revocation races, or M2 acceptance.
+
+## Evidence artifact reads under concurrent grant revocation — 2026-10-19
+
+- Exact source revision: `7c1e21a4e959b0b1cc0410f9ae90a078a19ff315` on
+  `feat/aao-m0-foundation`; adds a PostgreSQL integration schedule in which
+  grant revocation wins while an evidence read is waiting, and verifies the
+  read is denied without disclosing artifact bytes.
+- The focused race test passed **3 consecutive runs** (1 passed, 5 deselected
+  per run). The full explicitly disposable PostgreSQL suite passed **79 tests,
+  0 failures, 0 skips, 0 warnings** in **19.74 s** with `-W error`.
+- `python -m compileall -q src tests`, `python -m ruff check src tests`,
+  `python -m pip check`, and `git diff --check` passed on the same source tree.
+  CI was not run or awaited per operator direction.
+- This covers one controlled grant-deletion/read schedule; it does not prove
+  every credential/grant race, establish truth or human provenance of the
+  evidence, or constitute independent security review or M2 acceptance.
+
+## Evidence registration denied when concurrent grant revocation wins — 2026-10-19
+
+- Exact source revision: `0c3fc8e508de7f8a5a48bffba294b2dab2f3de53` on
+  `feat/aao-m0-foundation`; adds a controlled PostgreSQL schedule for
+  `register_evidence()` against deletion of the `evidence.submit` project
+  grant. The test observes the registration's grant query blocked behind the
+  revoker, then verifies denial after revocation commits and verifies that
+  neither the artifact nor its registration event was written.
+- The focused race test passed **3 consecutive runs** (1 passed, 6 deselected
+  per run). The full explicitly disposable PostgreSQL suite passed **80 tests,
+  0 failures, 0 skips, 0 warnings** in **19.70 s** under `-W error`.
+- `python -m compileall -q src tests`, `python -m ruff check src tests`,
+  `python -m pip check`, and `git diff --check` passed on the same source tree.
+  CI was not run or awaited per operator direction.
+- Together with the prior read-race test, this demonstrates two specific
+  revocation-wins schedules for evidence access. It does not prove all
+  credential/grant orderings, evidence truth/authorship, a formal independent
+  review, or M2 acceptance.
+
+## Duplicate-safe inert staging after client reconnection — 2026-10-19
+
+- Exact source revision: `99760c7339323600368e5dbb145b088d83ad0715` on
+  `feat/aao-m0-foundation`; extends the disposable PostgreSQL staging test to
+  claim once, reconnect the HTTP test client, and replay the staging request.
+  The replay returns the same execution ID and `RUNNING` status; the queue
+  contains one row, attempts remain one, and one `claimed` journal entry exists.
+- The focused staging test passed **twice** after the extension (1 passed, 6
+  deselected per run). The full disposable PostgreSQL suite passed **80 tests,
+  0 failures, 0 skips, 0 warnings** in **19.92 s** under `-W error`.
+- On this source tree, `python -m compileall -q src tests`, Ruff, `pip check`,
+  and `git diff --check` passed. CI was not run or awaited per operator
+  direction.
+- This proves duplicate-safe HTTP request replay after client reconnection for
+  an already-claimed inert execution. It does not simulate an AAO process
+  restart, post-reconciliation redelivery, or an autonomous event consumer and
+  does not close the broader M2-06 recovery requirement.
+
+## Consolidated M2 candidate verification — 2026-10-19
+
+- Exact checked-out revision: `7a9835316c273da5249329f3ead1f5e3e64cd732`
+  on `feat/aao-m0-foundation`; this revision contains documentation-only
+  changes after the implementation candidate `99760c7` recorded above.
+- Re-ran locally against the explicitly disposable PostgreSQL test database:
+  `AAO_ENV=test AAO_ENV_FILE=.env.test python -m pytest -q -rs -W error` —
+  **80 passed, 0 failed, 0 skipped, 0 warnings** in **19.80 s**.
+- `python -m compileall -q src tests`, `python -m ruff check src tests`,
+  `python -m pip check`, and `git diff --check` all passed at this checkout.
+  CI was not awaited per operator instruction.
+- This re-verifies the repository candidate at the stated local boundary. It
+  is not a formal independent review, CI result, operational recovery proof,
+  scope ratification, or M2 acceptance.
+
+## M2-A clean migration replay and suite — 2026-10-19
+
+- Replayed PostgreSQL migrations `001_foundation.sql` through
+  `009_prevent_evidence_truncation.sql`, in order, on a newly created scratch
+  database named with a random `aao_m2a_replay_` suffix. The configured test
+  database was used only as the source of local PostgreSQL connection settings
+  and explicit disposable-mode confirmation; no secret DSN was printed.
+- To exercise the same legacy upgrade path as CI, inserted one synthetic
+  `worker_registrations` row after migration 005 and before 006. The final
+  `schema_migrations` entry was `009_prevent_evidence_truncation`.
+- The full suite ran against that scratch database with
+  `AAO_ENV=test AAO_ENV_FILE=.env.test` and warnings as errors: **80 passed,
+  0 failed, 0 skipped, 0 warnings** in **19.46 s**. The scratch database was
+  terminated/dropped after the run.
+- This was local verification of a fresh schema plus the represented legacy
+  upgrade path, not backup/restore, production deployment, CI, independent
+  review, or M2-A acceptance. The test command used the candidate worktree with
+  documentation-only scope and review-package updates after implementation
+  source `99760c7`; code was unchanged.
+
+## M2-A scope package verification — 2026-10-19
+
+- Exact checked-out and PR candidate revision: `acb85a268b3ec32630e858512058d970ae970191` on `feat/aao-m0-foundation` / PR #2 head `review/m2-inert-candidate`.
+- `AAO_ENV=test AAO_ENV_FILE=.env.test python -m pytest -q -rs -W error` passed **80 tests, 0 failures, 0 skips, 0 warnings** in **19.76 s** against the explicitly disposable local test database.
+- `python -m compileall -q src tests`, `python -m ruff check src tests`, `python -m pip check`, and `git diff --check` passed at this revision.
+- Separately, fresh scratch database replay of migrations 001–009 including the synthetic legacy row upgrade path and the full 80-test suite passed at this same source state; scratch DB dropped. The exact run was performed before this evidence-registration-only commit, with no code changes between runs.
+- Live PR `#2` head was initially stale immediately after push, then refreshed to this exact SHA. CI is not asserted or awaited. This remains candidate evidence, not independent review or M2-A acceptance.
+
+## M2-A suspension and credential-boundary fix — 2026-10-19
+
+- Exact implementation candidate: `cbcab10f7010004b8ee12801356a2643f9dc6a79`
+  on `feat/aao-m0-foundation`. The commit adds a CEO-authenticated, audited
+  PostgreSQL project pause/resume/cancel path and denies individual development
+  credentials outside `development`/`test`.
+- Against explicitly disposable local PostgreSQL, the full suite passed:
+  **83 passed, 0 failed, 0 skipped, 0 warnings** in **19.73 s**, with
+  `AAO_ENV=test AAO_ENV_FILE=.env.test python -m pytest -q -rs -W error`.
+  The new integration test verifies unauthenticated suspension denial, allowed
+  and invalid transitions, audit records, and generation advancement.
+- `python -m compileall -q src tests`, `python -m ruff check src tests`,
+  `python -m pip check`, and `git diff --check` passed immediately before the
+  implementation commit. The commit contains the same tested code; changes
+  after testing before commit were documentation only.
+- Migration replay evidence above predates these code-only corrections. The
+  corrections do not change migrations or schema, but the 83-test result is
+  against the configured disposable test database, not a fresh replay of the
+  entire migration chain. CI was not awaited. This is engineering evidence,
+  not independent review or M2-A acceptance.
+
+## M2-A inert proposal idempotency race fix — 2026-10-19
+
+- Exact implementation candidate: `9fa503c334f17e3a7b6ef962a5df3a6428b280e8`
+  on `feat/aao-m0-foundation`; it follows suspension/credential fix
+  `cbcab10f7010004b8ee12801356a2643f9dc6a79`.
+- PostgreSQL effect proposal insertion now resolves a concurrent winner using
+  `ON CONFLICT (idempotency_key) DO NOTHING RETURNING` followed by a locked
+  read and semantic comparison. The regression schedule uses separate
+  transactions, two active executions, and one previously absent key; one
+  proposal succeeds and the other returns a domain conflict rather than a raw
+  unique-constraint error.
+- Focused integration suite: **7 passed** in **8.90 s**. Full suite at the
+  exact source tree: **83 passed, 0 failed, 0 skipped, 0 warnings** in
+  **19.89 s**, with warnings as errors. `compileall`, Ruff, `pip check`, and
+  `git diff --check` passed. Documentation-only acceptance/scope references
+  were updated after the code commit; no code changed after that test run.
+- This is local disposable PostgreSQL evidence, not CI, independent review,
+  production behavior, external-effect idempotency, or M2-A acceptance.
+
+## M2-A review follow-up — API lease fencing and edge normalization — 2026-10-19
+
+- Exact implementation candidate: `dc084417a2ba683fe4737342f89e9cd1036b38ad`.
+  The proposal-race fallback now normalizes PostgreSQL UUID values before
+  comparing to the API string identifier. The lease integration test now
+  pauses and resumes a project through the CEO API while holding a live lease,
+  proves that completion is denied while paused and remains denied after
+  resume, and retains the controlled concurrent completion schedule.
+- Full disposable PostgreSQL suite at this source tree:
+  **83 passed, 0 failed, 0 skipped, 0 warnings** in **19.74 s** with
+  `AAO_ENV=test AAO_ENV_FILE=.env.test python -m pytest -q -rs -W error`.
+  The focused lease integration suite passed **8 tests**. `compileall`, Ruff,
+  `pip check`, and `git diff --check` passed.
+- This resolves the internal review's A-07 end-to-end coverage gap and a
+  low-probability UUID normalization inconsistency. The concurrent proposal
+  test remains contention coverage; it does not deterministically prove entry
+  into PostgreSQL's conflict-fallback branch. No external effects are enabled.
+  This evidence is not CI, formal independent review, production evidence, or
+  M2-A acceptance.
+
+## M2-A review package trace verification — 2026-10-19
+
+- Exact package revision checked: `62fc0a2c63d3d493d7caaf5ad2a28beb6763a013`.
+  Local `HEAD`, `origin/feat/aao-m0-foundation`,
+  `origin/review/m2-inert-candidate`, and live PR #2 head matched this SHA.
+  The implementation source remains `dc084417a2ba683fe4737342f89e9cd1036b38ad`.
+- The PR description and latest review-request comment both named the same
+  package/source SHA pair. PR #2 remained OPEN and DRAFT, with no requested
+  reviewers or submitted reviews. The GitHub collaborator list contained only
+  the owner/implementer; no qualified independent reviewer was available in
+  that roster.
+- The package changes since the `dc08441` implementation source are
+  documentation-only. `git diff --check` passed for the package documentation
+  changes. No code tests were rerun at this package SHA; the full 83-test and
+  static-check results remain tied to implementation SHA `dc08441` as recorded
+  above.
+- This is a repository/ref trace check, not independent review, CI, a new code
+  validation, or M2-A acceptance. The package SHA must be rechecked against the
+  live PR immediately before formal review.

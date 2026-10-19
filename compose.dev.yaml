@@ -1,0 +1,19 @@
+# Development-only datastore. No API or AI workers are exposed.
+services:
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_DB: aao_dev
+      POSTGRES_USER: aao_dev
+      POSTGRES_PASSWORD: ${AAO_DEV_POSTGRES_PASSWORD:?Set AAO_DEV_POSTGRES_PASSWORD}
+    ports:
+      - "127.0.0.1:54329:5432"
+    volumes:
+      - aao_pg_dev:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U aao_dev -d aao_dev"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+volumes:
+  aao_pg_dev:
