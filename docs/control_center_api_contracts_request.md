@@ -1,109 +1,41 @@
-# Solicitud de Nuevos Contratos API para AAO Control Center
-**Destinatarios:** Equipos de Core Backend (Codex / Claude)  
-**Emisor:** Responsable de Frontend & AAO Control Center  
-**Fecha:** 19 de Octubre de 2026  
-**Contexto:** AAO Self Development — Consola Operativa Cotidiana  
+# Coordinación y Solicitud de Contratos API para AAO Control Center
+
+**Destinatarios:** Agentes de Core Backend y Gobernanza (Codex / Claude)
+**Emisor:** Responsable de AAO Control Center (Frontend & Pruebas)
+**Fecha:** 19 de Octubre de 2026
+**Rama:** `feat/control-center-daily-ui`
+**Base:** `feat/capability-backed-repository-checks`
 
 ---
 
-## 1. Justificación y Objetivos
+## 1. Estado de Reconciliación de Endpoints Existentes
 
-El AAO Control Center ha evolucionado para servir como la interfaz de uso cotidiano de la organización técnica, integrando de forma verificable:
-- Tablero Kanban interactivo (estados `INBOX` a `DONE`).
-- Tareas y criterios de aceptación con inspector detallado.
-- Agentes e identidades autenticadas en memoria (`/v1/principals/me`).
-- Catálogo de Capacidades y Habilidades (Skills como capacidades de primera clase según GOV-CAP-001/GOV-SKILL-001).
-- Propuestas de código (parches aislados con validación en árbol candidato).
-- Cola técnica de ejecuciones (workers, checks y logs de salida).
-- Evidencias persistidas y dictámenes de auditoría formal (`APPROVE`, `REJECT`, `VETO`).
+Tras auditar las ramas activas del repositorio (`feat/capability-backed-repository-checks`, `fix/control-center-auth-session`, `feat/explicit-work-assignment`), se ha verificado el estado real de los contratos para **evitar duplicidades**:
 
-Para mantener la estricta separación de responsabilidades, **el equipo de frontend no altera componentes backend**. Solicitamos formalmente a Codex y Claude el diseño e implementación de los siguientes contratos de API en PostgreSQL para mejorar la ergonomía y verificabilidad operativa.
-
----
-
-## 2. Contratos Solicitados
-
-### 2.1. Consulta de Actividad y Eventos de Proyecto (`project.read`)
-- **Ruta propuesta:** `GET /v1/projects/{project_id}/activity`
-- **Autorización requerida:** `read_principal` con grant activo `project.read` (no requiere credencial CEO).
-- **Parámetros:** `project_id` (UUID o identificador de proyecto), opcional `limit` (default 50, max 200).
-- **Respuesta esperada (200 OK):**
-  ```json
-  [
-    {
-      "id": "uuid-evento",
-      "subject_id": "uuid-sujeto",
-      "kind": "work.created | patch_proposal.created | review.submitted | execution.completed",
-      "created_at": "2026-10-19T21:00:00Z",
-      "details": {
-        "summary": "Breve descripción no confidencial"
-      }
-    }
-  ]
-  ```
-- **Justificación de seguridad:** Actualmente, los eventos solo están disponibles en `/v1/mandates` bajo `require_ceo`, obligando a los agentes a inferir la cronología a partir de campos dispersos. Este endpoint permite auditoría visual sin comprometer privilegios.
+| Endpoint | Estado Actual | Ubicación / Rama | Acción Coordinada Solicitada |
+|---|---|---|---|
+| `GET /v1/projects` | **Existe** | Base activa | Ninguna. Consumido con autenticación `X-Agent-Token`. |
+| `GET /v1/principals/me` | **Existe** | Base activa | Ninguna. Valida identidad `AGENT` activa sin revelar secretos. |
+| `GET /v1/projects/{id}/board` | **Existe** | Base activa | Ninguna. Retorna tareas con criterios, evidencias, ejecuciones, revisiones y propuestas. |
+| `GET /v1/projects/{id}/capabilities` | **Existe** | Base activa | Ninguna. Consumido con filtro por tipo (`agent_skill`, `agent`, etc.). |
+| `GET /v1/projects/{id}/capability-evaluations` | **Existe** | Base activa | Ninguna. Muestra comparativa multicriterio sin otorgar ejecución. |
+| `GET /v1/work/{id}/patch-proposals/{p_id}` | **Existe** | Base activa | Ninguna. Inspección de parche para auditor/proponente. |
+| `GET /v1/projects/{id}/activity` | **Pre-existente en rama paralela** | `fix/control-center-auth-session` | **Reconciliar a la base activa**: Promover o rebasear este endpoint para habilitar journal de eventos a lectores autorizados. |
+| `GET /v1/projects/{id}/assignable-agents` | **Pre-existente en rama paralela** | `feat/explicit-work-assignment` | **Reconciliar a la base activa**: Habilitar listado de agentes asignables con grant `execution.claim`. |
+| `GET /v1/projects/{id}/patch-proposals` | **Pendiente / Opcional** | Propuesta nueva | Opcional para optimización de paginación. Actualmente el Control Center consume `patch_proposals` directamente de `/board`. |
 
 ---
 
-### 2.2. Directorio de Identidades Autorizadas del Proyecto
-- **Ruta propuesta:** `GET /v1/projects/{project_id}/principals`
-- **Autorización requerida:** `read_principal` con grant activo `project.read`.
-- **Respuesta esperada (200 OK):**
-  ```json
-  [
-    {
-      "principal_id": "agent-core-01",
-      "kind": "AGENT",
-      "grants": ["work.create", "code.propose", "project.read"],
-      "status": "ACTIVE"
-    },
-    {
-      "principal_id": "auditor-sec-01",
-      "kind": "AUDITOR",
-      "grants": ["work.review", "project.read"],
-      "status": "ACTIVE"
-    }
-  ]
-  ```
-- **Restricción de seguridad:** **Bajo ninguna circunstancia** se deben exponer hashes (`token_digest`), tokens en claro ni credenciales. Únicamente metadatos públicos de autorización vigentes.
+## 2. Coordinación entre Dominios (Frontend <-> Codex / Claude)
+
+1. **Sin invasión de dominios:** El frontend trabaja exclusivamente en `frontend/` y `tests/test_control_center_ui.py`. No alteramos `src/aao/` ni aplicamos migraciones de base de datos.
+2. **Tolerancia a fallos y degradación elegante:** Si endpoints como `/activity` o `/assignable-agents` devuelven 404 (porque aún no están fusionados en la base), la interfaz no falla ni se bloquea: muestra de forma honesta que la funcionalidad no está disponible en este entorno o que no hay registros persistidos.
+3. **No simulación:** No se generan registros ficticios ni se simulan aprobaciones.
 
 ---
 
-### 2.3. Resumen Agregado de Propuestas de Código
-- **Ruta propuesta:** `GET /v1/projects/{project_id}/patch-proposals`
-- **Autorización requerida:** `read_principal` con grant activo `project.read`.
-- **Parámetros:** `project_id`, filtro opcional `status` (`DRAFT | SUBMITTED | VALIDATED | REJECTED`).
-- **Respuesta esperada (200 OK):**
-  ```json
-  [
-    {
-      "id": "uuid-propuesta",
-      "work_id": "uuid-tarea",
-      "proposer_id": "agent-identity",
-      "base_sha": "abc1234...",
-      "patch_sha256": "def5678...",
-      "changed_paths": ["frontend/index.html"],
-      "status": "VALIDATED",
-      "created_at": "2026-10-19T21:15:00Z",
-      "applied": false,
-      "validations": [
-        {
-          "id": "uuid-validacion",
-          "validator_id": "auditor-identity",
-          "candidate_tree": "tree-hash",
-          "created_at": "2026-10-19T21:25:00Z"
-        }
-      ]
-    }
-  ]
-  ```
-- **Aislamiento de diff:** El cuerpo completo del parche debe mantenerse accesible únicamente mediante el endpoint existente `/v1/work/{work_id}/patch-proposals/{proposal_id}` reservado a auditores o proponentes autorizados.
+## 3. Garantías de Gobernanza Verificadas
 
----
-
-## 3. Principios de Integración Garantizados por el Frontend
-
-1. **Datos reales sin simulación:** La interfaz consume exclusivamente lo que devuelven los endpoints; no se inventan estados, asignaciones ni validaciones.
-2. **Tokens exclusivamente en memoria volátil:** No se almacenan credenciales en `localStorage`, `sessionStorage`, cookies ni parámetros URL. Si la API retorna 401 o 403, la sesión se purga inmediatamente.
-3. **No-autorización explícita:** Las capacidades y habilidades listadas aclaran en todo momento que su presencia en el catálogo no otorga permiso de ejecución (`Ejecución autorizada: no`).
-4. **Verificabilidad antes que interfaz 3D:** La interfaz prioriza la claridad técnica, accesibilidad y trazabilidad para el trabajo cotidiano de desarrollo autónomo.
+- **Evaluaciones ≠ Ejecuciones:** Las evaluaciones de capacidades (`capability-evaluations`) se muestran estrictamente con la leyenda `Evaluación no autoriza ejecución.` y `Ejecución autorizada: no`.
+- **Dictámenes ≠ Auditoría Independiente:** Todo dictamen (`APPROVE`, `REJECT`, `VETO`) se rotula como registro persistido de auditor local. Se incluye advertencia explícita de que los registros no constituyen una certificación independiente externa.
+- **`IN_REVIEW` ≠ Aprobada:** Las tareas en estado `IN_REVIEW` permanecen clasificadas en la columna "Revisión" y jamás son catalogadas como aprobadas o completadas.

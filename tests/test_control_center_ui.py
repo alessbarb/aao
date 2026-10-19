@@ -126,3 +126,62 @@ def test_control_center_task_detail_modal_inspector():
     assert 'id="drawer-proposals-list"' in html
     assert 'aria-modal="true"' in html
     assert 'role="dialog"' in html
+
+
+def test_control_center_authentication_and_revocation_behavior():
+    html = (Path(__file__).parents[1] / "frontend" / "index.html").read_text()
+    # 401 / 403 error handling immediately purges reader session
+    assert "if (r.status === 401 || r.status === 403)" in html
+    assert "clearReaderSession();" in html
+    assert "Credencial rechazada o revocada por el núcleo local" in html
+    # Disconnect clears credentials and state
+    assert 'disconnectBtn.addEventListener("click"' in html
+    assert "readerToken = null;" in html
+    assert "currentPrincipal = null;" in html
+
+
+def test_control_center_loading_and_error_states():
+    html = (Path(__file__).parents[1] / "frontend" / "index.html").read_text()
+    assert "Cargando datos reales de PostgreSQL…" in html
+    assert "No se pudo cargar el tablero: " in html
+    assert "Sin proyectos autorizados para esta identidad" in html
+    assert "Sin tareas" in html
+    assert "No hay tareas registradas para este filtro." in html
+    assert "No hay capacidades registradas para este proyecto." in html
+    assert "No hay propuestas de código registradas en este proyecto." in html
+    assert "No hay ejecuciones registradas en este proyecto." in html
+    assert "No hay evidencias ni revisiones registradas en este proyecto." in html
+
+
+def test_control_center_tab_navigation_logic():
+    html = (Path(__file__).parents[1] / "frontend" / "index.html").read_text()
+    assert 'tab.addEventListener("click"' in html
+    assert 't.classList.remove("active");' in html
+    assert 't.setAttribute("aria-selected", "false");' in html
+    assert 'tab.classList.add("active");' in html
+    assert 'tab.setAttribute("aria-selected", "true");' in html
+
+
+def test_control_center_governance_strictly_separates_evaluations_from_executions():
+    html = (Path(__file__).parents[1] / "frontend" / "index.html").read_text()
+    # Capabilities and evaluations must never be represented as executions
+    assert 'card.append(node("div", "Ejecución autorizada: no", "meta-line disclaimer"));' in html
+    assert 'card.append(node("div", "Registro sin permiso de ejecución implícito", "meta-line"));' in html
+    assert 'card.append(node("div", "Evaluación no autoriza ejecución.", "meta-line disclaimer"));' in html
+    assert "capability.execution_authorized" not in html
+
+
+def test_control_center_governance_strictly_avoids_claiming_independent_audit():
+    html = (Path(__file__).parents[1] / "frontend" / "index.html").read_text()
+    # Safety note warns that records are not certified independent audits
+    assert "Los dictámenes de auditoría son registros almacenados y no sustituyen una certificación de auditoría independiente." in html
+    assert "Registro almacenado; independencia y validez no certificadas." in html
+
+
+def test_control_center_governance_does_not_treat_in_review_tasks_as_approved():
+    html = (Path(__file__).parents[1] / "frontend" / "index.html").read_text()
+    # IN_REVIEW status is mapped to "Revisión", never "Aprobado"
+    assert 'IN_REVIEW: "Revisión"' in html
+    # Approval reviews are noted as stored auditor reviews, not task completion or certified state
+    assert 'else if (rev.decision === "APPROVE") meta.append(node("span", "Aprobación registrada", "pill approve"));' in html
+    assert 'rev.decision === "APPROVE" ? "Aprobación registrada"' in html

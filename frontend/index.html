@@ -813,17 +813,10 @@
     }
 
     async function json(url) {
-      let headers=readerToken?{"X-Agent-Token":readerToken}:{};
-      let r = await fetch(url, { credentials: "same-origin", headers: headers });
-      if ((r.status === 401 || r.status === 403) && !readerToken) {
-        const supplied = window.prompt("Token individual AGENT con grant project.read:");
-        if (!supplied) {
-          clearReaderSession();
-          throw new Error("Se requiere identidad AGENT con acceso de lectura al proyecto");
-        }
-        readerToken = supplied.trim();
-        r = await fetch(url, { credentials: "same-origin", headers:{"X-Agent-Token":readerToken} });
+      if (!readerToken) {
+        throw new Error("Se requiere identidad AGENT con acceso de lectura al proyecto");
       }
+      let r = await fetch(url, { credentials: "same-origin", headers:{"X-Agent-Token":readerToken} });
       if (r.status === 401 || r.status === 403) {
         clearReaderSession();
         throw new Error("Credencial rechazada o revocada por el núcleo local (HTTP " + r.status + ")");
@@ -942,7 +935,7 @@
           const reviews = Array.isArray(task.reviews) ? task.reviews : [];
           for (const rev of reviews) {
             if (rev.decision === "VETO") meta.append(node("span", "VETO ACTIVO", "pill veto"));
-            else if (rev.decision === "APPROVE") meta.append(node("span", "Aprobado", "pill approve"));
+            else if (rev.decision === "APPROVE") meta.append(node("span", "Aprobación registrada", "pill approve"));
             else if (rev.decision === "REJECT") meta.append(node("span", "Rechazado", "pill reject"));
           }
 
@@ -1325,6 +1318,7 @@
           card.append(node("div", "Revisor: " + rev.reviewer_id, "meta-line"));
           card.append(node("div", "Referencias: " + ((rev.evidence || []).join(", ") || "sin referencias"), "meta-line"));
           card.append(node("div", "Fecha: " + rev.created_at, "meta-line"));
+          card.append(node("div", "Registro almacenado; independencia y validez no certificadas.", "meta-line"));
           drawerReviews.append(card);
         }
       } else {
