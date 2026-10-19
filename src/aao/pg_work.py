@@ -49,7 +49,18 @@ def require_reviewer(
     return "development-auditor"
 
 
-def require_worker(x_work_token: str | None = Header(None)):
+def require_worker(
+    x_work_token: str | None = Header(None),
+    x_agent_token: str | None = Header(None),
+):
+    # An individually issued credential takes precedence; invalid individual
+    # credentials cannot silently fall back to a shared development token.
+    if x_agent_token is not None:
+        from aao.pg_principals import PrincipalDenied, authenticate
+        try:
+            return authenticate(x_agent_token, kind="AGENT")
+        except PrincipalDenied as exc:
+            raise HTTPException(403, "Individual agent credential rejected") from exc
     expected = os.getenv("AAO_WORK_TOKEN")
     if not expected:
         raise HTTPException(503, "Worker credential not configured")
