@@ -1,6 +1,6 @@
 # AAO configuration (development and test)
 
-`settings.py` loads a local dotenv file before application configuration is
+`environment_settings.py` loads a local dotenv file before application configuration is
 evaluated. By default it selects `.env.local`; `AAO_ENV_FILE=.env.test` selects
 the test file. The environment wins over dotenv values. The selected path must
 be one of these two filenames in the repository root. In production dotenv
@@ -13,7 +13,7 @@ The CEO/worker/reviewer tokens remain shared prototype credentials.
 
 1. `cp .env.example .env.local` and replace every placeholder.
 2. `chmod 600 .env.local`.
-3. Run Python via `python -m uvicorn aao.pg_work:app --host 127.0.0.1 --port 8001`.
+3. Run Python via `python -m uvicorn aao.work_management_api:app --host 127.0.0.1 --port 8001`.
 4. Docker Compose uses the separate `--env-file` option:
    `docker compose --env-file .env.local -f compose.dev.yaml up -d`.
 5. For tests create `.env.test` with `AAO_ENV=test`, a **disposable**
