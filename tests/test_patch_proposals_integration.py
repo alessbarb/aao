@@ -41,6 +41,11 @@ def test_agent_patch_proposal_is_authorized_immutable_and_visible(monkeypatch, t
             "/v1/principals/credentials", headers=ceo,
             json={"principal_id": agent_id, "kind": "AGENT"},
         ).json()["token"]}
+        auditor_id = "patch-auditor-" + str(uuid4())
+        auditor = {"X-Auditor-Token": client.post(
+            "/v1/principals/credentials", headers=ceo,
+            json={"principal_id": auditor_id, "kind": "AUDITOR"},
+        ).json()["token"]}
         mandate = client.post("/v1/mandates", headers=ceo, json={
             "title": "Patch proposal test " + str(uuid4()),
             "objective": "Test constrained source patch proposal",
@@ -54,6 +59,9 @@ def test_agent_patch_proposal_is_authorized_immutable_and_visible(monkeypatch, t
                 "principal_id": agent_id, "capability": capability,
             })
             assert response.status_code == 201, response.text
+        assert client.post(f"/v1/projects/{project}/grants", headers=ceo, json={
+            "principal_id": auditor_id, "capability": "work.review",
+        }).status_code == 201
         work = client.post(f"/v1/projects/{project}/work", headers=agent, json={
             "title": "Propose a real source improvement",
             "author_id": "ignored-client-value",
@@ -101,6 +109,17 @@ def test_agent_patch_proposal_is_authorized_immutable_and_visible(monkeypatch, t
         assert task["patch_proposals"][0]["patch_sha256"] == result["patch_sha256"]
         assert task["patch_proposals"][0]["applied"] is False
         assert task["patch_proposals"][0]["validations"][0]["candidate_tree"] == validation["candidate_tree"]
+        assert client.post(f"/v1/work/{work}/progress", headers=agent).json()["status"] == "IN_REVIEW"
+        audit_read = client.get(
+            f"/v1/work/{work}/patch-proposals/{result['proposal_id']}", headers=auditor,
+        )
+        assert audit_read.status_code == 200, audit_read.text
+        assert audit_read.json()["patch"] == patch
+        assert audit_read.json()["patch_sha256"] == result["patch_sha256"]
+        assert audit_read.json()["applied"] is False
+        assert client.get(
+            f"/v1/work/{work}/patch-proposals/{result['proposal_id']}", headers=agent,
+        ).status_code == 403
         with connect_postgres() as db:
             persisted = db.execute(
                 "SELECT proposer_id,base_sha,patch_sha256,status FROM patch_proposals WHERE id=%s",

@@ -1000,6 +1000,66 @@ def validate_patch_proposal(
     }
 
 
+@app.get("/v1/work/{work_id}/patch-proposals/{proposal_id}")
+def read_patch_proposal(
+    work_id: str, proposal_id: str,
+    principal: str = Depends(require_reviewer),
+):
+    """Expose the exact stored diff to a project auditor only while work is in review."""
+    with tx() as db:
+        row = db.execute(
+            "SELECT p.project_id,p.proposer_id,p.base_sha,p.patch_sha256,p.patch_bytes,"
+            "p.changed_paths,p.created_at,w.status,w.author_id "
+            "FROM patch_proposals p JOIN work_items w ON w.id=p.work_id "
+            "WHERE p.id=%s AND p.work_id=%s FOR SHARE OF w",
+            (proposal_id, work_id),
+        ).fetchone()
+        if not row:
+            raise HTTPException(404, "Patch proposal not found")
+        project_id, proposer_id, base_sha, expected_digest, patch_bytes, paths, created_at, status, author_id = row
+        require_grant(db, principal, project_id, "work.review")
+        active = db.execute(
+            "SELECT state FROM projects WHERE id=%s FOR SHARE", (project_id,),
+        ).fetchone()
+        if not active or active[0] != "ACTIVE" or status != "IN_REVIEW":
+            raise HTTPException(409, "Patch proposal is available only for active work in review")
+        if principal == proposer_id or principal == author_id:
+            raise HTTPException(403, "Patch author cannot act as its auditor")
+        if db.execute(
+            "SELECT 1 FROM execution_journal WHERE kind='claimed' "
+            "AND details->>'worker_id'=%s AND execution_id IN "
+            "(SELECT id FROM execution_queue WHERE work_id=%s) LIMIT 1",
+            (principal, work_id),
+        ).fetchone():
+            raise HTTPException(403, "Execution worker cannot inspect its own work as auditor")
+        validations = db.execute(
+            "SELECT id,validator_id,candidate_tree,created_at FROM patch_proposal_validations "
+            "WHERE proposal_id=%s ORDER BY created_at,id",
+            (proposal_id,),
+        ).fetchall()
+        if hashlib.sha256(patch_bytes).hexdigest() != expected_digest:
+            raise HTTPException(409, "Stored patch integrity check failed")
+        try:
+            patch = patch_bytes.decode("utf-8")
+        except UnicodeDecodeError as exc:
+            raise HTTPException(409, "Stored patch is not valid UTF-8") from exc
+    return {
+        "proposal_id": proposal_id, "work_id": work_id,
+        "proposer_id": proposer_id, "base_sha": base_sha,
+        "patch_sha256": expected_digest, "changed_paths": paths,
+        "patch": patch, "created_at": created_at.isoformat(),
+        "validations": [
+            {
+                "id": str(validation[0]), "validator_id": validation[1],
+                "candidate_tree": validation[2],
+                "created_at": validation[3].isoformat(),
+            }
+            for validation in validations
+        ],
+        "applied": False,
+    }
+
+
 @app.post("/v1/work/{work_id}/reviews", status_code=201)
 def review(work_id: str, payload: ReviewRequest, principal: str = Depends(require_reviewer)):
     from aao.evidence_registry import EvidenceDenied, verify_evidence_references
