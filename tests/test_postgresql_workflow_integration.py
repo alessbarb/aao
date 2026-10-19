@@ -7,6 +7,8 @@ import os
 from uuid import uuid4
 
 import pytest
+from datetime import UTC
+
 from fastapi.testclient import TestClient
 
 
@@ -147,10 +149,10 @@ def test_postgres_inert_staging_is_default_off_and_idempotent(monkeypatch):
     reason="Explicit disposable PostgreSQL database required",
 )
 def test_worker_claim_complete_respects_identity_and_project_state(monkeypatch):
-    from aao.work_management_api import app
     from aao.execution_queue import ExecutionConflict, claim, complete, state
     from aao.legacy_worker_authentication import credential_digest
     from aao.postgresql_connection import connect_postgres
+    from aao.work_management_api import app
 
     monkeypatch.setenv("AAO_POSTGRES_URL", os.environ["AAO_TEST_POSTGRES_URL"])
     monkeypatch.setenv("AAO_CEO_TOKEN", "integration-ceo")
@@ -208,12 +210,13 @@ def test_worker_claim_complete_respects_identity_and_project_state(monkeypatch):
     reason="Explicit disposable PostgreSQL database required",
 )
 def test_reconciliation_requires_distinct_granted_reviewer(monkeypatch):
-    from aao.work_management_api import app
+    from datetime import datetime, timedelta, timezone
+
     from aao.execution_queue import claim, quarantine_expired, state
     from aao.execution_reconciliation import ReconciliationDenied, reconcile
     from aao.legacy_worker_authentication import credential_digest
     from aao.postgresql_connection import connect_postgres
-    from datetime import datetime, timedelta, timezone
+    from aao.work_management_api import app
 
     monkeypatch.setenv("AAO_POSTGRES_URL", os.environ["AAO_TEST_POSTGRES_URL"])
     monkeypatch.setenv("AAO_CEO_TOKEN", "reconcile-ceo")
@@ -247,7 +250,7 @@ def test_reconciliation_requires_distinct_granted_reviewer(monkeypatch):
         }).json()["id"]
         client.post(f"/v1/work/{wid}/admit", headers=worker)
         eid = client.post(f"/v1/work/{wid}/stage-inert", headers=worker).json()["execution_id"]
-    base = datetime.now(timezone.utc)
+    base = datetime.now(UTC)
     with connect_postgres() as db:
         db.execute("INSERT INTO project_grants(principal_id,project_id,capability) VALUES (%s,%s,'execution.claim')", (worker_id, project))
     lease = claim(worker_id, credential=secret, project_id=project, now=base, seconds=1)
@@ -285,9 +288,10 @@ def test_reconciliation_requires_distinct_granted_reviewer(monkeypatch):
 )
 def test_inert_worker_concurrent_claims_never_duplicate(monkeypatch):
     from concurrent.futures import ThreadPoolExecutor
-    from aao.postgresql_connection import connect_postgres
+
     from aao.execution_queue import claim, state
     from aao.legacy_worker_authentication import credential_digest
+    from aao.postgresql_connection import connect_postgres
     from aao.work_management_api import app
 
     monkeypatch.setenv("AAO_POSTGRES_URL", os.environ["AAO_TEST_POSTGRES_URL"])
@@ -389,9 +393,9 @@ def test_project_reads_are_scoped_to_granted_worker(monkeypatch):
     reason="Explicit disposable PostgreSQL database required",
 )
 def test_individual_auditor_credential_is_bound_to_review(monkeypatch):
-    from aao.work_management_api import app
-    from aao.principal_credentials import digest_token
     from aao.postgresql_connection import connect_postgres
+    from aao.principal_credentials import digest_token
+    from aao.work_management_api import app
 
     monkeypatch.setenv("AAO_POSTGRES_URL", os.environ["AAO_TEST_POSTGRES_URL"])
     monkeypatch.setenv("AAO_CEO_TOKEN", "individual-ceo")
@@ -457,9 +461,9 @@ def test_individual_auditor_credential_is_bound_to_review(monkeypatch):
 )
 def test_individual_agent_scoped_creation_and_revocation(monkeypatch):
     """Individual agent cannot write across projects and revocation is immediate."""
-    from aao.work_management_api import app
-    from aao.principal_credentials import digest_token
     from aao.postgresql_connection import connect_postgres
+    from aao.principal_credentials import digest_token
+    from aao.work_management_api import app
 
     monkeypatch.setenv("AAO_POSTGRES_URL", os.environ["AAO_TEST_POSTGRES_URL"])
     monkeypatch.setenv("AAO_CEO_TOKEN", "agent-scope-ceo")
@@ -522,10 +526,10 @@ def test_individual_agent_scoped_creation_and_revocation(monkeypatch):
     reason="Explicit disposable PostgreSQL database required",
 )
 def test_individual_agent_claim_and_revocation(monkeypatch):
-    from aao.work_management_api import app
     from aao.execution_queue import ExecutionConflict, claim, complete, state
-    from aao.principal_credentials import digest_token
     from aao.postgresql_connection import connect_postgres
+    from aao.principal_credentials import digest_token
+    from aao.work_management_api import app
 
     monkeypatch.setenv("AAO_POSTGRES_URL", os.environ["AAO_TEST_POSTGRES_URL"])
     monkeypatch.setenv("AAO_CEO_TOKEN", "lease-ceo")
@@ -578,9 +582,9 @@ def test_individual_agent_claim_and_revocation(monkeypatch):
     reason="Explicit disposable PostgreSQL database required",
 )
 def test_ceo_governed_principal_issue_rotate_revoke(monkeypatch):
-    from aao.work_management_api import app
-    from aao.principal_credentials import authenticate, PrincipalDenied
     from aao.postgresql_connection import connect_postgres
+    from aao.principal_credentials import PrincipalDenied, authenticate
+    from aao.work_management_api import app
 
     monkeypatch.setenv("AAO_POSTGRES_URL", os.environ["AAO_TEST_POSTGRES_URL"])
     monkeypatch.setenv("AAO_CEO_TOKEN", "governance-ceo")
