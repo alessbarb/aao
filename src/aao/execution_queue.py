@@ -7,9 +7,9 @@ import json
 from datetime import datetime, timedelta, timezone
 from uuid import uuid4
 
-from aao.postgres import connect_postgres
-from aao.worker_auth import verify_registered_worker
-from aao.pg_principals import digest_token
+from aao.postgresql_connection import connect_postgres
+from aao.legacy_worker_authentication import verify_registered_worker
+from aao.principal_credentials import digest_token
 import hmac
 
 

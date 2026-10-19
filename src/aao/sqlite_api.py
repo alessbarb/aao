@@ -1,7 +1,7 @@
 """Minimal AAO API: CEO-confirmed mandates, projects and evidence-gated Kanban."""
 import json
 
-from aao.settings import load_local_env
+from aao.environment_settings import load_local_env
 load_local_env()
 import os
 from contextlib import asynccontextmanager
@@ -16,7 +16,7 @@ from aao.policy import Verdict, authorize
 from aao.review import evaluate_review
 from aao.execution import initialize as initialize_queue
 from aao.planner import Admission, decide_admission
-from aao.storage import connect, event, initialize, transaction
+from aao.sqlite_storage import connect, event, initialize, transaction
 
 DB_PATH = os.getenv("AAO_DB_PATH", "./data/aao.sqlite3")
 CEO_TOKEN = os.getenv("AAO_CEO_TOKEN")

@@ -2,7 +2,7 @@
 import json
 from datetime import datetime, timezone
 
-from aao.pg_execution import claim, complete, state
+from aao.execution_queue import claim, complete, state
 
 
 def run_one(worker_id: str, credential: str, *, project_id: str, seconds: int = 30, agent_credential: str | None = None) -> dict:

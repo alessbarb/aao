@@ -6,7 +6,7 @@ separate investigation before the executing system can be retried.
 import json
 from uuid import uuid4
 
-from aao.postgres import connect_postgres
+from aao.postgresql_connection import connect_postgres
 
 
 class EffectReviewDenied(ValueError):
