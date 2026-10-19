@@ -192,6 +192,27 @@ def health():
     return {"service": "postgres-dev", "autonomous_execution": False}
 
 
+@app.get("/ready")
+def readiness():
+    """Read-only readiness probe with a sanitized PostgreSQL connection result."""
+    try:
+        import psycopg
+    except ImportError:
+        return JSONResponse(
+            status_code=503,
+            content={"status": "not_ready", "database": "unavailable"},
+        )
+    try:
+        with tx() as db:
+            db.execute("SELECT 1")
+    except (psycopg.Error, RuntimeError):
+        return JSONResponse(
+            status_code=503,
+            content={"status": "not_ready", "database": "unavailable"},
+        )
+    return {"status": "ready", "database": "available"}
+
+
 @app.post("/v1/principals/credentials", status_code=201)
 def issue_principal_credential(
     payload: PrincipalCredentialRequest, _: str = Depends(require_ceo)
