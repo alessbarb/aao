@@ -1094,3 +1094,19 @@ coverage, independent review, or M2 acceptance.
   on the disposable database. It does not establish an independent audit,
   authorization to merge, or completion of the authentic agent-produced
   patch-to-audited-PR cycle.
+- At code revision `e0cb26f9d7f377b9d0df20b3ee0797da56343040`, the runtime adds
+  `GET /v1/principals/me/grants`. The route authenticates an individual AGENT,
+  rechecks the principal in the read transaction, and returns only that
+  principal's own project grants with database-derived active/expiry status.
+  It is an inventory endpoint, not a grant issuance mechanism; it does not
+  modify the existing grant policy or expose other principals' grants. The
+  integration test verifies anonymous denial, principal isolation, and denial
+  after credential revocation. The full local suite against disposable
+  `aao_test` with migrations 001–012 completed with **153 passed, 0 failed,
+  0 skipped, 0 warnings** in 22.72 seconds. `compileall`, Ruff, `pip check`,
+  and `git diff --check` passed. The local API also returned the existing
+  AGENT's own grants through this route; `code.propose` was absent, so no
+  proposal authority is claimed. These local checks are not CI or independent
+  audit evidence. PR #11 was still at `c3d1df912912974deef5fb1684738f226e62167f`
+  when recorded, so the new runtime revision requires fresh CI and applicable
+  audit before any promotion.
