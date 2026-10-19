@@ -153,10 +153,79 @@ def test_reconciliation_requires_distinct_granted_reviewer(monkeypatch):
         reject_unexecuted_proposal(
             proposal["id"], auditor_credential=secret, evidence=["agent denied"]
         )
-    assert reject_unexecuted_proposal(
-        proposal["id"], auditor_credential=auditor_secret,
-        evidence=["proposal not executed"],
-    ) == "REJECTED"
+    for attempt in range(5):
+        if attempt == 0:
+            replay_key, effect_id = key, proposal["id"]
+        else:
+            replay_key = "reject-replay-" + str(uuid4())
+            candidate = propose(
+                execution_id=eid, worker_id=worker_id, lease_token=lease["token"],
+                agent_credential=secret, idempotency_key=replay_key,
+                capability="test.inert", request={"kind": "test-only"},
+            )
+            effect_id = candidate["id"]
+        def replay_proposal(selected_key):
+            try:
+                return propose(
+                    execution_id=eid, worker_id=worker_id, lease_token=lease["token"],
+                    agent_credential=secret, idempotency_key=selected_key,
+                    capability="test.inert", request={"kind": "test-only"},
+                )
+            except EffectConflict as exc:
+                return exc
+
+        def reject_proposal(selected_effect_id):
+            return reject_unexecuted_proposal(
+                selected_effect_id, auditor_credential=auditor_secret,
+                evidence=["proposal not executed"],
+            )
+
+        def wait_until_blocked(query_pattern, blocker_pid, excluded_pid=None):
+            deadline = time.monotonic() + 5
+            while time.monotonic() < deadline:
+                with connect_postgres() as observer:
+                    row = observer.execute(
+                        "SELECT pid FROM pg_stat_activity "
+                        "WHERE query LIKE %s AND wait_event_type='Lock' "
+                        "AND ( %s::int IS NULL OR pid != %s::int) LIMIT 1",
+                        (query_pattern, excluded_pid, excluded_pid),
+                    ).fetchone()
+                    if row and observer.execute(
+                        "SELECT cardinality(pg_blocking_pids(%s)) > 0", (row[0],),
+                    ).fetchone()[0]:
+                        return row[0]
+                time.sleep(0.01)
+            raise AssertionError(f"query did not wait on expected blocker: {query_pattern}")
+
+        with ThreadPoolExecutor(max_workers=2) as pool:
+            with connect_postgres() as blocker:
+                blocker_pid = blocker.execute("SELECT pg_backend_pid()").fetchone()[0]
+                blocker.execute(
+                    "SELECT id FROM execution_queue WHERE id=%s FOR UPDATE", (eid,),
+                )
+                replaying = pool.submit(replay_proposal, replay_key)
+                proposal_pid = wait_until_blocked(
+                    "SELECT q.status,q.project_id%", blocker_pid,
+                )
+                rejecting = pool.submit(reject_proposal, effect_id)
+                rejection_pid = wait_until_blocked(
+                    "%FROM execution_queue%FOR UPDATE OF q,p%", blocker_pid, proposal_pid,
+                )
+                assert proposal_pid != rejection_pid
+            # Both real operations were queued on the same execution row. Once
+            # released, explicit execution-before-effect lock order serializes them.
+            replay_result = replaying.result(timeout=5)
+            assert rejecting.result(timeout=5) == "REJECTED"
+        if isinstance(replay_result, EffectConflict):
+            assert str(replay_result) == "Effect proposal is no longer active"
+        else:
+            assert replay_result["status"] == "PROPOSED_OR_EXISTING"
+        with pytest.raises(EffectConflict, match="no longer active"):
+            propose(
+                execution_id=eid, worker_id=worker_id, lease_token=lease["token"],
+                agent_credential=secret, idempotency_key=replay_key,
+                capability="test.inert", request={"kind": "test-only"},
+            )
     def racing_proposal():
         try:
             return propose(

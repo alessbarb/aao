@@ -442,3 +442,22 @@ full disposable PostgreSQL suite passed **61 tests**, zero skips or warnings;
 compileall, Ruff, `pip check`, and `git diff --check` succeeded. GitHub CI run
 `39258935861` passed for this exact test SHA with a disposable PostgreSQL
 service, compileall, Ruff, warnings-as-errors suite, and `pip check`.
+
+
+## Effect proposal replay and rejection lock ordering
+
+The uncommitted candidate change makes effect rejection lock the execution and
+project before locking the effect row, matching proposal replay's execution-
+before-effect order. Replaying an idempotency key after rejection now fails
+closed instead of reporting a rejected effect as active. A controlled
+PostgreSQL test holds the execution row and starts replay and rejection as
+separate transactions; it verifies serialized completion and fail-closed replay.
+The schedule repeats five times per test run. This addresses a plausible lock
+ordering risk; no deadlock was previously reproduced.
+
+Local verification on the current uncommitted worktree: compileall succeeded;
+Ruff passed; the full disposable PostgreSQL suite passed **61 tests** with no
+skips or warnings; `pip check` and `git diff --check` passed. The focused
+reconciliation integration file passed **3 tests**. This evidence is not yet
+associated with a commit SHA or CI run and does not close grant-revocation race
+coverage, independent review, or M2 acceptance.

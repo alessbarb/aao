@@ -64,12 +64,14 @@ def propose(*, execution_id: str, worker_id: str, lease_token: str,
         if not live:
             raise EffectConflict("Execution lease expired")
         row = db.execute(
-            "SELECT id,execution_id,capability,request_digest FROM external_effects "
+            "SELECT id,execution_id,capability,request_digest,status FROM external_effects "
             "WHERE idempotency_key=%s FOR UPDATE", (idempotency_key,)
         ).fetchone()
         if row:
             if str(row[1]) != execution_id or row[2] != capability or row[3] != digest:
                 raise EffectConflict("Idempotency key reused with different request")
+            if row[4] != "PROPOSED":
+                raise EffectConflict("Effect proposal is no longer active")
             return {"id": str(row[0]), "status": "PROPOSED_OR_EXISTING"}
         effect_id = str(uuid4())
         db.execute(

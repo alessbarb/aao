@@ -24,20 +24,34 @@ def reject_unexecuted_proposal(effect_id: str, *, auditor_credential: str, evide
             )
         except PrincipalDenied as exc:
             raise EffectReviewDenied("Active auditor credential required") from exc
-        effect = db.execute(
-            "SELECT e.status,e.execution_id,q.project_id,q.worker_id "
-            "FROM external_effects e JOIN execution_queue q ON q.id=e.execution_id "
-            "WHERE e.id=%s FOR UPDATE OF e,q", (effect_id,),
+        candidate = db.execute(
+            "SELECT execution_id FROM external_effects WHERE id=%s",
+            (effect_id,),
         ).fetchone()
-        if not effect or effect[0] != "PROPOSED":
+        if not candidate:
             raise EffectReviewDenied("Only unexecuted proposals may be rejected")
-        if reviewer_id == effect[3]:
+        execution_id = str(candidate[0])
+        execution = db.execute(
+            "SELECT q.project_id,q.worker_id FROM execution_queue q "
+            "JOIN projects p ON p.id=q.project_id WHERE q.id=%s "
+            "FOR UPDATE OF q,p", (execution_id,),
+        ).fetchone()
+        if not execution:
+            raise EffectReviewDenied("Only unexecuted proposals may be rejected")
+        project_id, worker_id = execution
+        effect = db.execute(
+            "SELECT status,execution_id FROM external_effects WHERE id=%s FOR UPDATE",
+            (effect_id,),
+        ).fetchone()
+        if not effect or str(effect[1]) != execution_id or effect[0] != "PROPOSED":
+            raise EffectReviewDenied("Only unexecuted proposals may be rejected")
+        if reviewer_id == worker_id:
             raise EffectReviewDenied("Execution worker may not review own effect")
         grant = db.execute(
             "SELECT 1 FROM project_grants WHERE principal_id=%s AND project_id=%s "
             "AND capability='effect.reconcile' "
             "AND (expires_at IS NULL OR expires_at > clock_timestamp()) FOR SHARE",
-            (reviewer_id, effect[2]),
+            (reviewer_id, project_id),
         ).fetchone()
         if not grant:
             raise EffectReviewDenied("Independent effect capability missing")
@@ -45,7 +59,7 @@ def reject_unexecuted_proposal(effect_id: str, *, auditor_credential: str, evide
         db.execute(
             "INSERT INTO execution_journal(id,execution_id,kind,details) "
             "VALUES (%s,%s,'effect.rejected',%s::jsonb)",
-            (str(uuid4()), str(effect[1]), json.dumps({
+            (str(uuid4()), execution_id, json.dumps({
                 "effect_id": effect_id, "reviewer": reviewer_id, "evidence": evidence,
             })),
         )

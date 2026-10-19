@@ -31,9 +31,14 @@ Tests of database-level reconciliation require an isolated PostgreSQL instance.
 - Concurrent auditor-credential revocation schedules now cover both
   `MARK_FAILED` and `RETRY_CONFIRMED_SAFE`; grant-revocation races remain open.
 - Credential/grant revocation schedules and hostile ordering tests for effect
-  proposal; current proposal checks have selected non-concurrent denial cases
-  and three focused runs of a controlled execution-row-lock proposal/completion
-  schedule only.
+  proposal and reconciliation; the proposal/rejection lock-order schedule now
+  passes five repeated controlled PostgreSQL competitions per focused test run,
+  but revocation races and broader adversarial schedules remain open.
 - Immutable verification of evidence and signed disposition.
 - Recovery of paused/running work and explicit in-flight effects reconciliation.
 - Repeated crash/credential rotation and concurrent-worker integration tests.
+
+Effect rejection now locks the execution/project before locking the effect row,
+matching proposal replay's execution-before-effect order. Idempotent replay of a
+rejected effect fails closed rather than returning it as an active proposal.
+This reduces a plausible lock-order inversion; no prior deadlock was reproduced.
