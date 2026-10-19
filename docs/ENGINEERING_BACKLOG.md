@@ -4,12 +4,43 @@
 authoritative issue tracker. The PostgreSQL API, individual development
 credentials, project-scoped API grants, durable inert queue, lease quarantine
 and effect proposal/reconciliation helpers have since been implemented in
-part. The current authorization inventory is
-[`PRINCIPAL_AUTHORIZATION_MATRIX.md`](PRINCIPAL_AUTHORIZATION_MATRIX.md); the
-latest exact local baseline is in
+part. The current reviewable code candidate is
+`99760c7339323600368e5dbb145b088d83ad0715`; the package and scope disposition
+are at `a22227589d3b09ab3ff7b0eddf3968c516ea24ac`. On the code candidate, the
+explicitly disposable local PostgreSQL suite passed 80 tests with warnings as
+errors, and compileall, Ruff, `pip check`, and diff checks passed. CI was not
+awaited. Exact evidence and limits are recorded in
 [`VERIFICATION_EVIDENCE_REGISTER.md`](VERIFICATION_EVIDENCE_REGISTER.md).
-M2 remains in progress and is not accepted. Do not interpret old `[candidate]`
-or `[BLOCKED]` labels below as live issue statuses.
+The current authorization inventory is
+[`PRINCIPAL_AUTHORIZATION_MATRIX.md`](PRINCIPAL_AUTHORIZATION_MATRIX.md); the
+M2 compliance matrix is
+[`COMPLIANCE_MATRIX.md`](COMPLIANCE_MATRIX.md). M2 remains in progress and is
+not accepted. Do not interpret old `[candidate]` or `[BLOCKED]` labels below
+as live issue statuses.
+
+## Current M2 disposition
+
+- **M2-01 — SATISFECHO as an evaluation:** retain PostgreSQL for the inert
+  candidate; see [`DURABLE_EXECUTION_EVALUATION.md`](DURABLE_EXECUTION_EVALUATION.md).
+  This does not ratify scope or authorize a runtime migration.
+- **M2-02, M2-03, M2-05, M2-06 — PARCIAL:** selected lease/revocation,
+  reconciliation, inert-effect, and denied-action behavior exists and has
+  local evidence. Signed worker attestations, autonomous recovery, provider
+  effects, production-independent stop control, and repeated-event-delivery
+  acceptance remain unproven or intentionally disabled. Do not keep expanding
+  concurrency schedules without a concrete uncovered operation/order.
+- **M2-04 — BLOQUEADO on scope, not technically complete:** sandbox runners
+  with operation-scoped capabilities are explicitly named in this planning
+  seed but are not implemented. The current worker is deliberately inert.
+  A scope decision is required before treating sandbox execution as either an
+  acceptance requirement or a deferral.
+- **Formal acceptance — PENDIENTE:** the Constitution is a draft; no ratified
+  M2 acceptance contract, qualified independent review, or competent acceptance
+  exists. The prepared acceptance proposal is not a request to enable execution.
+
+This live disposition supersedes the dated implementation-status prose below
+where it differs. Detailed historical notes remain for provenance, not as an
+unbounded test backlog.
 
 ## Decision discipline
 
@@ -32,8 +63,8 @@ amendment or CEO-confirmed constitutional rule.
 
 ## Current M2 engineering priorities
 
-- **Implemented in the current working tree; local verification pending at the
-  recorded SHA:** migrations 008/009 and an internal content-addressed evidence
+- **Implemented and locally verified at the current code candidate:**
+  migrations 008/009 and an internal content-addressed evidence
   registry let reconciliation resolve project-scoped SHA-256 references and
   re-hash stored bytes. This proves byte integrity only—not truth, authorship,
   independent review, or protection from database-owner alteration. Row-level

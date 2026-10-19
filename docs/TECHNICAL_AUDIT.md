@@ -1,9 +1,10 @@
 # M2 candidate technical audit
 
-**Audit basis:** code and documents at
-`7c1e21a4e959b0b1cc0410f9ae90a078a19ff315`, plus local verification recorded
+**Assessment basis:** code and documents at
+`99760c7339323600368e5dbb145b088d83ad0715`, plus local verification recorded
 in [`VERIFICATION_EVIDENCE_REGISTER.md`](VERIFICATION_EVIDENCE_REGISTER.md).
-This is an engineering audit, not a formal independent review. It uses the
+This is a repository-authored engineering assessment prepared for review, not
+a completed formal independent review. It uses the
 draft Constitution and planning backlog as provisional traceability sources;
 neither currently defines a ratified M2 acceptance contract.
 

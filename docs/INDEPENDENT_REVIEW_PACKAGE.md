@@ -1,6 +1,6 @@
 # M2 candidate — independent review package
 
-**Implementation candidate:** `7c1e21a4e959b0b1cc0410f9ae90a078a19ff315` on
+**Implementation candidate:** `99760c7339323600368e5dbb145b088d83ad0715` on
 `feat/aao-m0-foundation`. This is the exact source revision with local test
 evidence. The review request must separately identify the exact packaging
 revision containing this document and its companion reports; those reports
@@ -72,9 +72,10 @@ itself the requested independent review and does not claim formal acceptance.
 - Recovery quarantine is explicit/helper-driven; no runtime scheduler or
   crash-restart acceptance harness is claimed.
 - At the exact implementation candidate SHA, the local explicitly disposable
-  PostgreSQL run passed 79 tests with warnings as errors; compileall, Ruff,
+  PostgreSQL run passed 80 tests with warnings as errors; compileall, Ruff,
   `pip check`, and diff checks passed. The evidence register records a focused
-  grant-revocation/read race repeated three times. CI was not awaited and no
+  grant-revocation/read and grant-revocation/write races, each repeated three
+  times. CI was not awaited and no
   production/deployment test was run. The documentation package is a later
   revision; the review request must pin its exact checkout separately.
 

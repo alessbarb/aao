@@ -787,3 +787,40 @@ coverage, independent review, or M2 acceptance.
 - This covers one controlled grant-deletion/read schedule; it does not prove
   every credential/grant race, establish truth or human provenance of the
   evidence, or constitute independent security review or M2 acceptance.
+
+## Evidence registration denied when concurrent grant revocation wins — 2026-10-19
+
+- Exact source revision: `0c3fc8e508de7f8a5a48bffba294b2dab2f3de53` on
+  `feat/aao-m0-foundation`; adds a controlled PostgreSQL schedule for
+  `register_evidence()` against deletion of the `evidence.submit` project
+  grant. The test observes the registration's grant query blocked behind the
+  revoker, then verifies denial after revocation commits and verifies that
+  neither the artifact nor its registration event was written.
+- The focused race test passed **3 consecutive runs** (1 passed, 6 deselected
+  per run). The full explicitly disposable PostgreSQL suite passed **80 tests,
+  0 failures, 0 skips, 0 warnings** in **19.70 s** under `-W error`.
+- `python -m compileall -q src tests`, `python -m ruff check src tests`,
+  `python -m pip check`, and `git diff --check` passed on the same source tree.
+  CI was not run or awaited per operator direction.
+- Together with the prior read-race test, this demonstrates two specific
+  revocation-wins schedules for evidence access. It does not prove all
+  credential/grant orderings, evidence truth/authorship, a formal independent
+  review, or M2 acceptance.
+
+## Duplicate-safe inert staging after client reconnection — 2026-10-19
+
+- Exact source revision: `99760c7339323600368e5dbb145b088d83ad0715` on
+  `feat/aao-m0-foundation`; extends the disposable PostgreSQL staging test to
+  claim once, reconnect the HTTP test client, and replay the staging request.
+  The replay returns the same execution ID and `RUNNING` status; the queue
+  contains one row, attempts remain one, and one `claimed` journal entry exists.
+- The focused staging test passed **twice** after the extension (1 passed, 6
+  deselected per run). The full disposable PostgreSQL suite passed **80 tests,
+  0 failures, 0 skips, 0 warnings** in **19.92 s** under `-W error`.
+- On this source tree, `python -m compileall -q src tests`, Ruff, `pip check`,
+  and `git diff --check` passed. CI was not run or awaited per operator
+  direction.
+- This proves duplicate-safe HTTP request replay after client reconnection for
+  an already-claimed inert execution. It does not simulate an AAO process
+  restart, post-reconciliation redelivery, or an autonomous event consumer and
+  does not close the broader M2-06 recovery requirement.
