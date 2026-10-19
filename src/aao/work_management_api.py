@@ -526,17 +526,20 @@ def register_capability(
         if project[0] != "ACTIVE":
             raise HTTPException(409, "Capabilities can only be registered in active projects")
         require_grant(db, principal, project_id, "work.create")
-        db.execute(
+        inserted = db.execute(
             "INSERT INTO capability_versions(project_id,capability_id,version,capability_type,"
             "status,provenance,contract,required_permissions,risks,dependencies,tests,"
             "compatibility,evidence,created_by) VALUES (%s,%s,%s,%s,%s,%s::jsonb,%s::jsonb,"
-            "%s::jsonb,%s::jsonb,%s::jsonb,%s::jsonb,%s::jsonb,%s::jsonb,%s)",
+            "%s::jsonb,%s::jsonb,%s::jsonb,%s::jsonb,%s::jsonb,%s::jsonb,%s) "
+            "ON CONFLICT (project_id,capability_id,version) DO NOTHING RETURNING version",
             (project_id, payload.capability_id, payload.version, payload.capability_type,
              "registered_local", json.dumps(payload.provenance), json.dumps(payload.contract),
              json.dumps(payload.required_permissions), json.dumps(payload.risks),
              json.dumps(payload.dependencies), json.dumps(payload.tests),
              json.dumps(payload.compatibility), json.dumps(payload.evidence), principal),
-        )
+        ).fetchone()
+        if not inserted:
+            raise HTTPException(409, "Capability version already exists and is immutable")
         audit(db, project_id, "capability.version_registered", {
             "capability_id": payload.capability_id, "version": payload.version,
             "capability_type": payload.capability_type, "created_by": principal,

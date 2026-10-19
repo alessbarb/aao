@@ -136,6 +136,7 @@ def test_capability_catalog_is_project_scoped_and_does_not_grant_execution(monke
         registered = client.post(path, headers=worker, json=payload)
         assert registered.status_code == 201, registered.text
         assert registered.json()["execution_authorized"] is False
+        assert client.post(path, headers=worker, json=payload).status_code == 409
 
         listed = client.get(path, headers=ceo)
         assert listed.status_code == 200, listed.text
