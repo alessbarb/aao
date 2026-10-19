@@ -1,7 +1,7 @@
 # Principal authorization matrix
 
 **Scope:** current development API and internal execution/reconciliation
-operations, updated through `68fe0fd12fba43ddfbaa6a1b01257fdc4dbca7a1`.
+operations, updated through `2bc60f51729d2013bcb88d547beac928367a6b35`.
 This is an engineering inventory, not a production authorization policy or
 independent security review. The PostgreSQL API and its internal helpers are
 not a claim of M2 acceptance.
@@ -70,6 +70,13 @@ register for test status.
   succeeded, and proposal either committed before it or was denied after
   completion. This is selected controlled coverage, not exhaustive or
   adversarial race coverage.
+- Effect proposal now has controlled disposable-PostgreSQL schedules against
+  both AGENT credential revocation and `effect.propose` grant deletion. In each
+  tested ordering, proposal locks authorization and waits later in its
+  transaction, revocation is observed blocked by the proposal PID, proposal
+  commits first, revocation succeeds, and a subsequent proposal is denied. The
+  inverse concurrent ordering (revocation first) has not been separately
+  scheduled; the subsequent denial is sequential evidence only.
 - Sequential credential revocation tests and unit mocks that assert SQL text
   do not prove real PostgreSQL lock behavior. Several real lock schedules now
   cover work creation, queue claim/completion against grant deletion, and

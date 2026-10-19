@@ -86,8 +86,11 @@ amendment or CEO-confirmed constitutional rule.
   observed proposal blocked while completion competed. A
   previously described proposal/retry race was not a valid concurrency case:
   proposal requires `RUNNING` while retry requires `UNCERTAIN`; it was replaced
-  with the proposal/completion schedule. Hostile/repeated lock schedules and
-  credential/grant revocation races for proposals remain open. A manual cold
+  with the proposal/completion schedule. Controlled schedules now prove that
+  effect proposals commit before a waiting AGENT credential revocation and a
+  waiting `effect.propose` grant deletion; follow-up proposals are denied.
+  The inverse concurrent ordering (revocation first) and hostile/repeated
+  schedules remain open. A manual cold
   restart of an isolated PostgreSQL 16
    container recovered a persisted expired lease to `UNCERTAIN`; broader
    crash/restart schedules and a repeatable automated restart harness remain
