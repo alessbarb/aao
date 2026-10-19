@@ -3,7 +3,7 @@ import os
 
 import pytest
 
-from aao import settings
+from aao import environment_settings as settings
 
 
 def test_selected_env_file_does_not_override_process_secrets(tmp_path, monkeypatch):
