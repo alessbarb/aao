@@ -40,3 +40,11 @@ El operador comunicó una ejecución completa posterior a la incorporación de i
 ## Validación del contrato `execution.claim` — 2026-10-19
 
 El operador confirmó `git pull --ff-only` hasta `3de90ea` y la ejecución `AAO_ENV=test AAO_ENV_FILE=.env.test python -m pytest -v -rs`: **43 passed, 0 failed, 0 skipped, 1 warning** en 2.29 s, Python 3.12.13. La prueba `test_individual_agent_claim_and_revocation` pasó junto con la nueva prueba del contrato exacto `execution.claim`. Persiste la advertencia de deprecación Starlette/httpx. Esta evidencia es una prueba local comunicada por el operador y no constituye revisión independiente ni autorización de ejecución externa.
+
+## Incremento de restricción de tokens compartidos — pendiente de validación
+
+Tras las 43 pruebas confirmadas, se incorporaron las rutas individuales de
+lectura de proyectos/tableros y el bloqueo de tokens compartidos de workers y
+auditores fuera de desarrollo o al establecer
+`AAO_ALLOW_SHARED_DEV_TOKENS=false`. Se añadieron pruebas negativas.
+**No se ha ejecutado todavía la nueva suite en el ordenador del operador.**
