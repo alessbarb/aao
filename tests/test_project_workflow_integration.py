@@ -542,6 +542,66 @@ def test_agent_can_inspect_only_its_own_project_grants(monkeypatch):
 
 @pytest.mark.skipif(
     not os.getenv("AAO_TEST_POSTGRES_URL") or os.getenv("AAO_TEST_DB_DISPOSABLE") != "yes",
+    reason="Explicit disposable PostgreSQL test database required",
+)
+def test_auditor_can_inspect_only_its_own_review_grants(monkeypatch):
+    monkeypatch.setenv("AAO_POSTGRES_URL", os.environ["AAO_TEST_POSTGRES_URL"])
+    monkeypatch.setenv("AAO_CEO_TOKEN", "auditor-grant-inventory-ceo")
+    from aao.work_management_api import app
+
+    ceo = {"X-CEO-Token": "auditor-grant-inventory-ceo"}
+    with TestClient(app) as client:
+        mandate = client.post("/v1/mandates", headers=ceo, json={
+            "title": "Auditor grant inventory " + str(uuid4()),
+            "objective": "Test self-scoped auditor grant discovery",
+        }).json()["id"]
+        assert client.post(f"/v1/mandates/{mandate}/confirm", headers=ceo).status_code == 200
+        project = client.post("/v1/projects", headers=ceo, json={
+            "name": "Auditor grant inventory", "mandate_id": mandate,
+        }).json()["id"]
+
+        auditor_id = "grant-auditor-" + str(uuid4())
+        auditor_token = client.post("/v1/principals/credentials", headers=ceo, json={
+            "principal_id": auditor_id, "kind": "AUDITOR",
+        }).json()["token"]
+        other_id = "other-auditor-" + str(uuid4())
+        client.post("/v1/principals/credentials", headers=ceo, json={
+            "principal_id": other_id, "kind": "AUDITOR",
+        })
+        agent_id = "grant-agent-" + str(uuid4())
+        client.post("/v1/principals/credentials", headers=ceo, json={
+            "principal_id": agent_id, "kind": "AGENT",
+        })
+        for principal_id, capability in (
+            (auditor_id, "work.review"), (auditor_id, "execution.reconcile"),
+            (other_id, "work.review"), (agent_id, "project.read"),
+        ):
+            response = client.post(f"/v1/projects/{project}/grants", headers=ceo, json={
+                "principal_id": principal_id, "capability": capability,
+            })
+            assert response.status_code == 201, response.text
+
+        assert client.get("/v1/auditors/me/grants").status_code == 403
+        assert client.get(
+            "/v1/auditors/me/grants", headers={"X-Agent-Token": auditor_token},
+        ).status_code == 403
+        response = client.get(
+            "/v1/auditors/me/grants", headers={"X-Auditor-Token": auditor_token},
+        )
+        assert response.status_code == 200, response.text
+        grants = response.json()
+        assert {row["capability"] for row in grants} == {"work.review", "execution.reconcile"}
+        assert {row["project_id"] for row in grants} == {project}
+        assert {row["principal_id"] for row in grants} == {auditor_id}
+        assert all(row["active"] for row in grants)
+        assert client.post(f"/v1/principals/{auditor_id}/revoke", headers=ceo).status_code == 200
+        assert client.get(
+            "/v1/auditors/me/grants", headers={"X-Auditor-Token": auditor_token},
+        ).status_code == 403
+
+
+@pytest.mark.skipif(
+    not os.getenv("AAO_TEST_POSTGRES_URL") or os.getenv("AAO_TEST_DB_DISPOSABLE") != "yes",
     reason="Explicit disposable PostgreSQL database required",
 )
 def test_grant_revocation_serializes_after_authorized_transaction(monkeypatch):

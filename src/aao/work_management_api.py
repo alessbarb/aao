@@ -300,6 +300,38 @@ def current_principal_grants(
     ]
 
 
+@app.get("/v1/auditors/me/grants")
+def current_auditor_grants(
+    principal: Annotated[AuthenticatedPrincipal, Depends(require_reviewer)],
+):
+    """List only the authenticated auditor's project grants; no authority is granted."""
+    with tx() as db:
+        credential = db.execute(
+            "SELECT kind,enabled FROM principal_credentials "
+            "WHERE principal_id=%s AND token_digest=%s FOR SHARE",
+            (principal, principal.token_digest),
+        ).fetchone()
+        if not credential or credential[0] != "AUDITOR" or not credential[1]:
+            raise HTTPException(403, "Individual auditor credential invalid or revoked")
+        rows = db.execute(
+            "SELECT project_id,capability,expires_at,"
+            "(expires_at IS NULL OR expires_at>clock_timestamp()) AS active "
+            "FROM project_grants WHERE principal_id=%s "
+            "ORDER BY project_id,capability FOR SHARE",
+            (principal,),
+        ).fetchall()
+    return [
+        {
+            "principal_id": str(principal),
+            "project_id": str(row[0]),
+            "capability": row[1],
+            "expires_at": row[2].isoformat() if row[2] else None,
+            "active": row[3],
+        }
+        for row in rows
+    ]
+
+
 @app.post("/v1/principals/{principal_id}/revoke")
 def revoke_principal(principal_id: str, _: str = Depends(require_ceo)):
     """Revocation prevents new authentication and lease completion."""
