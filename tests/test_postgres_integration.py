@@ -507,3 +507,59 @@ def test_individual_agent_scoped_creation_and_revocation(monkeypatch):
             db.execute("UPDATE principal_credentials SET enabled=false WHERE principal_id=%s", (identity,))
         assert client.post(f"/v1/projects/{allowed}/work",
                            headers=agent, json=payload).status_code == 403
+
+
+@pytest.mark.skipif(
+    not os.getenv("AAO_TEST_POSTGRES_URL") or os.getenv("AAO_TEST_DB_DISPOSABLE") != "yes",
+    reason="Explicit disposable PostgreSQL database required",
+)
+def test_individual_agent_claim_and_revocation(monkeypatch):
+    from aao.pg_work import app
+    from aao.pg_execution import ExecutionConflict, claim, complete, state
+    from aao.pg_principals import digest_token
+    from aao.postgres import connect_postgres
+
+    monkeypatch.setenv("AAO_POSTGRES_URL", os.environ["AAO_TEST_POSTGRES_URL"])
+    monkeypatch.setenv("AAO_CEO_TOKEN", "lease-ceo")
+    monkeypatch.setenv("AAO_WORK_TOKEN", "lease-worker")
+    monkeypatch.setenv("AAO_SANDBOX_QUEUE_ENABLED", "true")
+    ceo = {"X-CEO-Token": "lease-ceo"}
+    worker = {"X-Work-Token": "lease-worker"}
+    principal = "agent-" + str(uuid4())
+    secret = "secret-" + str(uuid4())
+    with connect_postgres() as db:
+        db.execute(
+            "INSERT INTO principal_credentials(principal_id,kind,token_digest,enabled) "
+            "VALUES (%s,'AGENT',%s,true)", (principal, digest_token(secret)),
+        )
+    with TestClient(app) as client:
+        mid = client.post("/v1/mandates", headers=ceo, json={
+            "title": "Unified agent lease " + str(uuid4()), "objective": "Isolated test"
+        }).json()["id"]
+        assert client.post(f"/v1/mandates/{mid}/confirm", headers=ceo).status_code == 200
+        project = client.post("/v1/projects", headers=ceo, json={
+            "name": "Unified lease", "mandate_id": mid
+        }).json()["id"]
+        for who, capability in (
+            ("development-worker", "work.create"),
+            ("development-worker", "work.admit"),
+            (principal, "execution.claim"),
+        ):
+            assert client.post(f"/v1/projects/{project}/grants", headers=ceo, json={
+                "principal_id": who, "capability": capability,
+            }).status_code == 201
+        wid = client.post(f"/v1/projects/{project}/work", headers=worker, json={
+            "title": "Inert execution", "author_id": "ignored",
+            "acceptance_criteria": ["completed"],
+        }).json()["id"]
+        assert client.post(f"/v1/work/{wid}/admit", headers=worker).status_code == 200
+        eid = client.post(f"/v1/work/{wid}/stage-inert", headers=worker).json()["execution_id"]
+    with pytest.raises(ExecutionConflict):
+        claim(principal, project_id=project, agent_credential="wrong")
+    lease = claim(principal, project_id=project, agent_credential=secret)
+    assert lease is not None and lease["execution_id"] == eid
+    with connect_postgres() as db:
+        db.execute("UPDATE principal_credentials SET enabled=false WHERE principal_id=%s", (principal,))
+    with pytest.raises(ExecutionConflict):
+        complete(eid, lease["token"], principal, {"ok": True}, agent_credential=secret)
+    assert state(eid)["status"] == "RUNNING"
