@@ -61,3 +61,7 @@ se generan aleatoriamente y solo se persisten como resúmenes; hay pruebas de
 control de autoridad, duplicados, invalidación por rotación, revocación y
 registros de eventos. **No hay todavía salida de ejecución local para esta
 revisión.** La referencia verificada continúa siendo la suite de 46 pruebas.
+
+## Validación del ciclo de credenciales — 2026-10-19
+
+El operador actualizó hasta la revisión `1006902` y ejecutó `AAO_ENV=test AAO_ENV_FILE=.env.test python -m pytest -v -rs`: **47 passed, 0 failed, 0 skipped, 1 warning** en 2.58 segundos, Python 3.12.13. Pasó `test_ceo_governed_principal_issue_rotate_revoke`, que verifica emisión, rotación, revocación y eventos. Advertencia de deprecación Starlette/httpx. Evidencia local comunicada por el operador; no constituye revisión independiente ni aceptación final de M2.
