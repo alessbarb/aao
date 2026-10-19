@@ -14,6 +14,7 @@
     .top-actions{display:flex;align-items:center;gap:10px}button,select{font:inherit;color:#e9eef6;background:#202b38;border:1px solid #3a495b;border-radius:7px;padding:9px 12px}button{cursor:pointer}button:hover{background:#2a3848}button:focus-visible,a:focus-visible,select:focus-visible{outline:3px solid #8ec5ff;outline-offset:2px}
     .layout{display:grid;grid-template-columns:220px minmax(0,1fr);gap:26px;padding-top:24px}.nav{display:flex;flex-direction:column;gap:5px}.nav button{text-align:left;background:transparent;border-color:transparent;color:#aeb9c9}.nav button[aria-current="page"]{background:#1c2a35;border-color:#2f4a50;color:#9ae2c8}
     main{min-width:0}.page-head{display:flex;align-items:flex-start;justify-content:space-between;gap:16px;margin-bottom:20px}.eyebrow,.muted,.meta{font-size:.82rem;color:#9aa9ba}.eyebrow{letter-spacing:.08em;text-transform:uppercase}.grid{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:12px}.panel,.metric,.task-card{background:#171f29;border:1px solid #2a3745;border-radius:9px;padding:16px}.metric strong{display:block;font-size:1.4rem;margin-top:6px}.panel{margin-bottom:14px}.panel p:last-child{margin-bottom:0}.banner{border-left:3px solid #d7a64a;background:#292519;padding:12px 14px;color:#ecd8a8;margin:14px 0 20px;font-size:.9rem}.state{display:inline-block;border:1px solid #42546a;border-radius:99px;padding:3px 8px;font-size:.75rem;color:#c6d5e5}.board{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:12px}.lane{background:#141b24;border:1px solid #273341;border-radius:9px;padding:12px;min-height:120px}.lane h3{color:#cbd6e3}.task-card{padding:12px;margin-top:9px}.task-title{color:#e9eef6;background:none;border:0;padding:0;text-align:left;font-weight:650}.list{list-style:none;margin:0;padding:0}.list li{border-top:1px solid #2a3745;padding:12px 0}.row{display:flex;justify-content:space-between;gap:12px;align-items:start}.error{color:#ffb4b4}.empty{padding:28px 16px;text-align:center;border:1px dashed #3a495b;border-radius:9px;color:#aeb9c9}.refs{font-family:ui-monospace,monospace;font-size:.8rem;overflow-wrap:anywhere;color:#c2d4e7}pre{white-space:pre-wrap;overflow-wrap:anywhere;max-height:280px;overflow:auto;background:#111820;border-radius:6px;padding:10px;color:#cbd6e3;font-size:.8rem}.decision{border-left:3px solid #8b6c35;padding-left:12px}.hidden{display:none!important}
+    .auth-panel{display:flex;align-items:end;gap:10px;flex-wrap:wrap;margin:14px 0;padding:14px;border:1px solid #3a495b;border-radius:9px;background:#171f29}.auth-panel label{display:grid;gap:6px;min-width:min(320px,100%);color:#cbd6e3;font-size:.85rem}.auth-panel input{font:inherit;color:#e9eef6;background:#10151c;border:1px solid #3a495b;border-radius:7px;padding:9px 12px}.auth-panel p{flex-basis:100%;margin:0;font-size:.82rem}
     @media(max-width:800px){.shell{padding:16px}.layout{grid-template-columns:1fr;gap:16px}.nav{flex-direction:row;overflow-x:auto;padding-bottom:5px}.nav button{white-space:nowrap}.grid,.board{grid-template-columns:1fr 1fr}}
     @media(max-width:520px){.topbar,.page-head{align-items:flex-start;flex-direction:column}.top-actions{width:100%}.top-actions select{min-width:0;flex:1}.grid,.board{grid-template-columns:1fr}}
   </style>
@@ -22,8 +23,15 @@
   <div class="shell">
     <header class="topbar">
       <div class="brand"><div class="mark" aria-hidden="true">A</div><div><h1>AAO Control Center</h1><span class="muted">Operaciones organizativas · desarrollo local</span></div></div>
-      <div class="top-actions"><label class="hidden" for="project">Proyecto</label><select id="project" aria-label="Proyecto"></select><button id="reload" type="button">Actualizar</button></div>
+      <div class="top-actions"><label class="hidden" for="project">Proyecto</label><select id="project" aria-label="Proyecto"></select><button id="reload" type="button">Actualizar</button><button id="disconnect" type="button" class="hidden">Desconectar</button></div>
     </header>
+    <form id="auth-panel" class="auth-panel hidden" autocomplete="off">
+      <label for="auth-token">Token CEO de desarrollo
+        <input id="auth-token" name="token" type="password" autocomplete="new-password" required>
+      </label>
+      <button type="submit">Conectar</button>
+      <p>La credencial solo se conserva en la memoria de esta pestaña; no se guarda en almacenamiento local.</p>
+    </form>
     <div id="message" role="status" aria-live="polite" class="muted">Conectando con el núcleo local…</div>
     <div class="layout">
       <nav class="nav" aria-label="Navegación principal">
@@ -41,6 +49,7 @@
     const states=["INBOX","READY","IN_PROGRESS","IN_REVIEW","VERIFIED","DONE"];
     const labels={INBOX:"Entrada",READY:"Preparado",IN_PROGRESS:"En curso",IN_REVIEW:"En revisión",VERIFIED:"Verificado",DONE:"Completado"};
     const projectSelect=document.querySelector("#project"),content=document.querySelector("#content"),message=document.querySelector("#message");
+    const authPanel=document.querySelector("#auth-panel"),authInput=document.querySelector("#auth-token"),disconnectButton=document.querySelector("#disconnect");
     let projects=[],selectedProject=null,board=[],detail=null,activity=[],selectedTask=null,activePage="home",ceoToken=null;
     function el(tag,text,cls){const item=document.createElement(tag);if(text!==undefined)item.textContent=text;if(cls)item.className=cls;return item}
     function panel(title){const p=el("section",undefined,"panel");p.append(el("h2",title));return p}
@@ -48,11 +57,11 @@
     function displayDate(value){if(!value)return "Fecha no disponible";const d=new Date(value);return Number.isNaN(d.getTime())?String(value):d.toLocaleString("es-ES")}
     async function request(path){
       const headers=ceoToken?{"X-CEO-Token":ceoToken}:{};
-      let response=await fetch(path,{credentials:"same-origin",headers});
-      if(response.status===403&&!ceoToken){
-        const token=window.prompt("Token CEO de desarrollo para consultar PostgreSQL (permanece solo en esta pestaña):");
-        if(!token)throw new Error("Acceso no autorizado. No se ha guardado ninguna credencial.");
-        ceoToken=token;response=await fetch(path,{credentials:"same-origin",headers:{"X-CEO-Token":ceoToken}});
+      const response=await fetch(path,{credentials:"same-origin",headers});
+      if(response.status===401||response.status===403){
+        if(ceoToken){ceoToken=null;authInput.value="";disconnectButton.classList.add("hidden")}
+        authPanel.classList.remove("hidden");
+        throw new Error("Acceso no autorizado. Introduce una credencial de desarrollo para continuar.");
       }
       if(!response.ok)throw new Error("La API respondió HTTP "+response.status);
       return response.json();
@@ -142,6 +151,8 @@
     function render(){content.replaceChildren();if(!projects.length){renderHome();return}if(activePage==="home")renderHome();else if(activePage==="project")renderProject();else if(activePage==="activity")renderActivity();else if(activePage==="evidence")renderEvidence();else renderDecisions();syncNav()}
     projectSelect.addEventListener("change",()=>{selectedProject=projectSelect.value;selectedTask=null;loadProjectData()});
     document.querySelector("#reload").addEventListener("click",()=>loadProjects().catch(err=>setMessage("No se pudo actualizar: "+err.message,true)));
+    authPanel.addEventListener("submit",event=>{event.preventDefault();const token=authInput.value.trim();if(!token)return;ceoToken=token;authInput.value="";disconnectButton.classList.remove("hidden");loadProjects().then(()=>authPanel.classList.add("hidden")).catch(err=>setMessage("No se pudo conectar: "+err.message,true))});
+    disconnectButton.addEventListener("click",()=>{ceoToken=null;projects=[];selectedProject=null;board=[];detail=null;activity=[];disconnectButton.classList.add("hidden");authPanel.classList.remove("hidden");render();setMessage("Sesión de desarrollo desconectada.")});
     document.querySelectorAll(".nav button").forEach(button=>button.addEventListener("click",()=>{activePage=button.dataset.page;selectedTask=null;render()}));
     loadProjects().catch(err=>{projectSelect.replaceChildren();setMessage("No se puede consultar el núcleo: "+err.message,true);content.replaceChildren(el("div","La interfaz no usa datos simulados. Comprueba la API y los permisos antes de reintentar.","empty"))});
   </script>

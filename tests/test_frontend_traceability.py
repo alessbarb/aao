@@ -14,3 +14,17 @@ def test_work_detail_ui_reports_local_sha_link_without_claiming_remote_validatio
     assert "no consta una ejecución exitosa para el SHA guardado" in page
     assert "Estado remoto de la PR: no verificado por AAO" in page
     assert "no certifica que el SHA siga siendo el HEAD remoto" in page
+
+
+def test_control_center_has_explicit_ephemeral_development_authentication():
+    with TestClient(app) as client:
+        response = client.get("/")
+
+    page = response.text
+    assert '<form id="auth-panel"' in page
+    assert 'id="auth-token" name="token" type="password"' in page
+    assert 'id="disconnect" type="button"' in page
+    assert "solo se conserva en la memoria de esta pestaña" in page
+    assert "window.prompt" not in page
+    assert "localStorage" not in page
+    assert "sessionStorage" not in page
