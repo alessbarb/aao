@@ -28,6 +28,31 @@ def test_transactional_development_credentials_fail_closed_in_production(monkeyp
         authenticate_in_transaction(object(), "not-a-real-token", kind="AUDITOR")
 
 
+@pytest.mark.parametrize("environment", [None, "", "production", "prodution"])
+@pytest.mark.parametrize("transactional", [False, True])
+def test_individual_credentials_require_explicit_known_dev_environment(
+    monkeypatch, environment, transactional,
+):
+    from aao import principal_credentials
+
+    if environment is None:
+        monkeypatch.delenv("AAO_ENV", raising=False)
+    else:
+        monkeypatch.setenv("AAO_ENV", environment)
+
+    def database_access_is_forbidden():
+        raise AssertionError("environment denial must happen before database access")
+
+    monkeypatch.setattr(principal_credentials, "connect_postgres", database_access_is_forbidden)
+    with pytest.raises(PrincipalDenied, match="unavailable"):
+        if transactional:
+            principal_credentials.authenticate_in_transaction(
+                object(), "not-a-real-token", kind="AUDITOR",
+            )
+        else:
+            principal_credentials.authenticate("not-a-real-token", kind="AGENT")
+
+
 def test_grant_contract_accepts_execution_capabilities_only_as_exact_values():
     from pydantic import ValidationError
 
