@@ -90,6 +90,70 @@ def test_transactional_auditor_authentication_serializes_with_revocation(monkeyp
     not os.getenv("AAO_TEST_POSTGRES_URL") or os.getenv("AAO_TEST_DB_DISPOSABLE") != "yes",
     reason="Explicit disposable PostgreSQL database required",
 )
+def test_transactional_agent_authentication_serializes_with_rotation(monkeypatch):
+    from aao.postgresql_connection import connect_postgres
+    from aao.principal_credentials import (
+        PrincipalDenied,
+        authenticate,
+        authenticate_in_transaction,
+        digest_token,
+    )
+    from aao.work_management_api import app
+
+    monkeypatch.setenv("AAO_POSTGRES_URL", os.environ["AAO_TEST_POSTGRES_URL"])
+    monkeypatch.setenv("AAO_CEO_TOKEN", "agent-rotation-race-ceo")
+    identity = "agent-rotation-" + str(uuid4())
+    ceo = {"X-CEO-Token": "agent-rotation-race-ceo"}
+    with TestClient(app) as client:
+        response = client.post("/v1/principals/credentials", headers=ceo, json={
+            "principal_id": identity, "kind": "AGENT",
+        })
+        assert response.status_code == 201, response.text
+        old_token = response.json()["token"]
+
+        with ThreadPoolExecutor(max_workers=1) as pool, connect_postgres() as protected:
+            assert authenticate_in_transaction(protected, old_token, kind="AGENT") == identity
+            protected_pid = protected.execute("SELECT pg_backend_pid()").fetchone()[0]
+            pid_ready = __import__("threading").Event()
+            rotate_pid = []
+
+            def rotate():
+                with connect_postgres() as rotator:
+                    rotate_pid.append(rotator.execute("SELECT pg_backend_pid()").fetchone()[0])
+                    pid_ready.set()
+                    new_secret = "rotated-" + str(uuid4())
+                    rotator.execute(
+                        "UPDATE principal_credentials SET token_digest=%s "
+                        "WHERE principal_id=%s AND enabled=true",
+                        (digest_token(new_secret), identity),
+                    )
+                    return new_secret
+
+            pending = pool.submit(rotate)
+            assert pid_ready.wait(timeout=2)
+            deadline = time.monotonic() + 3
+            blocked = False
+            while time.monotonic() < deadline:
+                with connect_postgres() as observer:
+                    blocked = observer.execute(
+                        "SELECT %s = ANY(pg_blocking_pids(%s))",
+                        (protected_pid, rotate_pid[0]),
+                    ).fetchone()[0]
+                if blocked:
+                    break
+                time.sleep(0.01)
+            assert blocked, "credential rotation was not blocked by authenticated transaction"
+            assert not pending.done()
+        new_token = pending.result(timeout=3)
+    with pytest.raises(PrincipalDenied):
+        authenticate(old_token, kind="AGENT")
+    assert authenticate(new_token, kind="AGENT") == identity
+
+
+@pytest.mark.skipif(
+    not os.getenv("AAO_TEST_POSTGRES_URL") or os.getenv("AAO_TEST_DB_DISPOSABLE") != "yes",
+    reason="Explicit disposable PostgreSQL database required",
+)
 def test_individual_auditor_credential_is_bound_to_review(monkeypatch):
     from aao.postgresql_connection import connect_postgres
     from aao.principal_credentials import digest_token
