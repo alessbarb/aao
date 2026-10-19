@@ -9,8 +9,11 @@ acceptance, merge approval, or operating authorization.
 - Repository: `https://github.com/alessbarb/aao`
 - Corrected implementation/source: `31e7397be082394a6da95eadebd0d8ad6bf99c39`
 - Initial corrected documentation package: `c9b2c7ad44d2cadc2e214904073073221e1207cd`
-- Final package containing this request: to be pinned after this documentation
-  commit; do not substitute the initial package SHA for the final checkout.
+- Final review package: the exact full SHA is pinned in
+  [`M2A_REVIEW_TRANSMITTAL.md`](M2A_REVIEW_TRANSMITTAL.md). This request cannot
+  embed the SHA of its own containing commit; reviewers must verify the
+  transmittal target and checkout SHA directly. Do not substitute the initial
+  package SHA for the final package.
 - Historical PR #2 implementation/package, preserved for lineage only:
   `dc084417a2ba683fe4737342f89e9cd1036b38ad` /
   `ef1a6e64ad4d6523cacd6c98a3b25ae7cebf4ad5`.
