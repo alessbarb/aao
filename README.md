@@ -14,6 +14,19 @@ An independently governed, private, multi-project AI organization. AAO is **not*
 
 Not implemented: independent review, production authentication, distributed workers, model adapters, durable engine, PostgreSQL deployment, office UI, and autonomous scheduling. No external effects are enabled.
 
+## Current PostgreSQL development path (19 October 2026)
+
+The sections below preserve the incremental history of the prototype; they must not be read as the present acceptance status. The PostgreSQL-backed development API is `aao.work_management_api:app`, while the separate SQLite prototype remains at `aao.sqlite_api:app`. The PostgreSQL integration suite is `tests/test_postgresql_workflow_integration.py`. Schema migrations `001` through `005` are immutable historical artifacts.
+
+For the local disposable test database, after configuring the private `.env.test` file and applying the existing migrations:
+
+```sh
+AAO_ENV=test AAO_ENV_FILE=.env.test python -m pytest -v -rs
+python -m uvicorn aao.work_management_api:app --host 127.0.0.1 --port 8001
+```
+
+The 47 passing tests were recorded against commit `1006902c2184fc7fed0f76c677c64ab6599f4669` **before** the naming refactor. They have not been rerun on the current branch by this documentation change. Individual development credentials and a deliberately inert execution worker are present, but M2 remains open and external effects remain disabled. This is not production authentication, independent security acceptance, or permission to enable autonomous operations.
+
 ## Local development
 
 Requires Python 3.12+.
@@ -96,12 +109,12 @@ Read [PostgreSQL runtime setup](docs/POSTGRESQL_RUNTIME_OPERATIONS.md). It requi
 database, then running on localhost. The development identity migration relaxes
 principal FK enforcement and is **not a production schema**.
 
-An opt-in integration test exists in `tests/test_postgres_integration.py`.
+An opt-in integration test exists in `tests/test_postgresql_workflow_integration.py`.
 Use it only on an explicitly disposable database:
 ```sh
 export AAO_TEST_POSTGRES_URL='postgresql://...disposable-test-database'
 export AAO_TEST_DB_DISPOSABLE=yes
-pytest -q tests/test_postgres_integration.py
+pytest -q tests/test_postgresql_workflow_integration.py
 ```
 The test creates records and does not delete the database afterwards.
 
