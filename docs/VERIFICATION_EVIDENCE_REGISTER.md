@@ -80,3 +80,7 @@ El operador actualizó hasta la revisión `1006902` y ejecutó `AAO_ENV=test AAO
 - The 12 previously passing PostgreSQL integration scenarios were redistributed without deliberate behavioral changes into `test_project_workflow_integration.py` (4), `test_execution_leases_integration.py` (3), `test_execution_reconciliation_integration.py` (1), and `test_principal_credential_lifecycle_integration.py` (4).
 - Each scenario retains its individual opt-in disposable PostgreSQL database guard. The original monolithic file has been removed; its historical test evidence remains associated with the previous revision.
 - **Validation on the resulting HEAD is pending:** full pytest suite and Ruff lint. No new proof of passing tests is asserted by this split.
+
+## Verified structural baseline and HTTPX2 deprecation resolution — 2026-10-19
+
+Operator supplied terminal output for commit `5fe0b4b86d999b020e928e0bd4e8375e5c0dc7c9` on Python 3.12.13. Local `python -m pip install -e '.[dev,postgres]'` installed `httpx2==2.14.0`; `python -m pip check` reported no broken requirements, `python -m ruff check src tests` passed, and `AAO_ENV=test AAO_ENV_FILE=.env.test python -m pytest -v -rs -W error` completed **47 passed, 0 failed, 0 skipped, 0 warnings in 3.30 seconds**. Thus the naming restructure and test-suite split have a verified local functional/static baseline, and the previous Starlette HTTPX deprecation no longer occurs under warnings-as-errors. This is operator-reported evidence only; no independent architecture/security review was performed, and M2 is not accepted.

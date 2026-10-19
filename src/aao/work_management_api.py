@@ -293,6 +293,27 @@ def grant(project_id: str, payload: GrantRequest, _: str = Depends(require_ceo))
 
 
 def require_grant(db, principal: str, project_id: str, capability: str):
+    """Recheck individual identity under a row lock within the write transaction.
+
+    Revocation/rotation cannot commit between this check and transaction end.
+    Transitional development principals remain confined to the explicit dev gate.
+    """
+    shared = {
+        "development-worker": ("AGENT", {"work.create", "work.admit", "work.progress", "project.read"}),
+        "development-auditor": ("AUDITOR", {"work.review"}),
+    }
+    if principal in shared:
+        _kind, capabilities = shared[principal]
+        if not shared_dev_tokens_enabled() or capability not in capabilities:
+            raise HTTPException(403, "Shared development identity not authorized")
+    else:
+        row = db.execute(
+            "SELECT kind,enabled FROM principal_credentials "
+            "WHERE principal_id=%s FOR SHARE", (principal,),
+        ).fetchone()
+        expected_kind = "AUDITOR" if capability == "work.review" else "AGENT"
+        if not row or row[0] != expected_kind or not row[1]:
+            raise HTTPException(403, "Individual principal invalid or revoked")
     if not db.execute(
         "SELECT 1 FROM project_grants WHERE principal_id=%s AND project_id=%s "
         "AND capability=%s AND (expires_at IS NULL OR expires_at > now())", (principal, project_id, capability),
