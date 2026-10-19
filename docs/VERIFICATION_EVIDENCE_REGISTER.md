@@ -235,3 +235,15 @@ tests** with compileall, Ruff, pip check and diff check clean. GitHub Actions
 run `39253994700` passed on the same code SHA. This verifies the implemented
 admission boundary, not every possible proposal/retry schedule and not any
 external effect execution.
+
+## Concurrent effect proposal versus safe retry
+
+Commit `919ce2118a37dd65763516748979494ce6f96e61` adds a barrier-started
+PostgreSQL race between `propose()` and `RETRY_CONFIRMED_SAFE`. The test asserts
+the serialized outcomes: if proposal admission wins, retry is denied because
+an effect exists; if retry wins, the execution is queued and proposal is denied.
+The race scenario passed ten consecutive local reruns, and the full disposable
+PostgreSQL suite passed **52 tests** with compileall, Ruff, pip check and diff
+check clean. GitHub Actions run `39254352077` passed on the same code SHA.
+These are bounded controlled tests, not exhaustive scheduling or adversarial
+review; no external effect was executed.

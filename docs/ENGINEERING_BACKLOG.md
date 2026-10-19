@@ -36,8 +36,10 @@ or `[BLOCKED]` labels below as live issue statuses.
 4. Lease expiry is now computed and checked by PostgreSQL clock. Integration
    tests prove delayed completion is rejected after expiry during a queue-row
    lock wait and run three competing completion/quarantine schedules, all
-   ending `UNCERTAIN`. Still verify repeated revocation schedules, effect
-   proposal/retry and cold-restart recovery with PostgreSQL concurrency tests.
+   ending `UNCERTAIN`. A controlled PostgreSQL proposal/retry race now checks
+   that retry sees a proposal that wins the execution-row lock, or a proposal
+   is rejected when retry wins; repeated adversarial schedules, revocation
+   races and cold-restart recovery remain open.
 5. Make PostgreSQL integration tests part of CI with a fresh disposable
    database and migrations; ordinary CI currently can skip those tests.
 6. Obtain adversarial independent security/architecture review and competent
