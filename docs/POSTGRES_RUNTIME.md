@@ -75,3 +75,22 @@ and lifecycle still need a single hardened PostgreSQL application.
 A test was added to verify same-origin page delivery and fail-closed
 project listing without valid CEO credentials. It has not yet been run
 against the operator's PostgreSQL instance.
+
+
+## Project-scoped reader integration
+
+The PostgreSQL development API accepts either the configured CEO token or
+the configured worker token on project and board reads. The CEO development
+credential can see all projects; the worker identity sees only projects with
+an explicit unexpired `project.read` grant, enforced for both listing and
+direct board URLs. Ungranted project IDs cannot be read with the worker token.
+
+This **does not** implement strong identity authentication: there is still one
+shared worker development credential and the browser presently prompts only for
+the CEO credential. Production read isolation requires distinct principals,
+role separation, server-enforced session identity, least-privilege database
+roles and adversarial security review.
+
+An isolated integration regression test demonstrates worker visibility for
+one granted project and denial for another. This test is not yet verified
+against the operator's PostgreSQL database.
