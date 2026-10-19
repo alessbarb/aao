@@ -571,3 +571,47 @@ def test_individual_agent_claim_and_revocation(monkeypatch):
     with pytest.raises(ExecutionConflict):
         complete(eid, lease["token"], principal, {"ok": True}, agent_credential=secret)
     assert state(eid)["status"] == "RUNNING"
+
+
+@pytest.mark.skipif(
+    not os.getenv("AAO_TEST_POSTGRES_URL") or os.getenv("AAO_TEST_DB_DISPOSABLE") != "yes",
+    reason="Explicit disposable PostgreSQL database required",
+)
+def test_ceo_governed_principal_issue_rotate_revoke(monkeypatch):
+    from aao.pg_work import app
+    from aao.pg_principals import authenticate, PrincipalDenied
+    from aao.postgres import connect_postgres
+
+    monkeypatch.setenv("AAO_POSTGRES_URL", os.environ["AAO_TEST_POSTGRES_URL"])
+    monkeypatch.setenv("AAO_CEO_TOKEN", "governance-ceo")
+    name = "agent-" + str(uuid4())
+    ceo = {"X-CEO-Token": "governance-ceo"}
+    with TestClient(app) as client:
+        payload = {"principal_id": name, "kind": "AGENT"}
+        assert client.post("/v1/principals/credentials", json=payload).status_code == 403
+        created = client.post("/v1/principals/credentials", headers=ceo, json=payload)
+        assert created.status_code == 201, created.text
+        initial = created.json()["token"]
+        assert authenticate(initial, kind="AGENT") == name
+        assert client.post("/v1/principals/credentials", headers=ceo, json=payload).status_code == 409
+        changed = client.post(f"/v1/principals/{name}/rotate", headers=ceo)
+        assert changed.status_code == 200, changed.text
+        rotated = changed.json()["token"]
+        assert rotated != initial
+        with pytest.raises(PrincipalDenied):
+            authenticate(initial, kind="AGENT")
+        assert authenticate(rotated, kind="AGENT") == name
+        assert client.post(f"/v1/principals/{name}/revoke", headers=ceo).status_code == 200
+        with pytest.raises(PrincipalDenied):
+            authenticate(rotated, kind="AGENT")
+        assert client.post(f"/v1/principals/{name}/revoke", headers=ceo).status_code == 404
+        with connect_postgres() as db:
+            events = db.execute(
+                "SELECT kind FROM events WHERE details->>'principal_id'=%s "
+                "AND kind LIKE 'principal.credential.%'", (name,)
+            ).fetchall()
+            assert {row[0] for row in events} == {
+                "principal.credential.issued",
+                "principal.credential.rotated",
+                "principal.credential.revoked",
+            }
