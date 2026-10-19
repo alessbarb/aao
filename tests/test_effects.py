@@ -1,5 +1,4 @@
 from aao.external_effect_registry import EffectConflict, canonical_digest
-import pytest
 
 
 def test_digest_is_canonical():
