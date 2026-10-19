@@ -1,4 +1,5 @@
 import pytest
+
 from aao.principal_credentials import PrincipalDenied, authenticate, digest_token
 
 
@@ -45,6 +46,7 @@ def test_shared_development_credentials_can_be_disabled(monkeypatch):
 
 def test_shared_development_credentials_require_opt_in(monkeypatch):
     from fastapi import HTTPException
+
     from aao.work_management_api import require_reviewer, require_worker, shared_dev_tokens_enabled
 
     monkeypatch.setenv("AAO_ENV", "development")
@@ -60,6 +62,7 @@ def test_shared_development_credentials_require_opt_in(monkeypatch):
 
 def test_individual_reader_cannot_fall_back_to_shared_credential(monkeypatch):
     from fastapi import HTTPException
+
     from aao.work_management_api import read_principal
 
     monkeypatch.setenv("AAO_ENV", "development")
