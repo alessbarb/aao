@@ -64,10 +64,15 @@
         if(!available.length)capabilities.append(node("p","No hay capacidades registradas para este proyecto.","meta"));
         for(const capability of available){
           const card=node("article","","card");
+          const assessedBy=assessments.filter(item=>item.details.capability_id===capability.capability_id && item.details.version===capability.version);
           card.append(node("strong",capability.capability_id+" · "+capability.version),
             node("div",capability.capability_type+" · "+capability.status,"meta"),
             node("p",typeof capability.contract.purpose==="string"?capability.contract.purpose:"Contrato registrado; propósito no especificado."),
+            node("div","Procedencia: "+JSON.stringify(capability.provenance),"meta"),
             node("div","Permisos declarados: "+(capability.required_permissions.join(", ")||"ninguno"),"meta"),
+            node("div","Riesgos y límites: "+(capability.risks.join(", ")||"no declarados"),"meta"),
+            node("div","Pruebas y evidencia: "+[...capability.tests,...capability.evidence].join(", "),"meta"),
+            node("div",assessedBy.length?"Evaluada en tareas: "+assessedBy.map(item=>item.task_title).join(", "):"Sin evaluaciones vinculadas a tareas." ,"meta"),
             node("div","Ejecución autorizada: no","meta"));
           capabilities.append(card)
         }

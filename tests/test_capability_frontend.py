@@ -11,3 +11,7 @@ def test_control_center_renders_project_scoped_capability_registry_as_non_author
     assert "capability.capability_id+\" · \"+capability.version" in html
     assert 'headers:{"X-Agent-Token":readerToken}' in html
     assert '"X-CEO-Token"' not in html
+    assert '"Procedencia: "+JSON.stringify(capability.provenance)' in html
+    assert '"Riesgos y límites: "' in html
+    assert '"Pruebas y evidencia: "' in html
+    assert '"Evaluada en tareas: "' in html
