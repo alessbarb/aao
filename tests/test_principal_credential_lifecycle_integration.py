@@ -1,4 +1,5 @@
 """PostgreSQL integration tests, opt-in for explicitly disposable databases."""
+import json
 import os
 import time
 from concurrent.futures import ThreadPoolExecutor
@@ -210,18 +211,14 @@ def test_individual_auditor_credential_is_bound_to_review(monkeypatch):
         assert denied.status_code == 403
         approval = client.post(f"/v1/work/{work}/reviews",
                                headers={"X-Auditor-Token": secret}, json=approval_payload)
-        assert approval.status_code == 409, approval.text
-        rejection = client.post(f"/v1/work/{work}/reviews",
-                                headers={"X-Auditor-Token": secret}, json={
-                                    "decision": "REJECT", "evidence": ["requires stronger evidence"],
-                                })
-        assert rejection.status_code == 201, rejection.text
-        with connect_postgres() as db:
-            actual = db.execute(
-                "SELECT reviewer_id FROM reviews WHERE id=%s",
-                (rejection.json()["review_id"],),
-            ).fetchone()
-            assert actual[0] == auditor_id
+        assert approval.status_code == 422, approval.text
+        sha_bound_payload = {
+            "decision": "REJECT", "candidate_sha": "a" * 40,
+            "evidence": ["sha256:" + "a" * 64],
+        }
+        unlinked = client.post(f"/v1/work/{work}/reviews",
+                               headers={"X-Auditor-Token": secret}, json=sha_bound_payload)
+        assert unlinked.status_code == 409, unlinked.text
 
 
 @pytest.mark.skipif(
@@ -260,6 +257,7 @@ def test_review_rejection_serializes_with_auditor_revocation(monkeypatch, revoca
             (agent_id, "work.create"),
             (agent_id, "work.admit"),
             (agent_id, "work.progress"),
+                (agent_id, "evidence.submit"),
             (auditor_id, "work.review"),
         ):
             response = client.post(f"/v1/projects/{project}/grants", headers=ceo, json={
@@ -275,6 +273,26 @@ def test_review_rejection_serializes_with_auditor_revocation(monkeypatch, revoca
         assert client.post(f"/v1/work/{work}/admit", headers=worker).status_code == 200
         assert client.post(f"/v1/work/{work}/progress", headers=worker).status_code == 200
         assert client.post(f"/v1/work/{work}/progress", headers=worker).status_code == 200
+
+        from aao.evidence_registry import register_evidence
+        candidate_sha = "b" * 40
+        with connect_postgres() as db:
+            db.execute(
+                "INSERT INTO execution_queue(id,work_id,project_id,status,input_json,"
+                "project_state_generation,result_json) "
+                "SELECT %s,%s,%s,'SUCCEEDED','{}'::jsonb,state_generation,%s::jsonb "
+                "FROM projects WHERE id=%s",
+                (str(uuid4()), work, project,
+                 json.dumps({"candidate_sha": candidate_sha}), project),
+            )
+        evidence_ref = register_evidence(
+            project, b"review authorization race evidence", agent_id=agent_id,
+            agent_credential=agent_token, media_type="text/plain",
+        )
+        review_payload = {
+            "decision": "REJECT", "candidate_sha": candidate_sha,
+            "evidence": [evidence_ref],
+        }
 
         authorized = Event()
         release_review = Event()
@@ -295,7 +313,7 @@ def test_review_rejection_serializes_with_auditor_revocation(monkeypatch, revoca
                 client.post,
                 f"/v1/work/{work}/reviews",
                 headers={"X-Auditor-Token": auditor_token},
-                json={"decision": "REJECT", "evidence": ["needs more work"]},
+                json=review_payload,
             )
             assert authorized.wait(timeout=5), "review did not reach its in-transaction grant check"
             if revocation == "credential":
@@ -343,7 +361,7 @@ def test_review_rejection_serializes_with_auditor_revocation(monkeypatch, revoca
         app.dependency_overrides[work_api.require_reviewer] = lambda: stale_context
         try:
             denied = client.post(f"/v1/work/{work}/reviews", json={
-                "decision": "REJECT", "evidence": ["stale authorization context"],
+                **review_payload,
             })
         finally:
             app.dependency_overrides.pop(work_api.require_reviewer, None)

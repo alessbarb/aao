@@ -96,7 +96,8 @@ class WorkRequest(BaseModel):
 
 
 class ReviewRequest(BaseModel):
-    decision: str = Field(pattern="^(APPROVE|REJECT)$")
+    decision: str = Field(pattern="^(APPROVE|REJECT|VETO)$")
+    candidate_sha: str = Field(pattern=r"^[0-9a-f]{40}$")
     evidence: list[str] = Field(min_length=1)
 
 
@@ -572,10 +573,24 @@ def board(project_id: str, principal: str = Depends(read_principal)):
             "FROM work_items w "
             "WHERE w.project_id=%s ORDER BY w.id", (project_id,),
         ).fetchall()
+        review_rows = db.execute(
+            "SELECT id,work_id,reviewer_id,decision,candidate_sha,evidence,created_at "
+            "FROM reviews WHERE work_id IN (SELECT id FROM work_items WHERE project_id=%s) "
+            "ORDER BY created_at,id", (project_id,),
+        ).fetchall()
+        reviews_by_work: dict[str, list[dict]] = {}
+        for review_row in review_rows:
+            reviews_by_work.setdefault(str(review_row[1]), []).append({
+                "id": str(review_row[0]), "reviewer_id": review_row[2],
+                "decision": review_row[3], "candidate_sha": review_row[4],
+                "evidence": review_row[5], "created_at": review_row[6].isoformat(),
+                "sha_bound": review_row[4] is not None,
+            })
         return [
             {"id": r[0], "title": r[1], "status": r[2],
              "acceptance_criteria": r[3], "evidence": r[4],
-             "executions": r[5]} for r in rows
+             "executions": r[5], "reviews": reviews_by_work.get(str(r[0]), [])}
+            for r in rows
         ]
 
 
@@ -795,8 +810,8 @@ def progress(work_id: str, principal: str = Depends(require_worker)):
 
 @app.post("/v1/work/{work_id}/reviews", status_code=201)
 def review(work_id: str, payload: ReviewRequest, principal: str = Depends(require_reviewer)):
-    if not all(item.strip() for item in payload.evidence):
-        raise HTTPException(422, "Blank evidence reference")
+    from aao.evidence_registry import EvidenceDenied, verify_evidence_references
+
     with tx() as db:
         work = db.execute("SELECT project_id,status,author_id FROM work_items WHERE id=%s FOR UPDATE", (work_id,)).fetchone()
         if not work:
@@ -808,6 +823,24 @@ def review(work_id: str, payload: ReviewRequest, principal: str = Depends(requir
             raise HTTPException(409, "Work not reviewable")
         if principal == author:
             raise HTTPException(403, "Author cannot review own work")
+        try:
+            verified_evidence = verify_evidence_references(
+                db, project_id, payload.evidence,
+            )
+        except EvidenceDenied as exc:
+            raise HTTPException(409, str(exc)) from exc
+        candidate_execution = db.execute(
+            "SELECT id,status FROM execution_queue WHERE work_id=%s "
+            "AND result_json->>'candidate_sha'=%s FOR SHARE",
+            (work_id, payload.candidate_sha),
+        ).fetchall()
+        if not candidate_execution:
+            raise HTTPException(409, "Candidate SHA has no linked execution")
+        if db.execute(
+            "SELECT 1 FROM reviews WHERE work_id=%s AND decision='VETO' LIMIT 1",
+            (work_id,),
+        ).fetchone() and payload.decision == "APPROVE":
+            raise HTTPException(409, "Active veto blocks approval; CEO disposition required")
         executions = db.execute(
             "SELECT id,status FROM execution_queue WHERE work_id=%s FOR UPDATE",
             (work_id,),
@@ -835,11 +868,26 @@ def review(work_id: str, payload: ReviewRequest, principal: str = Depends(requir
         if not review_decision.allowed:
             raise HTTPException(409, review_decision.reason)
         rid = str(uuid4())
-        db.execute("INSERT INTO reviews(id,work_id,reviewer_id,decision,evidence) VALUES (%s,%s,%s,%s,%s::jsonb)", (rid, work_id, principal, payload.decision, json.dumps(payload.evidence)))
-        next_state = "VERIFIED" if payload.decision == "APPROVE" else "IN_PROGRESS"
-        db.execute("UPDATE work_items SET status=%s,evidence=%s::jsonb WHERE id=%s", (next_state, json.dumps(payload.evidence), work_id))
-        audit(db, work_id, "work.reviewed", {"review_id": rid, "decision": payload.decision, "reviewer": principal})
-    return {"review_id": rid, "status": next_state}
+        db.execute(
+            "INSERT INTO reviews(id,work_id,reviewer_id,decision,evidence,candidate_sha) "
+            "VALUES (%s,%s,%s,%s,%s::jsonb,%s)",
+            (rid, work_id, principal, payload.decision,
+             json.dumps(payload.evidence), payload.candidate_sha),
+        )
+        next_state = {
+            "APPROVE": "VERIFIED", "REJECT": "IN_PROGRESS", "VETO": "IN_REVIEW",
+        }[payload.decision]
+        if payload.decision != "VETO":
+            db.execute(
+                "UPDATE work_items SET status=%s,evidence=%s::jsonb WHERE id=%s",
+                (next_state, json.dumps(payload.evidence), work_id),
+            )
+        audit(db, work_id, "work.reviewed", {
+            "review_id": rid, "decision": payload.decision, "reviewer": principal,
+            "candidate_sha": payload.candidate_sha,
+            "verified_evidence": verified_evidence,
+        })
+    return {"review_id": rid, "status": next_state, "candidate_sha": payload.candidate_sha}
 
 @app.post("/v1/work/{work_id}/stage-inert", status_code=202)
 def stage_inert(work_id: str, principal: str = Depends(require_worker)):

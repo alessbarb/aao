@@ -113,6 +113,19 @@
               if(result.stderr)evidence.append(node("pre",result.stderr));
               card.append(evidence);
             }
+            const reviews=Array.isArray(task.reviews)?task.reviews:[];
+            if(!reviews.length)card.append(node("div","Sin dictamen de auditor registrado","meta"));
+            for(const review of reviews){
+              const disposition=review.decision==="VETO"?"VETO ACTIVO":
+                review.decision==="APPROVE"?"Aprobación registrada":
+                review.decision==="REJECT"?"Rechazo registrado":"Dictamen histórico";
+              const audit=node("details",undefined,"meta");
+              audit.append(node("summary",disposition+" · "+(review.sha_bound?"SHA "+review.candidate_sha:"sin SHA verificable")));
+              audit.append(node("div","Revisor: "+review.reviewer_id,"meta"),
+                node("div","Referencias verificables: "+(review.evidence||[]).join(", "),"meta"),
+                node("div",review.created_at,"meta"));
+              card.append(audit);
+            }
             col.append(card)}
           board.append(col)
         }
