@@ -64,10 +64,16 @@ amendment or CEO-confirmed constitutional rule.
 4. Lease expiry is now computed and checked by PostgreSQL clock. Integration
    tests prove delayed completion is rejected after expiry during a queue-row
    lock wait and run three competing completion/quarantine schedules, all
-   ending `UNCERTAIN`. A controlled PostgreSQL proposal/retry race now checks
-   that retry sees a proposal that wins the execution-row lock, or a proposal
-   is rejected when retry wins; repeated adversarial schedules, revocation
-   races remain open. A manual cold restart of an isolated PostgreSQL 16
+   ending `UNCERTAIN`. Effect proposals now require an active AGENT credential,
+   the dedicated project `effect.propose` grant, and the matching live lease;
+   they append proposer identity to the journal and remain inert. Three focused
+  local reruns exercised a controlled execution-row-lock schedule: the test
+  observed proposal blocked while completion competed. A
+  previously described proposal/retry race was not a valid concurrency case:
+  proposal requires `RUNNING` while retry requires `UNCERTAIN`; it was replaced
+  with the proposal/completion schedule. Hostile/repeated lock schedules and
+  credential/grant revocation races for proposals remain open. A manual cold
+  restart of an isolated PostgreSQL 16
    container recovered a persisted expired lease to `UNCERTAIN`; broader
    crash/restart schedules and a repeatable automated restart harness remain
    open.

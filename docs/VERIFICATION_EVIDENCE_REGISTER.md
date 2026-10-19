@@ -394,3 +394,34 @@ constitutional CEO approval, delegation limits, revoking already-issued
 capabilities, or independent grant review.
 
 CI run `39257126986` passed for code commit `d891bacba49e2b4e291971f7ab23758a5ba73c00`, including the disposable PostgreSQL suite, compilation, Ruff, and dependency checks.
+
+## Bind external-effect proposals to the active executor lease
+
+The implementation is at code commit
+`424016daabda4f2cb0cd337be449b71d687d4cac`; the controlled proposal/completion
+lock-schedule test is at `22f7310822c2ca3bfe59b8e2ccbb9d8dbc856b0d`.
+`external_effect_registry.propose()` requires an active individual AGENT
+credential matching the execution worker, an explicit project `effect.propose`
+grant, an active project, and the current unexpired lease token for a RUNNING
+execution. The transaction records the proposer ID and request digest in the
+execution journal. It does not execute an external action. The old
+proposal/retry concurrency test was removed because those operations require
+mutually exclusive execution states; a controlled proposal/completion
+integration schedule replaced it. The test held the execution row, observed
+the proposal blocked on the database lock, and released it while completion
+competed for the same execution.
+
+Local verification used the explicitly disposable PostgreSQL test database:
+`python -m compileall -q src tests` succeeded; `python -m ruff check src tests`
+reported all checks passed; the full suite passed **60 tests**, with zero
+failures, skips, or warnings; `python -m pip check` reported no broken
+requirements; and `git diff --check` was clean. The focused reconciliation
+integration file passed **2 tests in three consecutive reruns**. GitHub CI run
+`39258084851` passed for the implementation SHA, and run `39258576394` passed
+for the test SHA. CI applied the schema to a fresh
+disposable PostgreSQL service, then passed compileall, Ruff, the
+warnings-as-errors unit/integration suite, and `pip check`. This is engineering evidence,
+not independent security/architecture review or M2 acceptance. Remaining
+gates include adversarial credential/grant revocation schedules for proposal,
+retry reconciliation versus auditor credential revocation, and independent
+review.
