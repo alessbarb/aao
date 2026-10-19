@@ -261,3 +261,14 @@ container was removed afterward. This demonstrates single-instance database
 restart persistence and explicit expired-lease quarantine, not automatic
 recovery, a process crash during transaction commit, failover, or repeated
 restart schedules. No production database or external effect was used.
+
+## Inert queue staging requires execution authority
+
+Commit `9f6f3e3dc80967e794104ca8c97e347cb50637bd` changes
+`POST /v1/work/{id}/stage-inert` to require both `work.admit` and
+`execution.claim`, with both active AGENT credential and grant checks held in
+the staging transaction. The PostgreSQL integration test confirms an otherwise
+admitted agent without `execution.claim` receives 403, then succeeds after the
+grant is added; staging remains fixed/inert and feature-flagged. Local full
+suite: **52 passed**, no skips/warnings; compileall, Ruff, pip check and diff
+check clean. GitHub Actions run `39254714699` passed on the same code SHA.
