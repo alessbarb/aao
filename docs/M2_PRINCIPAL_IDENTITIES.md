@@ -64,3 +64,20 @@ credential is given. This is a transitional compatibility path, not accepted
 production authentication. A database-backed test has been added for invalid
 credential, authorized project claim, and revocation after claim. **It has not
 yet been executed on the operator's machine.**
+
+## Restriction of transitional shared credentials
+
+The work API, review API and project/board reads recognize individual AGENT /
+AUDITOR bearer credentials. Project/board reads with `X-Agent-Token` are
+filtered by that principal's `project.read` grants. A supplied but invalid
+individual token never falls back to a shared development token.
+
+`AAO_ALLOW_SHARED_DEV_TOKENS=false` disables `X-Work-Token` and
+`X-Review-Token` compatibility in development; regardless of that setting,
+`AAO_ENV=production` refuses these shared credentials. This gate does not
+constitute production readiness: CEO still uses a prototype shared token,
+provisioning and rotation require governance, and worker registrations remain
+available through the old internal queue API. All external effects remain off.
+
+The new negative unit tests and integration behavior require validation by the
+operator before M2 can be accepted.
