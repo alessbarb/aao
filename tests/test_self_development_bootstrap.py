@@ -1,3 +1,5 @@
+from urllib.error import HTTPError
+
 from scripts import bootstrap_self_dev_agent as bootstrap
 
 
@@ -67,3 +69,17 @@ def test_bootstrap_reuses_verified_existing_project_without_writes(monkeypatch):
     assert mandate["id"] == "mandate-1"
     assert actual_project == project
     assert calls == [("GET", "/v1/mandates"), ("GET", "/v1/mandates")]
+
+
+def test_request_json_explains_stale_api_method_mismatch(monkeypatch):
+    def stale_api(*_args, **_kwargs):
+        raise HTTPError("http://127.0.0.1:8001/v1/mandates", 405,
+                        "Method Not Allowed", {}, None)
+
+    monkeypatch.setattr(bootstrap, "urlopen", stale_api)
+    try:
+        bootstrap.request_json("http://127.0.0.1:8001", "/v1/mandates")
+    except bootstrap.BootstrapError as exc:
+        assert "restart it from the current checkout" in str(exc)
+    else:
+        raise AssertionError("expected stale API method mismatch to fail closed")
