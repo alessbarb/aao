@@ -405,6 +405,135 @@ def test_reconciliation_serializes_with_auditor_credential_revocation(
     not os.getenv("AAO_TEST_POSTGRES_URL") or os.getenv("AAO_TEST_DB_DISPOSABLE") != "yes",
     reason="Explicit disposable PostgreSQL database required",
 )
+def test_execution_reconciliation_serializes_with_grant_revocation(monkeypatch):
+    """Whichever transaction locks the grant first determines authorization."""
+    from aao.execution_queue import claim, quarantine_expired, state
+    from aao.execution_reconciliation import ReconciliationDenied, reconcile
+    from aao.postgresql_connection import connect_postgres
+    from aao.work_management_api import app
+
+    monkeypatch.setenv("AAO_POSTGRES_URL", os.environ["AAO_TEST_POSTGRES_URL"])
+    monkeypatch.setenv("AAO_CEO_TOKEN", "reconcile-grant-revoke-ceo")
+    monkeypatch.setenv("AAO_SANDBOX_QUEUE_ENABLED", "true")
+    ceo = {"X-CEO-Token": "reconcile-grant-revoke-ceo"}
+    worker_id = "reconcile-grant-worker-" + str(uuid4())
+    auditor_id = "reconcile-grant-auditor-" + str(uuid4())
+    with TestClient(app) as client:
+        worker_response = client.post("/v1/principals/credentials", headers=ceo, json={
+            "principal_id": worker_id, "kind": "AGENT",
+        })
+        auditor_response = client.post("/v1/principals/credentials", headers=ceo, json={
+            "principal_id": auditor_id, "kind": "AUDITOR",
+        })
+        assert worker_response.status_code == auditor_response.status_code == 201
+        worker_token = worker_response.json()["token"]
+        auditor_token = auditor_response.json()["token"]
+        worker = {"X-Agent-Token": worker_token}
+        mandate = client.post("/v1/mandates", headers=ceo, json={
+            "title": "Reconciliation grant race " + str(uuid4()),
+            "objective": "Serialize reconciliation against grant revocation",
+        }).json()["id"]
+        assert client.post(f"/v1/mandates/{mandate}/confirm", headers=ceo).status_code == 200
+        project = client.post("/v1/projects", headers=ceo, json={
+            "name": "Reconciliation grant race", "mandate_id": mandate,
+        }).json()["id"]
+        for principal, capability in (
+            (worker_id, "work.create"), (worker_id, "work.admit"),
+            (worker_id, "execution.claim"), (auditor_id, "execution.reconcile"),
+        ):
+            response = client.post(f"/v1/projects/{project}/grants", headers=ceo, json={
+                "principal_id": principal, "capability": capability,
+            })
+            assert response.status_code == 201, response.text
+
+        def uncertain_execution(label):
+            work_id = client.post(f"/v1/projects/{project}/work", headers=worker, json={
+                "title": label + " " + str(uuid4()), "author_id": worker_id,
+                "acceptance_criteria": ["inert"],
+            }).json()["id"]
+            assert client.post(f"/v1/work/{work_id}/admit", headers=worker).status_code == 200
+            staged = client.post(f"/v1/work/{work_id}/stage-inert", headers=worker)
+            assert staged.status_code == 202, staged.text
+            execution_id = staged.json()["execution_id"]
+            lease = claim(worker_id, agent_credential=worker_token, project_id=project, seconds=1)
+            assert lease and lease["execution_id"] == execution_id
+            time.sleep(1.05)
+            assert quarantine_expired() >= 1
+            return execution_id
+
+        def wait_for_blocked_query(pattern, blocker_pid):
+            deadline = time.monotonic() + 5
+            while time.monotonic() < deadline:
+                with connect_postgres() as observer:
+                    row = observer.execute(
+                        "SELECT pid FROM pg_stat_activity WHERE query LIKE %s "
+                        "AND wait_event_type='Lock' "
+                        "AND %s=ANY(pg_blocking_pids(pid)) LIMIT 1",
+                        (pattern, blocker_pid),
+                    ).fetchone()
+                    if row:
+                        return row[0]
+                time.sleep(0.01)
+            raise AssertionError(f"query did not wait on expected lock: {pattern}")
+
+        execution_id = uncertain_execution("reconciliation wins grant race")
+        # Reconciliation has acquired FOR SHARE on its grant before its journal
+        # write. The queued deletion must wait until reconciliation commits.
+        with ThreadPoolExecutor(max_workers=2) as pool, connect_postgres() as blocker:
+            blocker.execute("LOCK TABLE execution_journal IN ACCESS EXCLUSIVE MODE")
+            blocker_pid = blocker.execute("SELECT pg_backend_pid()").fetchone()[0]
+            reconciliation = pool.submit(
+                reconcile, execution_id, auditor_credential=auditor_token,
+                evidence=["reviewed inert execution"], disposition="MARK_FAILED",
+            )
+            reconcile_pid = wait_for_blocked_query("INSERT INTO execution_journal%", blocker_pid)
+            revocation = pool.submit(
+                client.delete,
+                f"/v1/projects/{project}/grants/{auditor_id}/execution.reconcile",
+                headers=ceo,
+            )
+            wait_for_blocked_query("DELETE FROM project_grants%", reconcile_pid)
+        assert reconciliation.result(timeout=5) == "FAILED"
+        revoked = revocation.result(timeout=5)
+        assert revoked.status_code == 204, revoked.text
+        assert state(execution_id)["status"] == "FAILED"
+
+        # Reverse the order. Deletion is queued first on the grant row; the
+        # reconciliation's FOR SHARE must wait, then deny after deletion wins.
+        regrant = client.post(f"/v1/projects/{project}/grants", headers=ceo, json={
+            "principal_id": auditor_id, "capability": "execution.reconcile",
+        })
+        assert regrant.status_code == 201, regrant.text
+        execution_id = uncertain_execution("grant revocation wins reconciliation race")
+        with ThreadPoolExecutor(max_workers=2) as pool, connect_postgres() as blocker:
+            blocker_pid = blocker.execute("SELECT pg_backend_pid()").fetchone()[0]
+            blocker.execute(
+                "SELECT project_id FROM project_grants WHERE principal_id=%s "
+                "AND project_id=%s AND capability='execution.reconcile' FOR UPDATE",
+                (auditor_id, project),
+            )
+            revocation = pool.submit(
+                client.delete,
+                f"/v1/projects/{project}/grants/{auditor_id}/execution.reconcile",
+                headers=ceo,
+            )
+            revoker_pid = wait_for_blocked_query("DELETE FROM project_grants%", blocker_pid)
+            reconciliation = pool.submit(
+                reconcile, execution_id, auditor_credential=auditor_token,
+                evidence=["must be denied after revocation"], disposition="MARK_FAILED",
+            )
+            wait_for_blocked_query("SELECT 1 FROM project_grants%", revoker_pid)
+        revoked = revocation.result(timeout=5)
+        assert revoked.status_code == 204, revoked.text
+        with pytest.raises(ReconciliationDenied, match="Reconciliation capability required"):
+            reconciliation.result(timeout=5)
+        assert state(execution_id)["status"] == "UNCERTAIN"
+
+
+@pytest.mark.skipif(
+    not os.getenv("AAO_TEST_POSTGRES_URL") or os.getenv("AAO_TEST_DB_DISPOSABLE") != "yes",
+    reason="Explicit disposable PostgreSQL database required",
+)
 def test_effect_proposal_serializes_with_agent_credential_revocation(monkeypatch):
     """A proposal holding its credential lock commits before revocation."""
     from aao.execution_queue import claim
