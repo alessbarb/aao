@@ -106,7 +106,12 @@ def test_fixed_check_runs_inside_bubblewrap_and_returns_candidate_sha(tmp_path: 
     if not shutil.which("bwrap"):
         pytest.skip("bubblewrap is required to exercise the Linux sandbox")
     capability = subprocess.run(
-        ["bwrap", "--unshare-all", "--die-with-parent", "--", "true"],
+        [
+            "bwrap", "--unshare-all", "--ro-bind", "/usr", "/usr",
+            "--ro-bind", "/bin", "/bin", "--ro-bind", "/lib", "/lib",
+            "--ro-bind", "/lib64", "/lib64", "--die-with-parent", "--",
+            "/usr/bin/true",
+        ],
         capture_output=True,
         check=False,
         timeout=5,
