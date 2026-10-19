@@ -11,3 +11,16 @@ def test_each_capability_type_has_a_distinct_minimum_contract(capability_type, r
 
 def test_unknown_type_fails_closed():
     assert missing_contract_fields("unknown", {}) == {"<known capability type>"}
+
+
+def test_empty_contract_values_are_not_treated_as_declarations():
+    assert missing_contract_fields(
+        "agent_skill",
+        {
+            "purpose": "skill",
+            "compatible_roles": [],
+            "inputs": ["task"],
+            "outputs": ["evidence"],
+            "usage_limits": ["project scope"],
+        },
+    ) == {"compatible_roles"}
