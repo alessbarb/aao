@@ -1,7 +1,10 @@
 # M2 candidate — independent review package
 
-**Requested review target:** `88ec4264d655e6d25ec2b8f6859019a411a797fa` on
-`feat/aao-m0-foundation`.
+**Implementation candidate:** `7c1e21a4e959b0b1cc0410f9ae90a078a19ff315` on
+`feat/aao-m0-foundation`. This is the exact source revision with local test
+evidence. The review request must separately identify the exact packaging
+revision containing this document and its companion reports; those reports
+were added after the implementation candidate.
 
 This is a prepared package for a qualified independent reviewer. It is not
 itself the requested independent review and does not claim formal acceptance.
@@ -29,8 +32,9 @@ itself the requested independent review and does not claim formal acceptance.
 
 - `docs/CONSTITUTION.md` (draft; not a confirmed mandate),
   `docs/ENGINEERING_BACKLOG.md` (planning seed),
-  `docs/M2_COMPLIANCE_MATRIX.md`, `docs/M2_TECHNICAL_AUDIT.md`,
-  `docs/M2_CLOSURE_PLAN.md`, `docs/M2_ACCEPTANCE_PROPOSAL.md`.
+  `docs/COMPLIANCE_MATRIX.md`, `docs/TECHNICAL_AUDIT.md`,
+  `docs/CLOSURE_PLAN.md`, `docs/ACCEPTANCE_PROPOSAL.md`.
+- `docs/DURABLE_EXECUTION_EVALUATION.md` (disposition of backlog M2-01).
 - `docs/PRINCIPAL_AUTHORIZATION_MATRIX.md`,
   `docs/PRINCIPAL_AUTHORITY_AND_REVOCATION_BOUNDARIES.md`,
   `docs/EXECUTION_RECOVERY_AND_RECONCILIATION.md`,
@@ -67,9 +71,12 @@ itself the requested independent review and does not claim formal acceptance.
   independent review under the Constitution.
 - Recovery quarantine is explicit/helper-driven; no runtime scheduler or
   crash-restart acceptance harness is claimed.
-- The exact-SHA local run passed 78 tests under PostgreSQL with warnings as
-  errors. Compilation, Ruff, `pip check`, and diff checks passed. CI was not
-  awaited and no production/deployment test was run.
+- At the exact implementation candidate SHA, the local explicitly disposable
+  PostgreSQL run passed 79 tests with warnings as errors; compileall, Ruff,
+  `pip check`, and diff checks passed. The evidence register records a focused
+  grant-revocation/read race repeated three times. CI was not awaited and no
+  production/deployment test was run. The documentation package is a later
+  revision; the review request must pin its exact checkout separately.
 
 ## Required review output
 

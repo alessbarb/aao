@@ -771,3 +771,19 @@ coverage, independent review, or M2 acceptance.
   commit. CI was not awaited per operator direction.
 - This adds denial coverage only; it does not prove human independence,
   evidence truth, all read/submit/revocation races, or M2 acceptance.
+
+## Evidence artifact reads under concurrent grant revocation — 2026-10-19
+
+- Exact source revision: `7c1e21a4e959b0b1cc0410f9ae90a078a19ff315` on
+  `feat/aao-m0-foundation`; adds a PostgreSQL integration schedule in which
+  grant revocation wins while an evidence read is waiting, and verifies the
+  read is denied without disclosing artifact bytes.
+- The focused race test passed **3 consecutive runs** (1 passed, 5 deselected
+  per run). The full explicitly disposable PostgreSQL suite passed **79 tests,
+  0 failures, 0 skips, 0 warnings** in **19.74 s** with `-W error`.
+- `python -m compileall -q src tests`, `python -m ruff check src tests`,
+  `python -m pip check`, and `git diff --check` passed on the same source tree.
+  CI was not run or awaited per operator direction.
+- This covers one controlled grant-deletion/read schedule; it does not prove
+  every credential/grant race, establish truth or human provenance of the
+  evidence, or constitute independent security review or M2 acceptance.

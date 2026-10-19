@@ -20,8 +20,8 @@ elsewhere; production CEO identity and constitutional approval are not
 implemented. Remaining gaps include independent human auditor identity,
 database-role isolation, broader adversarial recovery coverage, and formal
 independent review. Approval and DONE transitions remain fail-closed. See the
-[M2 compliance matrix](docs/M2_COMPLIANCE_MATRIX.md),
-[technical audit](docs/M2_TECHNICAL_AUDIT.md), and exact
+[compliance matrix](docs/COMPLIANCE_MATRIX.md),
+[technical audit](docs/TECHNICAL_AUDIT.md), and exact
 [verification register](docs/VERIFICATION_EVIDENCE_REGISTER.md) for scope and
 evidence. The independent review package is prepared but no formal review has
 been obtained.

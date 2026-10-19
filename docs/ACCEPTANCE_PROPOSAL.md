@@ -5,7 +5,7 @@ This document does not grant authority, alter the Constitution, confirm an
 AAO project mandate, or authorize production or external execution.
 
 **Reviewed implementation candidate:**
-`88ec4264d655e6d25ec2b8f6859019a411a797fa`.
+`7c1e21a4e959b0b1cc0410f9ae90a078a19ff315`.
 **Verification limits:** local explicitly disposable PostgreSQL test run only;
 see [`VERIFICATION_EVIDENCE_REGISTER.md`](VERIFICATION_EVIDENCE_REGISTER.md).
 
@@ -24,7 +24,7 @@ see [`VERIFICATION_EVIDENCE_REGISTER.md`](VERIFICATION_EVIDENCE_REGISTER.md).
   model, shell, network or real external action was enabled.
 - Review `APPROVE` and completion to `DONE` remain fail-closed because positive
   reviewer independence and evidence sufficiency are not established.
-- The exact candidate source passed 78 local tests with PostgreSQL and
+- The exact candidate source passed 79 local tests with PostgreSQL and
   warnings-as-errors; compilation, Ruff, dependency consistency and whitespace
   checks also passed. CI was not awaited.
 
