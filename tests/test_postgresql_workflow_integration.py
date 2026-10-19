@@ -209,7 +209,7 @@ def test_worker_claim_complete_respects_identity_and_project_state(monkeypatch):
     reason="Explicit disposable PostgreSQL database required",
 )
 def test_reconciliation_requires_distinct_granted_reviewer(monkeypatch):
-    from datetime import datetime, timedelta, timezone
+    from datetime import datetime, timedelta
 
     from aao.execution_queue import claim, quarantine_expired, state
     from aao.execution_reconciliation import ReconciliationDenied, reconcile
