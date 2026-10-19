@@ -36,3 +36,7 @@ El operador ejecutó la migración `005_principal_credentials.sql` sobre `aao_de
 ## Validación local adicional — 2026-10-19
 
 El operador comunicó una ejecución completa posterior a la incorporación de identidades individuales de agentes: `AAO_ENV=test AAO_ENV_FILE=.env.test python -m pytest -v -rs`: **41 passed, 0 failed, 0 skipped, 1 warning**, duración 2.10 s. Esto valida el caso de aislamiento y revocación de la API de desarrollo incluido en la revisión `b1b9125`, no una identidad unificada del ejecutor ni garantías de producción.
+
+## Validación del contrato `execution.claim` — 2026-10-19
+
+El operador confirmó `git pull --ff-only` hasta `3de90ea` y la ejecución `AAO_ENV=test AAO_ENV_FILE=.env.test python -m pytest -v -rs`: **43 passed, 0 failed, 0 skipped, 1 warning** en 2.29 s, Python 3.12.13. La prueba `test_individual_agent_claim_and_revocation` pasó junto con la nueva prueba del contrato exacto `execution.claim`. Persiste la advertencia de deprecación Starlette/httpx. Esta evidencia es una prueba local comunicada por el operador y no constituye revisión independiente ni autorización de ejecución externa.
