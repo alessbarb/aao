@@ -1,7 +1,7 @@
 # Principal authorization matrix
 
 **Scope:** current development API and internal execution/reconciliation
-operations at revision `78fd000e65388dbee9fc0aefaa58391ba9541d7c`. This is an
+operations, updated in the shared-auth retirement worktree based on `a47c853`. This is an
 engineering inventory, not a production authorization policy or independent
 security review. The PostgreSQL API and its internal helpers are not a claim of
 M2 acceptance.
@@ -15,20 +15,18 @@ M2 acceptance.
 | `POST /v1/mandates`, `/v1/mandates/{id}/confirm`, `/v1/projects` | Static CEO bearer | No project grant; mandate/project row checked or locked within transaction | Draft/confirm mandate and create project. CEO identity is a development bearer, not a verified constitutional actor. |
 | `POST /v1/projects/{id}/grants` | Static CEO bearer | No project grant; only project existence is checked | Inserts supplied principal/capability (subject to request allowlist); no principal-kind/existence check or self-grant prevention. Conflict no-op still emits a grant-created event. |
 | `DELETE /v1/projects/{id}/grants/{principal}/{capability}` | Static CEO bearer | Deletes the exact matching grant inside a DB transaction | Returns 404 if project/grant is absent; writes `grant.revoked` event atomically with deletion. Protected operations hold `FOR SHARE` on the grant row, so deletion waits for their transaction. |
-| `GET /v1/projects` | CEO bearer, individual AGENT bearer, or transitional shared worker bearer | CEO receives all projects; other readers need unexpired `project.read`. Individual credential and project grant rows are rechecked/locked under `FOR SHARE` in the transaction. | Project list is scoped for non-CEO readers. Shared worker identity is enabled by default in development/test unless explicitly disabled. |
+| `GET /v1/projects` | CEO bearer or individual AGENT bearer | CEO receives all projects; other readers need unexpired `project.read`. Individual credential and project grant rows are rechecked/locked under `FOR SHARE` in the transaction. | Project list is scoped for non-CEO readers. Shared worker/reviewer tokens are not accepted by this API. |
 | `GET /v1/projects/{id}/board` | Same read-principal resolver | CEO bypasses grant; others pass `require_grant(project.read)` inside transaction. Individual credential and grant rows are locked under `FOR SHARE`. | Project-scoped board read. No DB RLS/role isolation is established by this application check. |
-| `POST /v1/projects/{id}/work` | Individual AGENT bearer or transitional shared worker bearer | `work.create`; individual credential and grant rows locked under `FOR SHARE` in transaction | Persists authenticated principal as author; ignores client `author_id`. Shared worker maps to fixed development identity. |
-| `POST /v1/work/{id}/admit` | Individual AGENT or transitional shared worker | `work.admit`; credential and grant recheck under `FOR SHARE` | Deterministic admission call uses simulated capacity, budget, risk and emergency-stop inputs; not real resource admission. |
-| `POST /v1/work/{id}/progress` | Individual AGENT or transitional shared worker | `work.progress`; credential and grant recheck under `FOR SHARE` | Advances allowed states; VERIFIED-to-DONE checks for any approval but does not establish independent evidence validation. |
-| `POST /v1/work/{id}/reviews` | Individual AUDITOR bearer or transitional shared reviewer bearer | `work.review`; individual AUDITOR credential and grant rows locked under `FOR SHARE` | Rejects same principal as author; does not establish independence from executor/approver or validate evidence references. Shared reviewer is a fixed development identity. |
-| `POST /v1/work/{id}/stage-inert` | Individual AGENT or transitional shared worker | Checks `work.admit`, not `execution.claim`; credential and grant rows locked under `FOR SHARE` | Feature-flagged staging of fixed inert payload only. No model/tool/external action. Capability mismatch remains unresolved as an execution boundary. |
+| `POST /v1/projects/{id}/work` | Individual AGENT bearer | `work.create`; individual credential and grant rows locked under `FOR SHARE` in transaction | Persists authenticated principal as author; ignores client `author_id`. |
+| `POST /v1/work/{id}/admit` | Individual AGENT bearer | `work.admit`; credential and grant recheck under `FOR SHARE` | Deterministic admission call uses simulated capacity, budget, risk and emergency-stop inputs; not real resource admission. |
+| `POST /v1/work/{id}/progress` | Individual AGENT bearer | `work.progress`; credential and grant recheck under `FOR SHARE` | Advances allowed states; VERIFIED-to-DONE checks for any approval but does not establish independent evidence validation. |
+| `POST /v1/work/{id}/reviews` | Individual AUDITOR bearer | `work.review`; individual AUDITOR credential and grant rows locked under `FOR SHARE` | Rejects same principal as author; does not establish independence from executor/approver or validate evidence references. |
+| `POST /v1/work/{id}/stage-inert` | Individual AGENT bearer | Checks `work.admit`, not `execution.claim`; credential and grant rows locked under `FOR SHARE` | Feature-flagged staging of fixed inert payload only. No model/tool/external action. Capability mismatch remains unresolved as an execution boundary. |
 
-The shared worker/reviewer fallbacks are controlled by
-`AAO_ALLOW_SHARED_DEV_TOKENS`; the application defaults the setting to enabled
-in `development` and `test`, and rejects them in production. Individual bearer
-authentication initially resolves identity outside the protected transaction;
-protected API operations then recheck the credential row inside their
-transaction. The CEO credential is still a single static bearer.
+The PostgreSQL API no longer accepts shared worker/reviewer tokens. SQLite
+prototype tokens are a separate path. Individual bearer authentication first
+resolves identity and protected API operations recheck the credential row
+inside their transaction. The CEO credential is still a single static bearer.
 
 ## Internal PostgreSQL operations (not HTTP authorization boundaries)
 

@@ -15,11 +15,13 @@ def test_postgres_inert_staging_is_default_off_and_idempotent(monkeypatch):
     from aao.work_management_api import app
     monkeypatch.setenv("AAO_POSTGRES_URL", os.environ["AAO_TEST_POSTGRES_URL"])
     monkeypatch.setenv("AAO_CEO_TOKEN", "test-ceo")
-    monkeypatch.setenv("AAO_WORK_TOKEN", "test-worker")
     monkeypatch.delenv("AAO_SANDBOX_QUEUE_ENABLED", raising=False)
     ceo = {"X-CEO-Token": "test-ceo"}
-    worker = {"X-Work-Token": "test-worker"}
     with TestClient(app) as client:
+        worker_id = "agent-" + str(uuid4())
+        issued = client.post("/v1/principals/credentials", headers=ceo, json={"principal_id": worker_id, "kind": "AGENT"})
+        assert issued.status_code == 201, issued.text
+        worker = {"X-Agent-Token": issued.json()["token"]}
         mid = client.post("/v1/mandates", headers=ceo, json={
             "title": "Queue " + str(uuid4()), "objective": "Inert test"
         }).json()["id"]
@@ -29,10 +31,10 @@ def test_postgres_inert_staging_is_default_off_and_idempotent(monkeypatch):
         }).json()["id"]
         for capability in ("work.create", "work.admit"):
             assert client.post(f"/v1/projects/{pid}/grants", headers=ceo, json={
-                "principal_id": "development-worker", "capability": capability
+                "principal_id": worker_id, "capability": capability
             }).status_code == 201
         wid = client.post(f"/v1/projects/{pid}/work", headers=worker, json={
-            "title": "Inert", "author_id": "development-worker",
+            "title": "Inert", "author_id": worker_id,
             "acceptance_criteria": ["queued"]
         }).json()["id"]
         assert client.post(f"/v1/work/{wid}/stage-inert", headers=worker).status_code == 503
@@ -56,10 +58,8 @@ def test_worker_claim_complete_respects_identity_and_project_state(monkeypatch):
 
     monkeypatch.setenv("AAO_POSTGRES_URL", os.environ["AAO_TEST_POSTGRES_URL"])
     monkeypatch.setenv("AAO_CEO_TOKEN", "integration-ceo")
-    monkeypatch.setenv("AAO_WORK_TOKEN", "integration-worker")
     monkeypatch.setenv("AAO_SANDBOX_QUEUE_ENABLED", "true")
     ceo = {"X-CEO-Token": "integration-ceo"}
-    worker = {"X-Work-Token": "integration-worker"}
     worker_id = "worker-" + str(uuid4())
     with TestClient(app) as client:
         issued = client.post("/v1/principals/credentials", headers=ceo, json={
@@ -67,6 +67,7 @@ def test_worker_claim_complete_respects_identity_and_project_state(monkeypatch):
         })
         assert issued.status_code == 201, issued.text
         token = issued.json()["token"]
+        worker = {"X-Agent-Token": token}
         mid = client.post("/v1/mandates", headers=ceo, json={
             "title": "Lease " + str(uuid4()), "objective": "Isolated worker tests"
         }).json()["id"]
@@ -76,13 +77,13 @@ def test_worker_claim_complete_respects_identity_and_project_state(monkeypatch):
         }).json()["id"]
         for cap in ("work.create", "work.admit"):
             client.post(f"/v1/projects/{project_id}/grants", headers=ceo, json={
-                "principal_id": "development-worker", "capability": cap
+                "principal_id": worker_id, "capability": cap
             })
         assert client.post(f"/v1/projects/{project_id}/grants", headers=ceo, json={
             "principal_id": worker_id, "capability": "execution.claim",
         }).status_code == 201
         wid = client.post(f"/v1/projects/{project_id}/work", headers=worker, json={
-            "title": "Lease test", "author_id": "development-worker",
+            "title": "Lease test", "author_id": worker_id,
             "acceptance_criteria": ["inert completion"]
         }).json()["id"]
         client.post(f"/v1/work/{wid}/admit", headers=worker)
@@ -117,10 +118,8 @@ def test_inert_worker_concurrent_claims_never_duplicate(monkeypatch):
 
     monkeypatch.setenv("AAO_POSTGRES_URL", os.environ["AAO_TEST_POSTGRES_URL"])
     monkeypatch.setenv("AAO_CEO_TOKEN", "concurrent-ceo")
-    monkeypatch.setenv("AAO_WORK_TOKEN", "concurrent-worker")
     monkeypatch.setenv("AAO_SANDBOX_QUEUE_ENABLED", "true")
     ceo = {"X-CEO-Token": "concurrent-ceo"}
-    worker = {"X-Work-Token": "concurrent-worker"}
     identity = "concurrent-" + str(uuid4())
     with TestClient(app) as client:
         issued = client.post("/v1/principals/credentials", headers=ceo, json={
@@ -128,17 +127,18 @@ def test_inert_worker_concurrent_claims_never_duplicate(monkeypatch):
         })
         assert issued.status_code == 201, issued.text
         secret = issued.json()["token"]
+        worker = {"X-Agent-Token": secret}
         mid = client.post("/v1/mandates", headers=ceo, json={"title": str(uuid4()), "objective": "Concurrency"}).json()["id"]
         client.post(f"/v1/mandates/{mid}/confirm", headers=ceo)
         pid = client.post("/v1/projects", headers=ceo, json={"name": "Concurrency", "mandate_id": mid}).json()["id"]
         for cap in ("work.create", "work.admit"):
-            client.post(f"/v1/projects/{pid}/grants", headers=ceo, json={"principal_id": "development-worker", "capability": cap})
+            client.post(f"/v1/projects/{pid}/grants", headers=ceo, json={"principal_id": identity, "capability": cap})
         assert client.post(f"/v1/projects/{pid}/grants", headers=ceo, json={
             "principal_id": identity, "capability": "execution.claim",
         }).status_code == 201
         ids = []
         for i in range(4):
-            wid = client.post(f"/v1/projects/{pid}/work", headers=worker, json={"title": f"Batch {i}", "author_id": "development-worker", "acceptance_criteria": ["inert"]}).json()["id"]
+            wid = client.post(f"/v1/projects/{pid}/work", headers=worker, json={"title": f"Batch {i}", "author_id": identity, "acceptance_criteria": ["inert"]}).json()["id"]
             client.post(f"/v1/work/{wid}/admit", headers=worker)
             ids.append(client.post(f"/v1/work/{wid}/stage-inert", headers=worker).json()["execution_id"])
     with ThreadPoolExecutor(max_workers=4) as pool:

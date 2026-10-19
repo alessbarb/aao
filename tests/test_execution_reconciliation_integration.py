@@ -20,10 +20,8 @@ def test_reconciliation_requires_distinct_granted_reviewer(monkeypatch):
 
     monkeypatch.setenv("AAO_POSTGRES_URL", os.environ["AAO_TEST_POSTGRES_URL"])
     monkeypatch.setenv("AAO_CEO_TOKEN", "reconcile-ceo")
-    monkeypatch.setenv("AAO_WORK_TOKEN", "reconcile-worker")
     monkeypatch.setenv("AAO_SANDBOX_QUEUE_ENABLED", "true")
     ceo = {"X-CEO-Token": "reconcile-ceo"}
-    worker = {"X-Work-Token": "reconcile-worker"}
     worker_id = "worker-" + str(uuid4())
     auditor_id = "audit-" + str(uuid4())
     with TestClient(app) as client:
@@ -32,6 +30,7 @@ def test_reconciliation_requires_distinct_granted_reviewer(monkeypatch):
         })
         assert issued.status_code == 201, issued.text
         secret = issued.json()["token"]
+        worker = {"X-Agent-Token": secret}
         auditor_issued = client.post("/v1/principals/credentials", headers=ceo, json={
             "principal_id": auditor_id, "kind": "AUDITOR",
         })
@@ -45,15 +44,15 @@ def test_reconciliation_requires_distinct_granted_reviewer(monkeypatch):
             "name": "Recovery project", "mandate_id": mid
         }).json()["id"]
         for principal_id, capability in (
-            ("development-worker", "work.create"),
-            ("development-worker", "work.admit"),
+            (worker_id, "work.create"),
+            (worker_id, "work.admit"),
             (worker_id, "execution.claim"),
         ):
             client.post(f"/v1/projects/{project}/grants", headers=ceo, json={
                 "principal_id": principal_id, "capability": capability
             })
         wid = client.post(f"/v1/projects/{project}/work", headers=worker, json={
-            "title": "Inert recovery", "author_id": "development-worker",
+            "title": "Inert recovery", "author_id": worker_id,
             "acceptance_criteria": ["Recorded"]
         }).json()["id"]
         client.post(f"/v1/work/{wid}/admit", headers=worker)

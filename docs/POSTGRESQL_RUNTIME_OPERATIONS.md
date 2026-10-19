@@ -16,9 +16,15 @@ python -m pip install -e '.[postgres]'
 psql "$AAO_POSTGRES_URL" -v ON_ERROR_STOP=1 -f db/postgres/001_foundation.sql
 psql "$AAO_POSTGRES_URL" -v ON_ERROR_STOP=1 -f db/postgres/002_dev_identity.sql
 export AAO_CEO_TOKEN='locally-generated-secret'
-export AAO_WORK_TOKEN='different-locally-generated-secret'
 uvicorn aao.work_management_api:app --host 127.0.0.1 --port 8001
 ```
+
+PostgreSQL work and review routes require individually issued credentials.
+Use the CEO-authenticated `/v1/principals/credentials` endpoint to provision
+an `AGENT` or `AUDITOR`, then send its one-time returned token as
+`X-Agent-Token` or `X-Auditor-Token`. Grant the resulting principal ID only
+the project capabilities it needs. `AAO_WORK_TOKEN` and `AAO_REVIEW_TOKEN`
+are SQLite-prototype settings and are not accepted by this PostgreSQL API.
 
 **Do not expose port 8001 beyond loopback.** Both secrets are development
 credentials, not a production identity system. PostgreSQL permissions,
@@ -38,9 +44,9 @@ The PostgreSQL service now exposes `POST /v1/work/{id}/progress` and
 `READY -> IN_PROGRESS -> IN_REVIEW -> VERIFIED -> DONE`.
 Only the review endpoint can reach VERIFIED. A rejected review returns the
 task to IN_PROGRESS; completion requires an accepted review record.
-Review identity derives from the dedicated development review token, not from
-the request body. The work author is also bound to the development worker
-credential rather than trusting a caller-supplied author ID.
+Review identity derives from an individually issued AUDITOR credential, not
+from the request body. The work author is bound to the authenticated AGENT
+principal rather than trusting a caller-supplied author ID.
 
 Grant checks use exact principal/project/capability matching and honor
 `expires_at`. Test coverage is included for a disposable PostgreSQL database.
@@ -79,18 +85,19 @@ against the operator's PostgreSQL instance.
 
 ## Project-scoped reader integration
 
-The PostgreSQL development API accepts either the configured CEO token or
-the configured worker token on project and board reads. The CEO development
-credential can see all projects; the worker identity sees only projects with
+The PostgreSQL development API accepts either the configured CEO token or an
+individually issued AGENT credential on project and board reads. The CEO
+development credential can see all projects; the AGENT identity sees only projects with
 an explicit unexpired `project.read` grant, enforced for both listing and
 direct board URLs. Ungranted project IDs cannot be read with the worker token.
 
 This **does not** implement strong identity authentication: there is still one
-shared worker development credential and the browser presently prompts only for
-the CEO credential. Production read isolation requires distinct principals,
+separate AGENT principal and the browser presently prompts only for the CEO
+credential. Production read isolation requires distinct principals,
 role separation, server-enforced session identity, least-privilege database
 roles and adversarial security review.
 
 An isolated integration regression test demonstrates worker visibility for
-one granted project and denial for another. This test is not yet verified
-against the operator's PostgreSQL database.
+one granted project and denial for another. The current full PostgreSQL suite
+was run against the explicitly disposable local test database; see the
+evidence register for the exact source checkpoint and outcomes.

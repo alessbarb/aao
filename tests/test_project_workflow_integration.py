@@ -17,10 +17,11 @@ def test_postgres_mandate_project_grant_work_admission(monkeypatch):
     from aao.work_management_api import app
     monkeypatch.setenv("AAO_POSTGRES_URL", os.environ["AAO_TEST_POSTGRES_URL"])
     monkeypatch.setenv("AAO_CEO_TOKEN", "test-ceo-key")
-    monkeypatch.setenv("AAO_WORK_TOKEN", "test-worker-key")
     ceo = {"X-CEO-Token": "test-ceo-key"}
-    worker = {"X-Work-Token": "test-worker-key"}
     with TestClient(app) as client:
+        agent_id = "agent-" + str(uuid4())
+        token = client.post("/v1/principals/credentials", headers=ceo, json={"principal_id": agent_id, "kind": "AGENT"}).json()["token"]
+        worker = {"X-Agent-Token": token}
         assert client.get("/health").json()["autonomous_execution"] is False
         mandate = client.post(
             "/v1/mandates", headers=ceo,
@@ -42,7 +43,7 @@ def test_postgres_mandate_project_grant_work_admission(monkeypatch):
         assert r.status_code == 201, r.text
         project = r.json()["id"]
         work_payload = {
-            "title": "Isolated smoke test", "author_id": "development-worker",
+            "title": "Isolated smoke test", "author_id": agent_id,
             "acceptance_criteria": ["State recorded"],
         }
         assert client.post(
@@ -52,7 +53,7 @@ def test_postgres_mandate_project_grant_work_admission(monkeypatch):
         for cap in ("work.create", "work.admit", "work.progress"):
             assert client.post(
                 f"/v1/projects/{project}/grants", headers=ceo,
-                json={"principal_id": "development-worker", "capability": cap},
+                json={"principal_id": agent_id, "capability": cap},
             ).status_code == 201
         created = client.post(
             f"/v1/projects/{project}/work", headers=worker,
@@ -78,16 +79,16 @@ def test_postgres_review_is_separate_from_author_and_required_for_done(monkeypat
     from aao.work_management_api import app
     monkeypatch.setenv("AAO_POSTGRES_URL", os.environ["AAO_TEST_POSTGRES_URL"])
     monkeypatch.setenv("AAO_CEO_TOKEN", "integration-ceo")
-    monkeypatch.setenv("AAO_WORK_TOKEN", "integration-worker")
-    monkeypatch.setenv("AAO_REVIEW_TOKEN", "integration-reviewer")
     ceo = {"X-CEO-Token": "integration-ceo"}
-    worker = {"X-Work-Token": "integration-worker"}
-    auditor = {"X-Review-Token": "integration-reviewer"}
     with TestClient(app) as client:
+        agent_id = "agent-" + str(uuid4())
+        auditor_id = "auditor-" + str(uuid4())
+        worker = {"X-Agent-Token": client.post("/v1/principals/credentials", headers=ceo, json={"principal_id": agent_id, "kind": "AGENT"}).json()["token"]}
+        auditor = {"X-Auditor-Token": client.post("/v1/principals/credentials", headers=ceo, json={"principal_id": auditor_id, "kind": "AUDITOR"}).json()["token"]}
         m = client.post("/v1/mandates", headers=ceo, json={"title": str(uuid4()), "objective": "Review gate test"}).json()["id"]
         client.post(f"/v1/mandates/{m}/confirm", headers=ceo)
         p = client.post("/v1/projects", headers=ceo, json={"name": "Audit smoke", "mandate_id": m}).json()["id"]
-        for who, cap in (("development-worker", "work.create"), ("development-worker", "work.admit"), ("development-worker", "work.progress"), ("development-auditor", "work.review")):
+        for who, cap in ((agent_id, "work.create"), (agent_id, "work.admit"), (agent_id, "work.progress"), (auditor_id, "work.review")):
             assert client.post(f"/v1/projects/{p}/grants", headers=ceo, json={"principal_id": who, "capability": cap}).status_code == 201
         w = client.post(f"/v1/projects/{p}/work", headers=worker, json={"title": "Review", "author_id": "spoofed", "acceptance_criteria": ["Reviewed"]}).json()["id"]
         assert client.post(f"/v1/work/{w}/progress", headers=worker).status_code == 409
@@ -131,10 +132,10 @@ def test_project_reads_are_scoped_to_granted_worker(monkeypatch):
     from aao.work_management_api import app
     monkeypatch.setenv("AAO_POSTGRES_URL", os.environ["AAO_TEST_POSTGRES_URL"])
     monkeypatch.setenv("AAO_CEO_TOKEN", "scoped-read-ceo")
-    monkeypatch.setenv("AAO_WORK_TOKEN", "scoped-read-worker")
     ceo = {"X-CEO-Token": "scoped-read-ceo"}
-    worker = {"X-Work-Token": "scoped-read-worker"}
     with TestClient(app) as client:
+        agent_id = "agent-" + str(uuid4())
+        worker = {"X-Agent-Token": client.post("/v1/principals/credentials", headers=ceo, json={"principal_id": agent_id, "kind": "AGENT"}).json()["token"]}
         project_ids = []
         for i in range(2):
             mid = client.post("/v1/mandates", headers=ceo, json={
@@ -152,7 +153,7 @@ def test_project_reads_are_scoped_to_granted_worker(monkeypatch):
         assert deny not in [p["id"] for p in before.json()]
         assert client.get(f"/v1/projects/{deny}/board", headers=worker).status_code == 403
         granted = client.post(f"/v1/projects/{allow}/grants", headers=ceo, json={
-            "principal_id": "development-worker", "capability": "project.read",
+            "principal_id": agent_id, "capability": "project.read",
         })
         assert granted.status_code == 201, granted.text
         visible = client.get("/v1/projects", headers=worker)
@@ -175,9 +176,10 @@ def test_grant_revocation_serializes_after_authorized_transaction(monkeypatch):
 
     monkeypatch.setenv("AAO_POSTGRES_URL", os.environ["AAO_TEST_POSTGRES_URL"])
     monkeypatch.setenv("AAO_CEO_TOKEN", "grant-race-ceo")
-    monkeypatch.setenv("AAO_WORK_TOKEN", "grant-race-worker")
     ceo = {"X-CEO-Token": "grant-race-ceo"}
     with TestClient(app) as client:
+        agent_id = "agent-" + str(uuid4())
+        worker = {"X-Agent-Token": client.post("/v1/principals/credentials", headers=ceo, json={"principal_id": agent_id, "kind": "AGENT"}).json()["token"]}
         mandate = client.post("/v1/mandates", headers=ceo, json={
             "title": f"Grant race {uuid4()}", "objective": "Test grant serialization",
         }).json()["id"]
@@ -186,13 +188,13 @@ def test_grant_revocation_serializes_after_authorized_transaction(monkeypatch):
             "name": f"Grant race {uuid4()}", "mandate_id": mandate,
         }).json()["id"]
         assert client.post(f"/v1/projects/{project}/grants", headers=ceo, json={
-            "principal_id": "development-worker", "capability": "work.create",
+            "principal_id": agent_id, "capability": "work.create",
         }).status_code == 201
 
         with ThreadPoolExecutor(max_workers=1) as pool, connect_postgres() as protected_db:
-            require_grant(protected_db, "development-worker", project, "work.create")
+            require_grant(protected_db, agent_id, project, "work.create")
             revoke = pool.submit(client.delete,
-                f"/v1/projects/{project}/grants/development-worker/work.create",
+                f"/v1/projects/{project}/grants/{agent_id}/work.create",
                 headers=ceo,
             )
             deadline = time.monotonic() + 5
@@ -212,7 +214,7 @@ def test_grant_revocation_serializes_after_authorized_transaction(monkeypatch):
         response = revoke.result(timeout=5)
         assert response.status_code == 204, response.text
         assert client.post(f"/v1/projects/{project}/work", headers={
-            "X-Work-Token": "grant-race-worker",
+            "X-Agent-Token": worker["X-Agent-Token"],
         }, json={"title": "Must be denied", "author_id": "ignored",
                 "acceptance_criteria": ["denial"]}).status_code == 403
 
@@ -232,6 +234,8 @@ def test_grant_expiring_while_lock_waiting_is_denied(monkeypatch):
     monkeypatch.setenv("AAO_CEO_TOKEN", "grant-expiry-ceo")
     ceo = {"X-CEO-Token": "grant-expiry-ceo"}
     with TestClient(app) as client:
+        agent_id = "agent-" + str(uuid4())
+        client.post("/v1/principals/credentials", headers=ceo, json={"principal_id": agent_id, "kind": "AGENT"})
         mandate = client.post("/v1/mandates", headers=ceo, json={
             "title": f"Grant expiry {uuid4()}", "objective": "Test expiry after lock wait",
         }).json()["id"]
@@ -240,19 +244,18 @@ def test_grant_expiring_while_lock_waiting_is_denied(monkeypatch):
             "name": f"Grant expiry {uuid4()}", "mandate_id": mandate,
         }).json()["id"]
         assert client.post(f"/v1/projects/{project}/grants", headers=ceo, json={
-            "principal_id": "development-worker", "capability": "work.create",
+            "principal_id": agent_id, "capability": "work.create",
         }).status_code == 201
         with connect_postgres() as setup:
             setup.execute(
                 "UPDATE project_grants SET expires_at=clock_timestamp()+interval '1 second' "
-                "WHERE project_id=%s AND principal_id='development-worker' "
-                "AND capability='work.create'", (project,),
+                "WHERE project_id=%s AND principal_id=%s AND capability='work.create'", (project, agent_id),
             )
 
         def check_grant():
             try:
                 with connect_postgres() as db:
-                    require_grant(db, "development-worker", project, "work.create")
+                    require_grant(db, agent_id, project, "work.create")
                 return "allowed"
             except HTTPException:
                 return "denied"
@@ -260,8 +263,8 @@ def test_grant_expiring_while_lock_waiting_is_denied(monkeypatch):
         with ThreadPoolExecutor(max_workers=1) as pool, connect_postgres() as blocker:
             blocker.execute(
                 "UPDATE project_grants SET expires_at=expires_at WHERE project_id=%s "
-                "AND principal_id='development-worker' AND capability='work.create'",
-                (project,),
+                "AND principal_id=%s AND capability='work.create'",
+                (project, agent_id),
             )
             check = pool.submit(check_grant)
             deadline = time.monotonic() + 5

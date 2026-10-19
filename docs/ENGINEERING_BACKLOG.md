@@ -16,8 +16,10 @@ or `[BLOCKED]` labels below as live issue statuses.
 1. **Implemented in candidate code:** execution authenticates only through
    individual AGENT credentials. Migration `006_unified_execution_identity`
    transfers legacy worker identities (aborting on collisions) and removes
-   `worker_registrations`. Transitional shared worker/reviewer credentials and
-   runtime validation of migration on a disposable database remain.
+   `worker_registrations`. Shared worker/reviewer authentication has now been
+   removed from the PostgreSQL API and its integration tests use individual
+   identities. This change still needs commit/CI verification and independent
+   review; migration/runtime operational risks remain under review.
 2. **Partially implemented and locally validated:** CEO grant revocation is
    audited transactionally; API, execution and reconciliation authorization
    checks lock the matched grant row. PostgreSQL tests cover revocation waiting

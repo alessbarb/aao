@@ -21,14 +21,6 @@ from pydantic import BaseModel, Field
 from aao.planner import Admission, decide_admission
 
 
-def shared_dev_tokens_enabled() -> bool:
-    """Legacy worker/reviewer tokens are forbidden in production."""
-    return (
-        os.getenv("AAO_ENV", "development").lower() in {"development", "test"}
-        and os.getenv("AAO_ALLOW_SHARED_DEV_TOKENS", "true").lower() == "true"
-    )
-
-
 def require_ceo(x_ceo_token: str | None = Header(None)):
     expected = os.getenv("AAO_CEO_TOKEN")
     if not expected:
@@ -39,47 +31,23 @@ def require_ceo(x_ceo_token: str | None = Header(None)):
 
 
 def require_reviewer(
-    x_review_token: str | None = Header(None),
     x_auditor_token: str | None = Header(None),
 ):
-    # Individual credentials are preferred where provisioned. The shared
-    # development reviewer token remains a transitional local-only fallback.
-    if x_auditor_token is not None:
-        from aao.principal_credentials import PrincipalDenied, authenticate
-        try:
-            return authenticate(x_auditor_token, kind="AUDITOR")
-        except PrincipalDenied as exc:
-            raise HTTPException(403, "Individual auditor credential rejected") from exc
-    if not shared_dev_tokens_enabled():
-        raise HTTPException(403, "Shared reviewer credentials disabled")
-    expected = os.getenv("AAO_REVIEW_TOKEN")
-    if not expected:
-        raise HTTPException(503, "Reviewer credential not configured")
-    if not x_review_token or not secrets.compare_digest(expected, x_review_token):
-        raise HTTPException(403, "Reviewer authentication required")
-    return "development-auditor"
+    from aao.principal_credentials import PrincipalDenied, authenticate
+    try:
+        return authenticate(x_auditor_token, kind="AUDITOR")
+    except PrincipalDenied as exc:
+        raise HTTPException(403, "Individual auditor credential rejected") from exc
 
 
 def require_worker(
-    x_work_token: str | None = Header(None),
     x_agent_token: str | None = Header(None),
 ):
-    # An individually issued credential takes precedence; invalid individual
-    # credentials cannot silently fall back to a shared development token.
-    if x_agent_token is not None:
-        from aao.principal_credentials import PrincipalDenied, authenticate
-        try:
-            return authenticate(x_agent_token, kind="AGENT")
-        except PrincipalDenied as exc:
-            raise HTTPException(403, "Individual agent credential rejected") from exc
-    if not shared_dev_tokens_enabled():
-        raise HTTPException(403, "Shared worker credentials disabled")
-    expected = os.getenv("AAO_WORK_TOKEN")
-    if not expected:
-        raise HTTPException(503, "Worker credential not configured")
-    if not x_work_token or not secrets.compare_digest(expected, x_work_token):
-        raise HTTPException(403, "Worker authentication required")
-    return "development-worker"
+    from aao.principal_credentials import PrincipalDenied, authenticate
+    try:
+        return authenticate(x_agent_token, kind="AGENT")
+    except PrincipalDenied as exc:
+        raise HTTPException(403, "Individual agent credential rejected") from exc
 
 
 @contextmanager
@@ -244,7 +212,6 @@ def create_project(payload: ProjectRequest, _: str = Depends(require_ceo)):
 
 def read_principal(
     x_ceo_token: str | None = Header(None),
-    x_work_token: str | None = Header(None),
     x_agent_token: str | None = Header(None),
 ):
     ceo = os.getenv("AAO_CEO_TOKEN")
@@ -256,9 +223,6 @@ def read_principal(
             return authenticate(x_agent_token, kind="AGENT")
         except PrincipalDenied as exc:
             raise HTTPException(403, "Individual reader credential rejected") from exc
-    worker = os.getenv("AAO_WORK_TOKEN")
-    if shared_dev_tokens_enabled() and worker and x_work_token and secrets.compare_digest(worker, x_work_token):
-        return "development-worker"
     raise HTTPException(403, "Authenticated reader required")
 
 
@@ -268,16 +232,12 @@ def projects(principal: str = Depends(read_principal)):
         if principal == "ceo":
             rows = db.execute("SELECT id,name,state FROM projects ORDER BY name,id").fetchall()
         else:
-            if principal == "development-worker":
-                if not shared_dev_tokens_enabled():
-                    raise HTTPException(403, "Shared development reader disabled")
-            else:
-                credential = db.execute(
-                    "SELECT kind,enabled FROM principal_credentials "
-                    "WHERE principal_id=%s FOR SHARE", (principal,),
-                ).fetchone()
-                if not credential or credential[0] != "AGENT" or not credential[1]:
-                    raise HTTPException(403, "Individual reader invalid or revoked")
+            credential = db.execute(
+                "SELECT kind,enabled FROM principal_credentials "
+                "WHERE principal_id=%s FOR SHARE", (principal,),
+            ).fetchone()
+            if not credential or credential[0] != "AGENT" or not credential[1]:
+                raise HTTPException(403, "Individual reader invalid or revoked")
             rows = db.execute(
                 "SELECT p.id,p.name,p.state FROM projects p JOIN project_grants g ON g.project_id=p.id "
                 "WHERE g.principal_id=%s AND g.capability='project.read' "
@@ -327,28 +287,14 @@ def revoke_grant(
 
 
 def require_grant(db, principal: str, project_id: str, capability: str):
-    """Recheck identity and hold its grant row through the protected transaction.
-
-    Credential and grant revocations cannot commit between these checks and
-    transaction end. Transitional development principals remain confined to
-    the explicit dev gate.
-    """
-    shared = {
-        "development-worker": ("AGENT", {"work.create", "work.admit", "work.progress", "project.read"}),
-        "development-auditor": ("AUDITOR", {"work.review"}),
-    }
-    if principal in shared:
-        _kind, capabilities = shared[principal]
-        if not shared_dev_tokens_enabled() or capability not in capabilities:
-            raise HTTPException(403, "Shared development identity not authorized")
-    else:
-        row = db.execute(
-            "SELECT kind,enabled FROM principal_credentials "
-            "WHERE principal_id=%s FOR SHARE", (principal,),
-        ).fetchone()
-        expected_kind = "AUDITOR" if capability in {"work.review", "execution.reconcile", "effect.reconcile"} else "AGENT"
-        if not row or row[0] != expected_kind or not row[1]:
-            raise HTTPException(403, "Individual principal invalid or revoked")
+    """Recheck identity and hold its grant row through the protected transaction."""
+    row = db.execute(
+        "SELECT kind,enabled FROM principal_credentials "
+        "WHERE principal_id=%s FOR SHARE", (principal,),
+    ).fetchone()
+    expected_kind = "AUDITOR" if capability in {"work.review", "execution.reconcile", "effect.reconcile"} else "AGENT"
+    if not row or row[0] != expected_kind or not row[1]:
+        raise HTTPException(403, "Individual principal invalid or revoked")
     if not db.execute(
         "SELECT 1 FROM project_grants WHERE principal_id=%s AND project_id=%s "
         "AND capability=%s AND (expires_at IS NULL OR expires_at > clock_timestamp()) FOR SHARE",

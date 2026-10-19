@@ -97,9 +97,8 @@ def test_individual_auditor_credential_is_bound_to_review(monkeypatch):
 
     monkeypatch.setenv("AAO_POSTGRES_URL", os.environ["AAO_TEST_POSTGRES_URL"])
     monkeypatch.setenv("AAO_CEO_TOKEN", "individual-ceo")
-    monkeypatch.setenv("AAO_WORK_TOKEN", "individual-worker")
     ceo = {"X-CEO-Token": "individual-ceo"}
-    worker = {"X-Work-Token": "individual-worker"}
+    agent_id = "agent-" + str(uuid4())
     auditor_id = "auditor-" + str(uuid4())
     secret = "individual-secret-" + str(uuid4())
     with connect_postgres() as db:
@@ -109,6 +108,8 @@ def test_individual_auditor_credential_is_bound_to_review(monkeypatch):
             (auditor_id, digest_token(secret)),
         )
     with TestClient(app) as client:
+        agent_token = client.post("/v1/principals/credentials", headers=ceo, json={"principal_id": agent_id, "kind": "AGENT"}).json()["token"]
+        worker = {"X-Agent-Token": agent_token}
         mandate = client.post("/v1/mandates", headers=ceo, json={
             "title": "Individual reviewer " + str(uuid4()),
             "objective": "Test credentials without external effects",
@@ -118,9 +119,9 @@ def test_individual_auditor_credential_is_bound_to_review(monkeypatch):
             "name": "Audit test", "mandate_id": mandate
         }).json()["id"]
         for identity, capability in (
-            ("development-worker", "work.create"),
-            ("development-worker", "work.admit"),
-            ("development-worker", "work.progress"),
+            (agent_id, "work.create"),
+            (agent_id, "work.admit"),
+            (agent_id, "work.progress"),
         ):
             assert client.post(f"/v1/projects/{project}/grants", headers=ceo, json={
                 "principal_id": identity, "capability": capability,
@@ -165,7 +166,6 @@ def test_individual_agent_scoped_creation_and_revocation(monkeypatch):
 
     monkeypatch.setenv("AAO_POSTGRES_URL", os.environ["AAO_TEST_POSTGRES_URL"])
     monkeypatch.setenv("AAO_CEO_TOKEN", "agent-scope-ceo")
-    monkeypatch.setenv("AAO_WORK_TOKEN", "agent-scope-shared-worker")
     ceo = {"X-CEO-Token": "agent-scope-ceo"}
     identity = "agent-" + str(uuid4())
     secret = "agent-secret-" + str(uuid4())
@@ -202,7 +202,7 @@ def test_individual_agent_scoped_creation_and_revocation(monkeypatch):
         payload = {"title": "Individual action", "author_id": "spoof-attempt",
                    "acceptance_criteria": ["Persisted"]}
         invalid = client.post(f"/v1/projects/{allowed}/work",
-                              headers={"X-Agent-Token": "incorrect", "X-Work-Token": "agent-scope-shared-worker"},
+                              headers={"X-Agent-Token": "incorrect"},
                               json=payload)
         assert invalid.status_code == 403
         assert client.post(f"/v1/projects/{forbidden}/work",
@@ -231,10 +231,8 @@ def test_individual_agent_claim_and_revocation(monkeypatch):
 
     monkeypatch.setenv("AAO_POSTGRES_URL", os.environ["AAO_TEST_POSTGRES_URL"])
     monkeypatch.setenv("AAO_CEO_TOKEN", "lease-ceo")
-    monkeypatch.setenv("AAO_WORK_TOKEN", "lease-worker")
     monkeypatch.setenv("AAO_SANDBOX_QUEUE_ENABLED", "true")
     ceo = {"X-CEO-Token": "lease-ceo"}
-    worker = {"X-Work-Token": "lease-worker"}
     principal = "agent-" + str(uuid4())
     secret = "secret-" + str(uuid4())
     with connect_postgres() as db:
@@ -243,6 +241,7 @@ def test_individual_agent_claim_and_revocation(monkeypatch):
             "VALUES (%s,'AGENT',%s,true)", (principal, digest_token(secret)),
         )
     with TestClient(app) as client:
+        worker = {"X-Agent-Token": secret}
         mid = client.post("/v1/mandates", headers=ceo, json={
             "title": "Unified agent lease " + str(uuid4()), "objective": "Isolated test"
         }).json()["id"]
@@ -251,8 +250,8 @@ def test_individual_agent_claim_and_revocation(monkeypatch):
             "name": "Unified lease", "mandate_id": mid
         }).json()["id"]
         for who, capability in (
-            ("development-worker", "work.create"),
-            ("development-worker", "work.admit"),
+            (principal, "work.create"),
+            (principal, "work.admit"),
             (principal, "execution.claim"),
         ):
             assert client.post(f"/v1/projects/{project}/grants", headers=ceo, json={
