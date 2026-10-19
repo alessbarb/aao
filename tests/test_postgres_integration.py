@@ -605,6 +605,8 @@ def test_ceo_governed_principal_issue_rotate_revoke(monkeypatch):
         with pytest.raises(PrincipalDenied):
             authenticate(rotated, kind="AGENT")
         assert client.post(f"/v1/principals/{name}/revoke", headers=ceo).status_code == 404
+        # A revoked identity cannot be silently reactivated by token rotation.
+        assert client.post(f"/v1/principals/{name}/rotate", headers=ceo).status_code == 404
         with connect_postgres() as db:
             events = db.execute(
                 "SELECT kind FROM events WHERE details->>'principal_id'=%s "
