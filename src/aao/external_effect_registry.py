@@ -15,20 +15,54 @@ def canonical_digest(value: dict) -> str:
     return hashlib.sha256(data).hexdigest()
 
 
-def propose(*, execution_id: str, idempotency_key: str, capability: str, request: dict):
-    """Persist a proposal. Does not authorize, call tools or execute a request."""
-    if not execution_id or not idempotency_key or not capability:
-        raise EffectConflict("Execution, idempotency key and capability required")
+def propose(*, execution_id: str, worker_id: str, lease_token: str,
+            agent_credential: str, idempotency_key: str, capability: str,
+            request: dict):
+    """Record an inert proposal from the AGENT holding the live execution lease."""
+    if not all((execution_id, worker_id, lease_token, agent_credential,
+                idempotency_key, capability)):
+        raise EffectConflict("Execution, worker, lease, credential, key and capability required")
     if len(idempotency_key) > 200:
         raise EffectConflict("Idempotency key too long")
     digest = canonical_digest(request)
     with connect_postgres() as db:
+        from aao.principal_credentials import PrincipalDenied, authenticate_in_transaction
+        try:
+            principal_id = authenticate_in_transaction(
+                db, agent_credential, kind="AGENT",
+            )
+        except PrincipalDenied as exc:
+            raise EffectConflict("Active agent credential required") from exc
+        if principal_id != worker_id:
+            raise EffectConflict("Credential does not match execution worker")
         execution = db.execute(
-            "SELECT status FROM execution_queue WHERE id=%s FOR UPDATE",
+            "SELECT q.status,q.project_id,q.worker_id,q.lease_token,"
+            "q.lease_expires_at,p.state FROM execution_queue q "
+            "JOIN projects p ON p.id=q.project_id WHERE q.id=%s "
+            "FOR UPDATE OF q,p",
             (execution_id,),
         ).fetchone()
         if not execution:
             raise EffectConflict("Unknown execution")
+        status, project_id, owner, current_token, expires_at, project_state = execution
+        if (status != "RUNNING" or owner != worker_id or str(current_token) != lease_token
+                or expires_at is None or project_state != "ACTIVE"):
+            raise EffectConflict("Execution lease is not active for this worker")
+        grant = db.execute(
+            "SELECT 1 FROM project_grants WHERE principal_id=%s AND project_id=%s "
+            "AND capability='effect.propose' "
+            "AND (expires_at IS NULL OR expires_at > clock_timestamp()) FOR SHARE",
+            (principal_id, str(project_id)),
+        ).fetchone()
+        if not grant:
+            raise EffectConflict("Project effect proposal grant required")
+        live = db.execute(
+            "SELECT lease_expires_at > clock_timestamp() FROM execution_queue "
+            "WHERE id=%s",
+            (execution_id,),
+        ).fetchone()[0]
+        if not live:
+            raise EffectConflict("Execution lease expired")
         row = db.execute(
             "SELECT id,execution_id,capability,request_digest FROM external_effects "
             "WHERE idempotency_key=%s FOR UPDATE", (idempotency_key,)
@@ -37,12 +71,19 @@ def propose(*, execution_id: str, idempotency_key: str, capability: str, request
             if str(row[1]) != execution_id or row[2] != capability or row[3] != digest:
                 raise EffectConflict("Idempotency key reused with different request")
             return {"id": str(row[0]), "status": "PROPOSED_OR_EXISTING"}
-        if execution[0] != "RUNNING":
-            raise EffectConflict("Effects may only be proposed for a running execution")
         effect_id = str(uuid4())
         db.execute(
             "INSERT INTO external_effects(id,execution_id,idempotency_key,capability,status,request_digest) "
             "VALUES (%s,%s,%s,%s,'PROPOSED',%s)",
             (effect_id, execution_id, idempotency_key, capability, digest),
+        )
+        db.execute(
+            "INSERT INTO execution_journal(id,execution_id,kind,details) "
+            "VALUES (%s,%s,'effect.proposed',%s::jsonb)",
+            (str(uuid4()), execution_id, json.dumps({
+                "proposed_by": principal_id,
+                "capability": capability,
+                "request_digest": digest,
+            })),
         )
         return {"id": effect_id, "status": "PROPOSED"}

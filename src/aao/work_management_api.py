@@ -92,7 +92,7 @@ class PrincipalCredentialRequest(BaseModel):
 
 class GrantRequest(BaseModel):
     principal_id: str = Field(min_length=1)
-    capability: str = Field(pattern=r"^(?:work\.(?:create|admit|review|progress)|project\.read|execution\.claim|execution\.reconcile|effect\.reconcile)$")
+    capability: str = Field(pattern=r"^(?:work\.(?:create|admit|review|progress)|project\.read|execution\.claim|execution\.reconcile|effect\.(?:propose|reconcile))$")
 
 
 app = FastAPI(title="AAO PostgreSQL development core", version="0.2.0")

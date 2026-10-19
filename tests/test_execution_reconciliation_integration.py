@@ -14,7 +14,7 @@ from fastapi.testclient import TestClient
     reason="Explicit disposable PostgreSQL database required",
 )
 def test_reconciliation_requires_distinct_granted_reviewer(monkeypatch):
-    from aao.execution_queue import claim, quarantine_expired, state
+    from aao.execution_queue import claim, complete, quarantine_expired, state
     from aao.execution_reconciliation import ReconciliationDenied, reconcile
     from aao.work_management_api import app
 
@@ -47,6 +47,7 @@ def test_reconciliation_requires_distinct_granted_reviewer(monkeypatch):
             (worker_id, "work.create"),
             (worker_id, "work.admit"),
             (worker_id, "execution.claim"),
+            (worker_id, "effect.propose"),
         ):
             client.post(f"/v1/projects/{project}/grants", headers=ceo, json={
                 "principal_id": principal_id, "capability": capability
@@ -61,6 +62,13 @@ def test_reconciliation_requires_distinct_granted_reviewer(monkeypatch):
     assert lease["execution_id"] == eid
     # Quarantine is global: previous tests may leave other expired leases.
     time.sleep(1.1)
+    from aao.external_effect_registry import EffectConflict, propose
+    with pytest.raises(EffectConflict, match="lease expired"):
+        propose(
+            execution_id=eid, worker_id=worker_id, lease_token=lease["token"],
+            agent_credential=secret, idempotency_key="expired-" + str(uuid4()),
+            capability="test.inert", request={"kind": "test-only"},
+        )
     assert quarantine_expired() >= 1
     assert state(eid)["status"] == "UNCERTAIN"
     # Re-running quarantine must not alter this execution again.
@@ -78,52 +86,70 @@ def test_reconciliation_requires_distinct_granted_reviewer(monkeypatch):
                   disposition="RETRY_CONFIRMED_SAFE")
     from aao.execution_reconciliation import ReconciliationDenied
     from aao.external_effect_reconciliation import EffectReviewDenied, reject_unexecuted_proposal
-    from aao.external_effect_registry import EffectConflict, propose
     with TestClient(app) as client:
         granted = client.post(f"/v1/projects/{project}/grants", headers=ceo, json={
             "principal_id": auditor_id, "capability": "effect.reconcile",
         })
         assert granted.status_code == 201, granted.text
-    barrier = threading.Barrier(2)
-    def race_proposal():
-        barrier.wait(timeout=3)
-        return propose(
-            execution_id=eid, idempotency_key="race-" + str(uuid4()),
+    with pytest.raises(EffectConflict, match="lease is not active"):
+        propose(
+            execution_id=eid, worker_id=worker_id, lease_token=lease["token"],
+            agent_credential=secret, idempotency_key="uncertain-" + str(uuid4()),
             capability="test.inert", request={"kind": "test-only"},
         )
-    def race_retry():
-        barrier.wait(timeout=3)
-        return reconcile(
-            eid, auditor_credential=auditor_secret, evidence=["inert-only confirmed"],
-            disposition="RETRY_CONFIRMED_SAFE",
-        )
-    with ThreadPoolExecutor(max_workers=2) as pool:
-        proposed = pool.submit(race_proposal)
-        retried = pool.submit(race_retry)
-        try:
-            proposal = proposed.result(timeout=5)
-        except EffectConflict:
-            proposal = None
-        try:
-            retry_state = retried.result(timeout=5)
-        except ReconciliationDenied:
-            retry_state = None
-    if proposal:
-        assert retry_state is None
-        assert "External effect exists" in str(retried.exception())
-    else:
-        assert retry_state == "QUEUED"
-        with pytest.raises(EffectConflict, match="running execution"):
-            propose(
-                execution_id=eid, idempotency_key="queued-" + str(uuid4()),
-                capability="test.inert", request={"kind": "test-only"},
-            )
-        lease = claim(worker_id, agent_credential=secret, project_id=project)
-        assert lease["execution_id"] == eid
-        proposal = propose(
-            execution_id=eid, idempotency_key="reconcile-" + str(uuid4()),
+    assert reconcile(
+        eid, auditor_credential=auditor_secret, evidence=["inert-only confirmed"],
+        disposition="RETRY_CONFIRMED_SAFE",
+    ) == "QUEUED"
+    lease = claim(worker_id, agent_credential=secret, project_id=project)
+    assert lease["execution_id"] == eid
+    with pytest.raises(EffectConflict, match="credential required"):
+        propose(
+            execution_id=eid, worker_id=worker_id, lease_token=lease["token"],
+            agent_credential="wrong", idempotency_key="wrong-auth-" + str(uuid4()),
             capability="test.inert", request={"kind": "test-only"},
         )
+    with pytest.raises(EffectConflict, match="does not match"):
+        propose(
+            execution_id=eid, worker_id="other-worker", lease_token=lease["token"],
+            agent_credential=secret, idempotency_key="wrong-worker-" + str(uuid4()),
+            capability="test.inert", request={"kind": "test-only"},
+        )
+    key = "reconcile-" + str(uuid4())
+    proposal = propose(
+        execution_id=eid, worker_id=worker_id, lease_token=lease["token"],
+        agent_credential=secret, idempotency_key=key,
+        capability="test.inert", request={"kind": "test-only"},
+    )
+    again = propose(
+        execution_id=eid, worker_id=worker_id, lease_token=lease["token"],
+        agent_credential=secret, idempotency_key=key,
+        capability="test.inert", request={"kind": "test-only"},
+    )
+    assert again["id"] == proposal["id"]
+    assert again["status"] == "PROPOSED_OR_EXISTING"
+    from aao.postgresql_connection import connect_postgres
+    with connect_postgres() as db:
+        proposer = db.execute(
+            "SELECT details->>'proposed_by' FROM execution_journal "
+            "WHERE execution_id=%s AND kind='effect.proposed' ORDER BY id DESC LIMIT 1",
+            (eid,),
+        ).fetchone()[0]
+        assert proposer == worker_id
+        db.execute(
+            "DELETE FROM project_grants WHERE principal_id=%s AND project_id=%s "
+            "AND capability='effect.propose'", (worker_id, project),
+        )
+    with pytest.raises(EffectConflict, match="proposal grant required"):
+        propose(
+            execution_id=eid, worker_id=worker_id, lease_token=lease["token"],
+            agent_credential=secret, idempotency_key="not-granted-" + str(uuid4()),
+            capability="test.inert", request={"kind": "test-only"},
+        )
+    with TestClient(app) as client:
+        assert client.post(f"/v1/projects/{project}/grants", headers=ceo, json={
+            "principal_id": worker_id, "capability": "effect.propose",
+        }).status_code == 201
     with pytest.raises(EffectReviewDenied):
         reject_unexecuted_proposal(
             proposal["id"], auditor_credential=secret, evidence=["agent denied"]
@@ -132,10 +158,42 @@ def test_reconciliation_requires_distinct_granted_reviewer(monkeypatch):
         proposal["id"], auditor_credential=auditor_secret,
         evidence=["proposal not executed"],
     ) == "REJECTED"
-    if retry_state is None:
-        assert reconcile(eid, auditor_credential=auditor_secret,
-                         evidence=["effect rejected"],
-                         disposition="RETRY_CONFIRMED_SAFE") == "QUEUED"
+    barrier = threading.Barrier(2)
+
+    def racing_proposal():
+        barrier.wait(timeout=3)
+        try:
+            return propose(
+                execution_id=eid, worker_id=worker_id, lease_token=lease["token"],
+                agent_credential=secret, idempotency_key="completion-race-" + str(uuid4()),
+                capability="test.inert", request={"kind": "completion-race"},
+            )
+        except EffectConflict as exc:
+            return exc
+
+    def racing_completion():
+        barrier.wait(timeout=3)
+        return complete(
+            eid, lease["token"], worker_id, {"inert": True},
+            agent_credential=secret,
+        )
+
+    with ThreadPoolExecutor(max_workers=2) as pool:
+        proposal_result = pool.submit(racing_proposal)
+        completion_result = pool.submit(racing_completion)
+        raced_proposal = proposal_result.result(timeout=5)
+        completion_result.result(timeout=5)
+    assert state(eid)["status"] == "SUCCEEDED"
+    if isinstance(raced_proposal, EffectConflict):
+        assert "lease is not active" in str(raced_proposal)
+    else:
+        assert raced_proposal["status"] == "PROPOSED"
+    with pytest.raises(EffectConflict, match="lease is not active"):
+        propose(
+            execution_id=eid, worker_id=worker_id, lease_token=lease["token"],
+            agent_credential=secret, idempotency_key="after-completion-" + str(uuid4()),
+            capability="test.inert", request={"kind": "after-completion"},
+        )
     with TestClient(app) as client:
         assert client.post(f"/v1/principals/{worker_id}/revoke", headers=ceo).status_code == 200
     from aao.execution_queue import ExecutionConflict
