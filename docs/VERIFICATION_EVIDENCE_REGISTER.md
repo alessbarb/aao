@@ -61,6 +61,18 @@ GitHub Actions run `39252871118` completed successfully for commit
 migrations against disposable PostgreSQL, integration tests and pip check.
 This is not independent review or M2 acceptance.
 
+## PostgreSQL-clock lease expiry and delayed completion
+
+At `02603d680520e034dce2908f575038411c6e73df`, lease issue, completion
+expiry validation, and quarantine compare against PostgreSQL `clock_timestamp()`;
+the API no longer accepts caller-supplied timestamps for these decisions. The
+full local disposable-database suite passed **52 tests, 0 skipped, 0
+warnings**. The delayed-completion integration scenario was also run three
+additional times individually and passed each time. Compileall, Ruff, pip
+check, and diff check passed. GitHub Actions run `39253290548` completed
+successfully on the same SHA. This covers one controlled lock-wait schedule,
+not repeated adversarial race testing or M2 acceptance.
+
 Tras las 43 pruebas confirmadas, se incorporaron las rutas individuales de
 lectura de proyectos/tableros y el bloqueo de tokens compartidos de workers y
 auditores fuera de desarrollo o al establecer
