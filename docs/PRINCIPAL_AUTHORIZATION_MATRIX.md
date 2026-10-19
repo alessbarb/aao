@@ -1,10 +1,10 @@
 # Principal authorization matrix
 
 **Scope:** current development API and internal execution/reconciliation
-operations, updated for commit `ca1857e`. This is an
-engineering inventory, not a production authorization policy or independent
-security review. The PostgreSQL API and its internal helpers are not a claim of
-M2 acceptance.
+operations, updated through `8189be1a2106f041e6419ef30cddd54ba7602ea8`.
+This is an engineering inventory, not a production authorization policy or
+independent security review. The PostgreSQL API and its internal helpers are
+not a claim of M2 acceptance.
 
 ## External HTTP operations
 
@@ -41,30 +41,34 @@ inside their transaction. The CEO credential is still a single static bearer.
 
 - API, queue and reconciliation authorization checks hold matching grant
   tuples under `FOR SHARE`; CEO grant deletion serializes behind in-flight
-  protected transactions. PostgreSQL tests cover a held-check/revocation race,
-  expiry during a blocked row-lock wait, AUDITOR credential-authentication
-  serialization against revocation, and AGENT authentication serialization
-  against credential rotation. Other lease and credential-rotation schedules
-  remain untested. A barrier-started proposal/retry test covers the
-  serialized outcomes but not exhaustive lock scheduling.
+  protected transactions. PostgreSQL schedules cover an HTTP work-creation
+  transaction, queue claim, and queue completion each holding authorization
+  while grant deletion waits. Queue completion has also been observed holding
+  the AGENT credential row while credential revocation waits; after the
+  operation commits, the revocation succeeds and subsequent completion is
+  denied. A separate AUDITOR auth/revocation schedule and AGENT auth/rotation
+  schedule exercise credential row locks. These are selected controlled lock
+  schedules, not exhaustive or adversarial race coverage.
 - Sequential credential revocation tests and unit mocks that assert SQL text
-  do not prove real PostgreSQL lock behavior. Direct transaction-level tests
-  verify auditor credential revocation lock behavior; a controlled HTTP work
-  creation test holds the admitted grant check while grant deletion attempts
-  to race and confirms the write commits first. Other business writes and
-  queue claim/completion races remain to be tested.
-- The current full local suite has 54 tests, including grant-row, auditor
+  do not prove real PostgreSQL lock behavior. Several real lock schedules now
+  cover work creation, queue claim/completion against grant deletion, and
+  queue completion against credential revocation. Other business writes,
+  queue claim against credential revocation, alternative operation/revocation
+  orderings, and hostile schedules remain untested.
+- The current full local suite has 57 tests, including grant-row, auditor
   credential-lock, and completion-after-lease-expiry-during-row-lock-wait
-  coverage, plus one AGENT authentication/rotation lock schedule. Three
+  coverage, AGENT authentication/rotation, and selected protected-operation
+  revocation schedules. Three
   controlled races between completion and quarantine after
   expiry also finish in `UNCERTAIN`; this is not a broad adversarial schedule
   proof. Effect proposal/retry races are tested as above. A cold PostgreSQL
   restart has been manually verified for one expired lease; broad restart and
   crash-recovery schedules remain open.
 - GitHub CI configures a fresh disposable PostgreSQL service and runs the
-  guarded integration suite; run `39255217942` passed on code SHA `3168ec3`.
-  Current exact local results are recorded in the evidence register; this is
-  not independent review or M2 acceptance.
+  guarded integration suite; run `39256075817` passed on code SHA
+  `8b99abad1ae996d31284eab002ec827f066fb7a6`. Current exact local results and
+  prior candidate SHA-specific CI runs are recorded in the evidence register;
+  this is not independent review or M2 acceptance.
 - Grant expiry uses `clock_timestamp()` when the locked authorization query is
   evaluated, avoiding PostgreSQL transaction-start `now()` semantics. This
   does not itself prove every long-running operation stops exactly at expiry;
