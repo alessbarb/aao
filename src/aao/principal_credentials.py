@@ -5,7 +5,7 @@ These are bearer-token development credentials, not production identities.
 import hashlib
 import hmac
 
-from aao.postgres import connect_postgres
+from aao.postgresql_connection import connect_postgres
 
 
 class PrincipalDenied(ValueError):

@@ -4,7 +4,7 @@ Not enabled in the active SQLite API. Schema creation is a manual development st
 """
 import os
 
-from aao.settings import load_local_env
+from aao.environment_settings import load_local_env
 from contextlib import contextmanager
 
 

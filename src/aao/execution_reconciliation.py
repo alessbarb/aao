@@ -5,7 +5,7 @@ This operation only changes queue state. It NEVER calls tools or retries work.
 import json
 from uuid import uuid4
 
-from aao.postgres import connect_postgres
+from aao.postgresql_connection import connect_postgres
 
 
 class ReconciliationDenied(ValueError):

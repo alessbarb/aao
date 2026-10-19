@@ -5,7 +5,7 @@ SQLite API. No agent execution or external side effects are enabled.
 """
 import json
 
-from aao.settings import load_local_env
+from aao.environment_settings import load_local_env
 load_local_env()
 import os
 import secrets
@@ -44,7 +44,7 @@ def require_reviewer(
     # Individual credentials are preferred where provisioned. The shared
     # development reviewer token remains a transitional local-only fallback.
     if x_auditor_token is not None:
-        from aao.pg_principals import PrincipalDenied, authenticate
+        from aao.principal_credentials import PrincipalDenied, authenticate
         try:
             return authenticate(x_auditor_token, kind="AUDITOR")
         except PrincipalDenied as exc:
@@ -66,7 +66,7 @@ def require_worker(
     # An individually issued credential takes precedence; invalid individual
     # credentials cannot silently fall back to a shared development token.
     if x_agent_token is not None:
-        from aao.pg_principals import PrincipalDenied, authenticate
+        from aao.principal_credentials import PrincipalDenied, authenticate
         try:
             return authenticate(x_agent_token, kind="AGENT")
         except PrincipalDenied as exc:
@@ -83,7 +83,7 @@ def require_worker(
 
 @contextmanager
 def tx():
-    from aao.postgres import connect_postgres
+    from aao.postgresql_connection import connect_postgres
     with connect_postgres() as db:
         yield db
 
@@ -145,7 +145,7 @@ def issue_principal_credential(
     payload: PrincipalCredentialRequest, _: str = Depends(require_ceo)
 ):
     """CEO-only development issuance. Secret returned once, digest persisted."""
-    from aao.pg_principals import digest_token
+    from aao.principal_credentials import digest_token
 
     token = secrets.token_urlsafe(32)
     with tx() as db:
@@ -183,7 +183,7 @@ def revoke_principal(principal_id: str, _: str = Depends(require_ceo)):
 @app.post("/v1/principals/{principal_id}/rotate")
 def rotate_principal(principal_id: str, _: str = Depends(require_ceo)):
     """Atomic rotation invalidates the previous token."""
-    from aao.pg_principals import digest_token
+    from aao.principal_credentials import digest_token
 
     token = secrets.token_urlsafe(32)
     with tx() as db:
@@ -250,7 +250,7 @@ def read_principal(
     if ceo and x_ceo_token and secrets.compare_digest(ceo, x_ceo_token):
         return "ceo"
     if x_agent_token is not None:
-        from aao.pg_principals import PrincipalDenied, authenticate
+        from aao.principal_credentials import PrincipalDenied, authenticate
         try:
             return authenticate(x_agent_token, kind="AGENT")
         except PrincipalDenied as exc:
