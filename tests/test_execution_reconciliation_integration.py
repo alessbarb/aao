@@ -196,12 +196,11 @@ def test_reconciliation_requires_distinct_granted_reviewer(monkeypatch):
                     row = observer.execute(
                         "SELECT pid FROM pg_stat_activity "
                         "WHERE query LIKE %s AND wait_event_type='Lock' "
-                        "AND ( %s::int IS NULL OR pid != %s::int) LIMIT 1",
-                        (query_pattern, excluded_pid, excluded_pid),
+                        "AND %s=ANY(pg_blocking_pids(pid)) "
+                        "AND (%s::int IS NULL OR pid != %s::int) LIMIT 1",
+                        (query_pattern, blocker_pid, excluded_pid, excluded_pid),
                     ).fetchone()
-                    if row and observer.execute(
-                        "SELECT cardinality(pg_blocking_pids(%s)) > 0", (row[0],),
-                    ).fetchone()[0]:
+                    if row:
                         return row[0]
                 time.sleep(0.01)
             raise AssertionError(f"query did not wait on expected blocker: {query_pattern}")
@@ -218,7 +217,7 @@ def test_reconciliation_requires_distinct_granted_reviewer(monkeypatch):
                 )
                 rejecting = pool.submit(reject_proposal, effect_id)
                 rejection_pid = wait_until_blocked(
-                    "%FROM execution_queue%FOR UPDATE OF q,p%", blocker_pid, proposal_pid,
+                    "%FROM execution_queue%FOR UPDATE OF q,p%", proposal_pid,
                 )
                 assert proposal_pid != rejection_pid
             # Both real operations were queued on the same execution row. Once
