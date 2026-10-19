@@ -1,7 +1,7 @@
 # Principal authorization matrix
 
 **Scope:** current development API and internal execution/reconciliation
-operations, updated through `9339a1da24e17599422fd62227107f46302bf88e`.
+operations, updated through `a2791349e6000bec56d95cfe0ede587bb631573b`.
 This is an engineering inventory, not a production authorization policy or
 independent security review. The PostgreSQL API and its internal helpers are
 not a claim of M2 acceptance.
@@ -76,7 +76,8 @@ register for test status.
   queue completion against credential revocation. Other business writes,
   alternative operation/revocation orderings, reconciliation against grant
   revocation, and hostile schedules remain untested.
-- The current full local suite has 61 tests, including grant-row, auditor
+- The full local suite at `a2791349e6000bec56d95cfe0ede587bb631573b` has 66
+  tests, including the HTTP token-rotation gap check, grant-row, auditor
   credential-lock, and completion-after-lease-expiry-during-row-lock-wait
   coverage, AGENT authentication/rotation, and selected protected-operation
   revocation schedules. Three
