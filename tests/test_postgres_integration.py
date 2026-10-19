@@ -608,7 +608,7 @@ def test_ceo_governed_principal_issue_rotate_revoke(monkeypatch):
         with connect_postgres() as db:
             events = db.execute(
                 "SELECT kind FROM events WHERE details->>'principal_id'=%s "
-                "AND kind LIKE 'principal.credential.%'", (name,)
+                "AND kind LIKE %s", (name, "principal.credential.%")
             ).fetchall()
             assert {row[0] for row in events} == {
                 "principal.credential.issued",
