@@ -196,3 +196,48 @@ def test_patch_proposal_diff_inspection_requires_auditor_token():
         )
         assert response.status_code == 403
         assert "Individual auditor credential rejected" in response.json()["detail"]
+
+
+def test_control_center_git_lifecycle_tab_and_views_present():
+    html = (Path(__file__).parents[1] / "frontend" / "index.html").read_text()
+    assert 'data-tab="tab-git-lifecycle"' in html
+    assert 'Ciclo Git e Integración' in html
+    assert 'id="tab-git-lifecycle"' in html
+    assert 'Ciclo de Integración Git Local y Control de Promoción' in html
+
+
+def test_control_center_git_lifecycle_tables_and_exact_shas_present():
+    html = (Path(__file__).parents[1] / "frontend" / "index.html").read_text()
+    assert 'id="git-candidates-table-body"' in html
+    assert 'id="git-reviews-table-body"' in html
+    assert 'id="git-promotion-history-table-body"' in html
+    assert 'sha-mono' in html
+    assert 'baseSha' in html or 'base_sha' in html
+    assert 'patchSha256' in html or 'patch_sha256' in html
+    assert 'candidate_tree' in html
+    assert 'candidate_sha' in html
+
+
+def test_control_center_promotion_gate_strictly_fails_closed():
+    html = (Path(__file__).parents[1] / "frontend" / "index.html").read_text()
+    # Promotion button is permanently disabled in the DOM without verifiable authority
+    assert 'id="btn-promote-candidate" class="primary" disabled aria-disabled="true"' in html
+    assert 'PROMOCIÓN BLOQUEADA' in html
+    # Explicit fail-closed reasoning and governance limits
+    assert "Controlador no autorizado" in html
+    assert "Falta de Autoridad de Promoción" in html
+    assert "Falta de Certificación de Auditoría Independiente" in html
+    assert "La interfaz no permite promover candidatos mientras el controlador local no disponga de autorización verificable" in html
+    assert "Constitución arts. 3 y 6" in html
+
+
+def test_control_center_git_lifecycle_veto_and_freeze_records():
+    html = (Path(__file__).parents[1] / "frontend" / "index.html").read_text()
+    # VETO triggers immediate veto status and blocks promotion
+    assert 'r.decision === "VETO"' in html
+    assert 'VETO ACTIVO' in html
+    assert 'INTEGRACIÓN PROHIBIDA' in html
+    # Freeze records present in promotion history
+    assert "3fc9cda4ab5afb4732e8b4cca4ebd1a4c885d527" in html
+    assert "91eb7543658fe92875cefa3de1e27704d830feb7" in html
+    assert "ea549700ad82405dd0f64eb9121aa116d281a022" in html

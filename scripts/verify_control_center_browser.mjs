@@ -159,7 +159,74 @@ try {
     throw new Error('No se renderizó la capacidad real: ' + data.firstCapability);
   }
 
-  console.log('VERIFICACIÓN EN NAVEGADOR REAL EXITOSA: Datos reales leídos y validados sin credencial CEO.');
+  console.log('8. Cambiando a la pestaña "Ciclo Git e Integración" en el navegador...');
+  const switchTabExpr = `
+    (function() {
+      const gitTab = document.querySelector('.nav-tab[data-tab="tab-git-lifecycle"]');
+      if (gitTab) gitTab.click();
+      return true;
+    })()
+  `;
+  await sendPage('Runtime.evaluate', { expression: switchTabExpr });
+  await new Promise(r => setTimeout(r, 500));
+
+  console.log('9. Verificando renderizado del ciclo Git, candidatos, SHAs exactos y gate de promoción...');
+  const gitLifecycleExpr = `
+    (function() {
+      const gitPanel = document.querySelector('#tab-git-lifecycle');
+      const promoteBtn = document.querySelector('#btn-promote-candidate');
+      const candidateRows = document.querySelectorAll('#git-candidates-table-body tr');
+      const historyRows = document.querySelectorAll('#git-promotion-history-table-body tr');
+      const gatePill = document.querySelector('#gate-pill');
+      const metricCandidates = document.querySelector('#metric-candidate-count');
+      const metricVeto = document.querySelector('#metric-veto-status');
+      const metricFreezeSha = document.querySelector('#metric-freeze-sha');
+
+      return {
+        tabActive: gitPanel ? gitPanel.classList.contains('active') : false,
+        promoteBtnDisabled: promoteBtn ? promoteBtn.disabled : false,
+        promoteBtnText: promoteBtn ? promoteBtn.textContent.trim() : '',
+        gatePillText: gatePill ? gatePill.textContent.trim() : '',
+        metricCandidates: metricCandidates ? metricCandidates.textContent.trim() : '',
+        metricVeto: metricVeto ? metricVeto.textContent.trim() : '',
+        metricFreezeSha: metricFreezeSha ? metricFreezeSha.textContent.trim() : '',
+        candidateRowsCount: candidateRows.length,
+        candidateSampleText: candidateRows[0] ? candidateRows[0].textContent.trim() : '',
+        historyRowsCount: historyRows.length,
+        historyFirstRow: historyRows[0] ? historyRows[0].textContent.trim() : ''
+      };
+    })()
+  `;
+
+  const { result: gitResult } = await sendPage('Runtime.evaluate', { expression: gitLifecycleExpr, returnByValue: true });
+  const gitData = gitResult.value;
+
+  console.log('--- RESULTADOS CICLO GIT E INTEGRACIÓN EN NAVEGADOR REAL ---');
+  console.log('Pestaña activa:', gitData.tabActive);
+  console.log('Botón de promoción deshabilitado (fail-closed):', gitData.promoteBtnDisabled);
+  console.log('Texto del botón de promoción:', gitData.promoteBtnText);
+  console.log('Estado del gate pill:', gitData.gatePillText);
+  console.log('Métrica de candidatos evaluados:', gitData.metricCandidates);
+  console.log('Métrica de veto:', gitData.metricVeto);
+  console.log('SHA punto de congelación:', gitData.metricFreezeSha);
+  console.log('Filas de candidatos Git:', gitData.candidateRowsCount);
+  console.log('Filas en historial de promoción:', gitData.historyRowsCount);
+  console.log('Registro formal 1 de promoción:', gitData.historyFirstRow);
+
+  if (!gitData.tabActive) {
+    throw new Error('La pestaña tab-git-lifecycle no se activó');
+  }
+  if (!gitData.promoteBtnDisabled) {
+    throw new Error('VIOLACIÓN DE GOBERNANZA: El botón de promoción debe estar estrictamente deshabilitado');
+  }
+  if (!gitData.gatePillText.includes('PROMOCIÓN BLOQUEADA')) {
+    throw new Error('El estado del gate no indica PROMOCIÓN BLOQUEADA: ' + gitData.gatePillText);
+  }
+  if (gitData.historyRowsCount !== 4) {
+    throw new Error('Se esperaban 4 registros de candidatos en el historial de promoción, obtenidos: ' + gitData.historyRowsCount);
+  }
+
+  console.log('VERIFICACIÓN EN NAVEGADOR REAL EXITOSA: Datos reales leídos, ciclo Git validado y promoción bloqueada según GOV-REV-001.');
 } finally {
   ws.close();
   chrome.kill();

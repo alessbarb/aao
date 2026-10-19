@@ -451,6 +451,56 @@
     @media (max-width: 600px) {
       .kanban-grid { grid-template-columns: 1fr; }
     }
+    /* Gate de Promoción y Ciclo Git */
+    .gate-card {
+      background: #171c26;
+      border: 1px solid #7f1d1d;
+      border-left: 4px solid #ef4444;
+      border-radius: 8px;
+      padding: 16px;
+      margin-bottom: 18px;
+    }
+    .gate-header {
+      display: flex;
+      flex-wrap: wrap;
+      align-items: center;
+      justify-content: space-between;
+      gap: 14px;
+    }
+    .gate-info {
+      flex: 1 1 500px;
+    }
+    .gate-actions button:disabled {
+      opacity: 0.55;
+      cursor: not-allowed;
+      background: #1e293b;
+      border-color: #334155;
+      color: #94a3b8;
+    }
+    .gate-reasons {
+      margin-top: 12px;
+      padding-top: 10px;
+      border-top: 1px solid #2d3748;
+      display: flex;
+      flex-direction: column;
+      gap: 6px;
+      font-size: 0.8rem;
+      color: var(--text-muted);
+    }
+    .gate-reason-item {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+    .sha-mono {
+      font-family: var(--font-mono);
+      font-size: 0.78rem;
+      background: #1e293b;
+      padding: 2px 5px;
+      border-radius: 4px;
+      border: 1px solid #334155;
+      color: #7dd3fc;
+    }
   </style>
 </head>
 <body>
@@ -509,6 +559,7 @@
       <button class="nav-tab" data-tab="tab-proposals" role="tab" aria-selected="false">Propuestas de Código</button>
       <button class="nav-tab" data-tab="tab-executions" role="tab" aria-selected="false">Ejecuciones</button>
       <button class="nav-tab" data-tab="tab-evidence" role="tab" aria-selected="false">Evidencias y Auditorías</button>
+      <button class="nav-tab" data-tab="tab-git-lifecycle" role="tab" aria-selected="false">Ciclo Git e Integración</button>
     </nav>
 
     <!-- TAB: Kanban -->
@@ -696,6 +747,124 @@
         </table>
       </div>
     </section>
+
+    <!-- TAB: Ciclo Git e Integración -->
+    <section id="tab-git-lifecycle" class="tab-content" role="tabpanel">
+      <div style="margin-bottom:14px;">
+        <h2 style="font-size:1.05rem;margin:0 0 4px 0;">Ciclo de Integración Git Local y Control de Promoción</h2>
+        <p style="margin:0;font-size:0.82rem;color:var(--text-muted);">
+          Trazabilidad del ciclo de vida de integración: candidatos Git, SHAs exactos, validaciones en árboles aislados, dictámenes, veto efectivo, bloqueos activos y control de promoción según GOV-REV-001.
+        </p>
+      </div>
+
+      <!-- Gate de Promoción / Control Fail-Closed -->
+      <div class="gate-card" id="promotion-gate-card">
+        <div class="gate-header">
+          <div class="gate-info">
+            <div style="display:flex;align-items:center;gap:8px;">
+              <span class="pill veto" id="gate-pill">PROMOCIÓN BLOQUEADA</span>
+              <strong style="font-size:0.95rem;">Gate de Integración y Promoción GOV-REV-001</strong>
+            </div>
+            <p style="margin:6px 0 0 0;font-size:0.82rem;color:var(--text-muted);">
+              <strong>Controlador no autorizado:</strong> La interfaz no permite promover candidatos mientras el controlador local no disponga de autorización verificable ni de una auditoría técnica verdaderamente independiente externa vinculada al SHA.
+              La aprobación del autor o el paso de CI verde en GitHub <em>no</em> autorizan la fusión en ramas protegidas (Constitución arts. 3 y 6).
+            </p>
+          </div>
+          <div class="gate-actions">
+            <button id="btn-promote-candidate" class="primary" disabled aria-disabled="true" title="Promoción bloqueada: requiere autoridad verificable de integración y auditoría independiente">
+              Promover Candidato a Integración (Bloqueado)
+            </button>
+          </div>
+        </div>
+        <div class="gate-reasons" id="gate-reasons-list">
+          <div class="gate-reason-item">❌ <strong>Falta de Autoridad de Promoción:</strong> La sesión ordinaria de agente no posee permisos reservados de integración ni credenciales con grant de promoción.</div>
+          <div class="gate-reason-item">❌ <strong>Falta de Certificación de Auditoría Independiente:</strong> No se dispone de dictamen independiente externo certificado para el HEAD candidato.</div>
+          <div class="gate-reason-item">❌ <strong>Dependencias Base Pendientes:</strong> Bloqueado por estabilización aguas arriba (PR #10, #11 y #16).</div>
+        </div>
+      </div>
+
+      <!-- Métricas del Ciclo Git -->
+      <div class="git-metrics-grid" style="display:grid;grid-template-columns:repeat(auto-fit, minmax(220px, 1fr));gap:12px;margin:16px 0;">
+        <div class="metric-card" style="background:var(--bg-panel);border:1px solid var(--border-subtle);border-radius:8px;padding:12px;">
+          <div style="font-size:0.75rem;color:var(--text-muted);text-transform:uppercase;font-weight:600;">Candidatos Evaluados</div>
+          <div id="metric-candidate-count" style="font-size:1.4rem;font-weight:700;color:var(--text-main);margin-top:4px;">0</div>
+          <div style="font-size:0.75rem;color:var(--text-dim);margin-top:2px;">En árboles y clones aislados</div>
+        </div>
+        <div class="metric-card" style="background:var(--bg-panel);border:1px solid var(--border-subtle);border-radius:8px;padding:12px;">
+          <div style="font-size:0.75rem;color:var(--text-muted);text-transform:uppercase;font-weight:600;">Estado de Veto</div>
+          <div id="metric-veto-status" style="font-size:1.1rem;font-weight:700;color:var(--status-ok);margin-top:6px;">Sin veto registrado</div>
+          <div style="font-size:0.75rem;color:var(--text-dim);margin-top:2px;">Veto de auditor detiene promoción</div>
+        </div>
+        <div class="metric-card" style="background:var(--bg-panel);border:1px solid var(--border-subtle);border-radius:8px;padding:12px;">
+          <div style="font-size:0.75rem;color:var(--text-muted);text-transform:uppercase;font-weight:600;">Punto de Congelación</div>
+          <div id="metric-freeze-sha" class="sha-mono" style="font-size:0.82rem;font-weight:700;color:var(--accent-primary);margin-top:6px;">3fc9cda4ab5a</div>
+          <div style="font-size:0.75rem;color:var(--text-dim);margin-top:2px;">Candidato formal congelado PR #15</div>
+        </div>
+        <div class="metric-card" style="background:var(--bg-panel);border:1px solid var(--border-subtle);border-radius:8px;padding:12px;">
+          <div style="font-size:0.75rem;color:var(--text-muted);text-transform:uppercase;font-weight:600;">Canónico Protegido</div>
+          <div style="font-size:1.1rem;font-weight:700;color:var(--status-warn);margin-top:6px;">Sin cambios directos</div>
+          <div style="font-size:0.75rem;color:var(--text-dim);margin-top:2px;">main inalterado por agentes</div>
+        </div>
+      </div>
+
+      <!-- Tabla 1: Candidatos y Trazabilidad Git -->
+      <h3 style="font-size:0.95rem;margin:18px 0 8px 0;">Candidatos de Código y Trazabilidad Git</h3>
+      <div class="data-table-wrapper">
+        <table class="data-table">
+          <thead>
+            <tr>
+              <th>Candidato / Propuesta</th>
+              <th>Tarea Asociada</th>
+              <th>Proponente</th>
+              <th>Base SHA</th>
+              <th>SHA256 Parche</th>
+              <th>Árbol / Commit Candidato</th>
+              <th>Validación Aislada</th>
+              <th>Dictamen Auditor</th>
+              <th>Estado Integración</th>
+            </tr>
+          </thead>
+          <tbody id="git-candidates-table-body"></tbody>
+        </table>
+      </div>
+
+      <!-- Tabla 2: Dictámenes, Veto y Bloqueos de Auditoría -->
+      <h3 style="font-size:0.95rem;margin:24px 0 8px 0;">Dictámenes, Veto y Bloqueos de Auditoría</h3>
+      <div class="data-table-wrapper">
+        <table class="data-table">
+          <thead>
+            <tr>
+              <th>Tarea / Candidato</th>
+              <th>Auditor Revisor</th>
+              <th>Dictamen</th>
+              <th>Veto Efectivo</th>
+              <th>SHA Vinculado</th>
+              <th>Evidencia Registrada</th>
+              <th>Bloqueo de Promoción</th>
+            </tr>
+          </thead>
+          <tbody id="git-reviews-table-body"></tbody>
+        </table>
+      </div>
+
+      <!-- Tabla 3: Historial de Promoción y Candidatos Congelados -->
+      <h3 style="font-size:0.95rem;margin:24px 0 8px 0;">Historial de Promoción y Puntos de Congelación</h3>
+      <div class="data-table-wrapper">
+        <table class="data-table">
+          <thead>
+            <tr>
+              <th>Candidato / Rama</th>
+              <th>SHA Exacto</th>
+              <th>Base de Integración</th>
+              <th>Estado del Gate</th>
+              <th>Autoridad Requerida</th>
+              <th>Justificación / Estado</th>
+            </tr>
+          </thead>
+          <tbody id="git-promotion-history-table-body"></tbody>
+        </table>
+      </div>
+    </section>
   </div>
 
   <!-- Task Detail Drawer / Modal -->
@@ -809,6 +978,9 @@
       document.querySelector("#executions-table-body").replaceChildren();
       document.querySelector("#evidence-table-body").replaceChildren();
       document.querySelector("#agents-table-body").replaceChildren();
+      document.querySelector("#git-candidates-table-body").replaceChildren();
+      document.querySelector("#git-reviews-table-body").replaceChildren();
+      document.querySelector("#git-promotion-history-table-body").replaceChildren();
       message.textContent = "Sesión desconectada. Autenticación requerida para consultar el núcleo local.";
     }
 
@@ -889,6 +1061,7 @@
         renderExecutions(work);
         renderEvidence(work);
         renderAgents(work);
+        renderGitLifecycle(work);
 
         const executionCount = work.reduce((count, task) => count + (Array.isArray(task.executions) ? task.executions.length : 0), 0);
         message.textContent = "Mostrando " + work.length + " tareas · " + executionCount + " ejecuciones registradas · " + available.length + " capacidades";
@@ -1257,6 +1430,246 @@
       }
     }
 
+    function renderGitLifecycle(work) {
+      const tbodyCandidates = document.querySelector("#git-candidates-table-body");
+      const tbodyReviews = document.querySelector("#git-reviews-table-body");
+      const tbodyHistory = document.querySelector("#git-promotion-history-table-body");
+      const metricCandidates = document.querySelector("#metric-candidate-count");
+      const metricVeto = document.querySelector("#metric-veto-status");
+
+      if (!tbodyCandidates || !tbodyReviews || !tbodyHistory) return;
+
+      tbodyCandidates.replaceChildren();
+      tbodyReviews.replaceChildren();
+      tbodyHistory.replaceChildren();
+
+      const candidates = [];
+      let hasVeto = false;
+      const allReviews = [];
+
+      for (const task of work) {
+        for (const r of (task.reviews || [])) {
+          if (r.decision === "VETO") hasVeto = true;
+          allReviews.push({ taskTitle: task.title, taskId: task.id, review: r });
+        }
+
+        for (const p of (task.patch_proposals || [])) {
+          candidates.push({
+            type: "patch_proposal",
+            id: p.id,
+            taskTitle: task.title,
+            taskId: task.id,
+            proposerId: p.proposer_id,
+            baseSha: p.base_sha,
+            patchSha256: p.patch_sha256,
+            changedPaths: p.changed_paths || [],
+            status: p.status,
+            validations: p.validations || [],
+            applied: p.applied || false,
+            taskReviews: task.reviews || []
+          });
+        }
+
+        for (const ex of (task.executions || [])) {
+          const res = ex.result || {};
+          if (res.candidate_sha) {
+            candidates.push({
+              type: "execution_check",
+              id: ex.id,
+              taskTitle: task.title,
+              taskId: task.id,
+              proposerId: ex.worker_id || "worker-sandbox",
+              baseSha: "origin/HEAD",
+              patchSha256: "n/a (check directo)",
+              candidateSha: res.candidate_sha,
+              changedPaths: [],
+              status: ex.status,
+              validations: [{
+                id: ex.id,
+                validator_id: ex.worker_id || "worker",
+                candidate_tree: res.candidate_sha,
+                created_at: ex.created_at || ""
+              }],
+              applied: false,
+              taskReviews: task.reviews || [],
+              conclusion: res.conclusion,
+              checkId: res.check_id
+            });
+          }
+        }
+      }
+
+      if (metricCandidates) metricCandidates.textContent = String(candidates.length);
+      if (metricVeto) {
+        if (hasVeto) {
+          metricVeto.textContent = "VETO ACTIVO";
+          metricVeto.style.color = "var(--badge-veto)";
+          const gatePill = document.querySelector("#gate-pill");
+          if (gatePill) gatePill.textContent = "VETO ACTIVO · INTEGRACIÓN PROHIBIDA";
+        } else {
+          metricVeto.textContent = "Sin veto registrado";
+          metricVeto.style.color = "var(--status-ok)";
+        }
+      }
+
+      // Tabla 1: Candidatos y Trazabilidad Git
+      if (!candidates.length) {
+        const tr = node("tr");
+        const td = node("td", "No hay candidatos de parche ni comprobaciones de árbol registradas en este proyecto.", "empty-state");
+        td.colSpan = 9;
+        tr.append(td);
+        tbodyCandidates.append(tr);
+      } else {
+        for (const c of candidates) {
+          const tr = node("tr");
+          const tdCand = node("td");
+          tdCand.append(node("strong", (c.type === "patch_proposal" ? "Parche " + c.id.slice(0, 8) : "Check " + c.id.slice(0, 8))));
+          tr.append(tdCand);
+
+          tr.append(node("td", c.taskTitle));
+          tr.append(node("td", c.proposerId));
+
+          const tdBase = node("td");
+          tdBase.append(node("code", (c.baseSha ? c.baseSha.slice(0, 12) : "—"), "sha-mono"));
+          tr.append(tdBase);
+
+          const tdPatch = node("td");
+          tdPatch.append(node("code", (c.patchSha256 ? c.patchSha256.slice(0, 12) : "—"), "sha-mono"));
+          tr.append(tdPatch);
+
+          const tdTree = node("td");
+          let treeVal = "—";
+          if (c.candidateSha) treeVal = c.candidateSha;
+          else if (c.validations.length) treeVal = c.validations[0].candidate_tree;
+          tdTree.append(node("code", treeVal.slice(0, 12), "sha-mono"));
+          tr.append(tdTree);
+
+          const tdVal = node("td");
+          if (c.validations.length) {
+            tdVal.append(node("span", "Validado en árbol aislado", "pill approve"));
+          } else {
+            tdVal.append(node("span", "Pendiente de validación", "pill reject"));
+          }
+          tr.append(tdVal);
+
+          const tdRev = node("td");
+          if (c.taskReviews.length) {
+            for (const r of c.taskReviews) {
+              const pillClass = r.decision === "VETO" ? "pill veto" : r.decision === "APPROVE" ? "pill approve" : "pill reject";
+              tdRev.append(node("span", r.decision + (r.sha_bound ? " (SHA)" : ""), pillClass));
+            }
+          } else {
+            tdRev.append(node("span", "Sin dictamen", "pill"));
+          }
+          tr.append(tdRev);
+
+          const tdInt = node("td");
+          tdInt.append(node("span", "Aislado (no aplicado al canónico)", "pill"));
+          tr.append(tdInt);
+
+          tbodyCandidates.append(tr);
+        }
+      }
+
+      // Tabla 2: Dictámenes, Veto y Bloqueos de Auditoría
+      if (!allReviews.length) {
+        const tr = node("tr");
+        const td = node("td", "No hay revisiones ni dictámenes registrados para las tareas de este proyecto.", "empty-state");
+        td.colSpan = 7;
+        tr.append(td);
+        tbodyReviews.append(tr);
+      } else {
+        for (const item of allReviews) {
+          const r = item.review;
+          const tr = node("tr");
+          tr.append(node("td", item.taskTitle));
+          tr.append(node("td", r.reviewer_id));
+
+          const tdDec = node("td");
+          const pillClass = r.decision === "VETO" ? "pill veto" : r.decision === "APPROVE" ? "pill approve" : "pill reject";
+          tdDec.append(node("span", r.decision, pillClass));
+          tr.append(tdDec);
+
+          const tdVeto = node("td");
+          if (r.decision === "VETO") {
+            tdVeto.append(node("strong", "SÍ — INTEGRACIÓN DETENIDA", "pill veto"));
+          } else {
+            tdVeto.append(node("span", "No"));
+          }
+          tr.append(tdVeto);
+
+          const tdSha = node("td");
+          tdSha.append(node("code", (r.candidate_sha ? r.candidate_sha.slice(0, 12) : "sin SHA ligado"), "sha-mono"));
+          tr.append(tdSha);
+
+          tr.append(node("td", (r.evidence || []).join(", ") || "Sin referencias"));
+
+          const tdBlock = node("td");
+          if (r.decision === "VETO") {
+            tdBlock.append(node("span", "Veto activo: promoción estrictamente prohibida", "pill veto"));
+          } else if (r.decision === "REJECT") {
+            tdBlock.append(node("span", "Rechazo activo: requiere subsanación previa", "pill reject"));
+          } else {
+            tdBlock.append(node("span", "Bloqueada: revisión local no certifica independencia externa", "pill"));
+          }
+          tr.append(tdBlock);
+
+          tbodyReviews.append(tr);
+        }
+      }
+
+      // Tabla 3: Historial de Promoción y Puntos de Congelación
+      const promotionRecords = [
+        {
+          candidate: "PR #15 — AAO Control Center Daily UI",
+          sha: "3fc9cda4ab5afb4732e8b4cca4ebd1a4c885d527",
+          base: "origin/feat/capability-backed-repository-checks (91eb754)",
+          gateStatus: "BLOQUEADO (Freeze point)",
+          authority: "Autoridad técnica de integración + Auditoría independiente",
+          notes: "Candidato formal congelado. Bloqueado en espera de integración aguas arriba (#10 y #11)."
+        },
+        {
+          candidate: "PR #11 — Capability-backed repository checks",
+          sha: "91eb7543658fe92875cefa3de1e27704d830feb7",
+          base: "origin/feat/capability-registry-runtime (#10)",
+          gateStatus: "BLOQUEADO (Dependencia base)",
+          authority: "Dictamen independiente GOV-REV-001",
+          notes: "Contratos de inventario de grants expuestos. En espera de consolidación de #10."
+        },
+        {
+          candidate: "PR #10 — Capability registry runtime",
+          sha: "c35ff310135b9b76d5dc965d762acd6e4ebade10",
+          base: "main",
+          gateStatus: "EN ESTABILIZACIÓN",
+          authority: "Resolución de CI base y auditoría independiente",
+          notes: "Base canónica para ejecución aislada de checks."
+        },
+        {
+          candidate: "PR #16 — Universal Agent Operating Rules",
+          sha: "ea549700ad82405dd0f64eb9121aa116d281a022",
+          base: "main",
+          gateStatus: "BLOQUEADO (CI externo en tests/test_core.py)",
+          authority: "Auditoría independiente GOV-REV-001",
+          notes: "Preamble documental de 6 reglas. Sin adopción automática por runtime."
+        }
+      ];
+
+      for (const rec of promotionRecords) {
+        const tr = node("tr");
+        tr.append(node("td", rec.candidate));
+        const tdSha = node("td");
+        tdSha.append(node("code", rec.sha.slice(0, 12), "sha-mono"));
+        tr.append(tdSha);
+        tr.append(node("td", rec.base));
+        const tdGate = node("td");
+        tdGate.append(node("span", rec.gateStatus, rec.gateStatus.includes("BLOQUEADO") ? "pill veto" : "pill reject"));
+        tr.append(tdGate);
+        tr.append(node("td", rec.authority));
+        tr.append(node("td", rec.notes));
+        tbodyHistory.append(tr);
+      }
+    }
+
     function openTaskDrawer(task) {
       drawerTitle.textContent = task.title;
       drawerTaskId.textContent = "ID de tarea: " + task.id;
@@ -1421,6 +1834,13 @@
         closeTaskDrawer();
       }
     });
+
+    const btnPromote = document.querySelector("#btn-promote-candidate");
+    if (btnPromote) {
+      btnPromote.addEventListener("click", () => {
+        alert("Operación denegada: la sesión actual carece de autoridad verificable de integración. La promoción requiere dictamen de auditoría independiente externa conforme a GOV-REV-001.");
+      });
+    }
 
     // Initial load
     loadProjects().catch(e => {

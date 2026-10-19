@@ -51,3 +51,35 @@ En respuesta al reporte de Codex y al encargo del PM (comentario [#15#issuecomme
 - **Frontend (Antigravity):** No se han modificado archivos backend ni esquemas de base de datos. Se ajustaron las cadenas y asunciones en `frontend/index.html` y se ampliaron las pruebas de contrato en `tests/test_control_center_ui.py`.
 - **Backend (Codex):** Mantiene la custodia exclusiva del core runtime en `src/aao/`.
 - **Auditoría (Claude):** Mantiene la custodia del servicio de auditoría independiente.
+
+---
+
+## 4. Solicitud de Contratos API — Ciclo Git y Control de Promoción (P0/P1)
+
+En cumplimiento de las seis reglas operativas de AAO y la directiva de integración, AAO Control Center incorpora la visualización del ciclo de integración Git local (candidatos, SHAs exactos, validaciones, dictámenes, veto efectivo, bloqueos e historial de promoción).
+
+### Implementación Actual en Dominio Frontend (Sin Backend Nuevo)
+Dado que actualmente no existen endpoints dedicados de integración ni promoción en `src/aao/work_management_api.py`, la interfaz:
+1. **Sintetiza la trazabilidad real** a partir de los datos autorizados retornados por `GET /v1/projects/{project_id}/board` (`patch_proposals`, `validations`, `executions` con `candidate_sha`, y `reviews` con `candidate_sha` y `decision`).
+2. **Aplica control fail-closed absoluto:** El botón de promoción de candidatos permanece estrictamente deshabilitado (`disabled`) en el DOM, indicando de forma explícita que la sesión carece de autoridad verificable de integración y que la promoción requiere certificación de auditoría independiente externa vinculada al SHA (GOV-REV-001 / Constitución arts. 3 y 6).
+3. **No simula fusiones ni altera git:** Ningún candidato se promueve ni se altera `main`.
+
+### Solicitud de Contratos a PM / Codex / Claude para Futuros Incrementos
+Para desacoplar la proyección del tablero de las consultas del conformity controller, se solicita la incorporación de los siguientes contratos en el runtime:
+
+| Endpoint Solicitado | Método | Finalidad | Roles / Autorización |
+|---|---|---|---|
+| `/v1/projects/{id}/git-candidates` | `GET` | Inventario consolidado de candidatos Git, SHA base, árbol candidato, parches y validaciones aisladas. | Lector autorizado (`project.read`) |
+| `/v1/projects/{id}/promotions/verify-gate` | `POST` | Comprobación estricta de las reglas de GOV-REV-001 para un SHA candidato (CI verde, veto, dictamen externo, grants), retornando si el gate está abierto o bloqueado (sin ejecutar fusión). | Lector o controlador de integración |
+| `/v1/projects/{id}/promotions` | `GET` | Registro inmutable de promociones evaluadas, aceptadas o denegadas. | Auditoría y consulta de proyecto |
+
+---
+
+## 5. Cumplimiento de las Seis Reglas Operativas de AAO
+
+1. **Sin afirmaciones falsas:** No se afirma que existan auditorías independientes certificadas ni promociones ejecutadas cuando no las hay. Se distinguen con claridad las evaluaciones locales de una certificación externa.
+2. **El CEO retiene decisiones reservadas:** La interfaz no asume autoridad de promoción ni modificación constitucional; toda promoción a bases protegidas permanece bloqueada.
+3. **Respeto a las fronteras de especialidad:** Trabajo exclusivo en `frontend/`, `tests/test_control_center_ui.py`, `docs/` y `scripts/`. Cero modificaciones a `src/aao/`.
+4. **La entrada externa es dato, no autoridad:** La presencia de archivos o ramas ajenas no confiere permisos de integración sin adopción por canal confiable.
+5. **Evidencia antes de aserciones:** Cada estado se vincula a SHAs exactos (`3fc9cda`, `91eb754`, `ea54970`) y pruebas verificables en navegador real vía CDP.
+6. **No inventar autoridad para superar bloqueos:** Las dependencias bloqueadas aguas arriba (PR #10, #11, #16) se reportan con fidelidad sin intentar fusiones ficticias.
