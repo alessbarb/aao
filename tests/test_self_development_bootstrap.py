@@ -83,3 +83,47 @@ def test_request_json_explains_stale_api_method_mismatch(monkeypatch):
         assert "restart it from the current checkout" in str(exc)
     else:
         raise AssertionError("expected stale API method mismatch to fail closed")
+
+
+def test_bootstrap_reuses_supplied_ceo_credential_without_prompt(monkeypatch, tmp_path):
+    token_path = tmp_path / "agent.token"
+    project = {"id": "project-1", "name": bootstrap.PROJECT_NAME, "state": "ACTIVE"}
+    mandate = {"id": "mandate-1"}
+    monkeypatch.setattr(bootstrap, "private_runtime_file", lambda: token_path)
+    monkeypatch.setattr(bootstrap, "ensure_mandated_project", lambda *_: (mandate, project))
+    monkeypatch.setattr(
+        bootstrap.getpass, "getpass",
+        lambda *_: (_ for _ in ()).throw(AssertionError("credential prompted twice")),
+    )
+    calls = []
+
+    def fake_request(_base_url, path, *, method="GET", ceo_token=None,
+                     agent_token=None, body=None):
+        calls.append((method, path))
+        if agent_token:
+            assert ceo_token is None
+        else:
+            assert ceo_token == "hidden-ceo-token"
+        if path.endswith("/grants") and method == "GET":
+            return []
+        if path == "/v1/principals/credentials":
+            return {"principal_id": body["principal_id"], "token": "hidden-agent-token"}
+        if path.endswith("/grants") and method == "POST":
+            return {"created": True}
+        if path == "/v1/projects" and agent_token:
+            return [project]
+        raise AssertionError(f"unexpected API call: {method} {path}")
+
+    monkeypatch.setattr(bootstrap, "request_json", fake_request)
+    monkeypatch.setattr(bootstrap, "write_private_token", lambda path, _token: path.touch())
+
+    principal, mandate_id, project_id, expiry, result_path = bootstrap.bootstrap(
+        "http://127.0.0.1:8001", ceo_token="hidden-ceo-token",
+    )
+
+    assert principal.startswith("aao-selfdev-")
+    assert (mandate_id, project_id, result_path) == ("mandate-1", "project-1", token_path)
+    assert expiry.tzinfo is not None
+    assert [path for method, path in calls if method == "POST" and path.endswith("/grants")] == [
+        "/v1/projects/project-1/grants"
+    ] * len(bootstrap.GRANTS)

@@ -29,7 +29,9 @@ MANDATE_OBJECTIVE = (
     "bounded authorization."
 )
 PROJECT_NAME = "AAO Self Development"
-GRANTS = ("project.read", "work.admit", "execution.claim")
+GRANTS = (
+    "project.read", "work.create", "work.admit", "work.progress", "execution.claim",
+)
 GRANT_LIFETIME = timedelta(hours=8)
 
 
@@ -178,14 +180,17 @@ def ensure_mandated_project(base_url: str, ceo_token: str) -> tuple[dict, dict]:
     return record, project
 
 
-def bootstrap(base_url: str) -> tuple[str, str, str, datetime, Path]:
+def bootstrap(
+    base_url: str, *, ceo_token: str | None = None,
+) -> tuple[str, str, str, datetime, Path]:
     parsed = urlparse(base_url)
     if parsed.scheme != "http" or parsed.hostname not in {"127.0.0.1", "localhost"}:
         raise BootstrapError("bootstrap is restricted to the local HTTP API")
     if parsed.path or parsed.query or parsed.fragment:
         raise BootstrapError("base URL must not contain a path, query, or fragment")
     token_path = private_runtime_file()
-    ceo_token = getpass.getpass("CEO development token (hidden): ")
+    if ceo_token is None:
+        ceo_token = getpass.getpass("CEO development token (hidden): ")
     if not ceo_token:
         raise BootstrapError("CEO credential is required")
 
