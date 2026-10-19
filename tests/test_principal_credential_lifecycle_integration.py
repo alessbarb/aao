@@ -1,9 +1,32 @@
 """PostgreSQL integration tests, opt-in for explicitly disposable databases."""
 import os
+from hashlib import sha256
 from uuid import uuid4
 
 import pytest
 from fastapi.testclient import TestClient
+
+
+@pytest.mark.skipif(
+    not os.getenv("AAO_TEST_POSTGRES_URL") or os.getenv("AAO_TEST_DB_DISPOSABLE") != "yes",
+    reason="Explicit disposable PostgreSQL database required",
+)
+def test_legacy_execution_identity_migration_is_applied(monkeypatch):
+    from aao.postgresql_connection import connect_postgres
+
+    monkeypatch.setenv("AAO_POSTGRES_URL", os.environ["AAO_TEST_POSTGRES_URL"])
+    with connect_postgres() as db:
+        assert db.execute(
+            "SELECT to_regclass('public.worker_registrations') IS NULL"
+        ).fetchone()[0]
+        migrated = db.execute(
+            "SELECT kind,token_digest,enabled FROM principal_credentials "
+            "WHERE principal_id='legacy-ci-agent'"
+        ).fetchone()
+        if migrated is not None:
+            assert migrated == (
+                "AGENT", sha256(b"aao-ci-legacy-migration-token").hexdigest(), True
+            )
 
 
 @pytest.mark.skipif(

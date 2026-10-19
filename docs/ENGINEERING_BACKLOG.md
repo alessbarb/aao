@@ -13,9 +13,11 @@ or `[BLOCKED]` labels below as live issue statuses.
 
 ## Current M2 engineering priorities
 
-1. Retire the `worker_registrations` authentication path and transitional
-   shared worker/reviewer credentials without aliases or loss of applicable
-   development identities.
+1. **Implemented in candidate code:** execution authenticates only through
+   individual AGENT credentials. Migration `006_unified_execution_identity`
+   transfers legacy worker identities (aborting on collisions) and removes
+   `worker_registrations`. Transitional shared worker/reviewer credentials and
+   runtime validation of migration on a disposable database remain.
 2. **Partially implemented and locally validated:** CEO grant revocation is
    audited transactionally; API, execution and reconciliation authorization
    checks lock the matched grant row. PostgreSQL tests cover revocation waiting

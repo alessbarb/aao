@@ -4,8 +4,8 @@ from datetime import UTC, datetime
 from aao.execution_queue import claim, complete, state
 
 
-def run_one(worker_id: str, credential: str, *, project_id: str, seconds: int = 30, agent_credential: str | None = None) -> dict:
-    lease = claim(worker_id, credential=credential, project_id=project_id, seconds=seconds, agent_credential=agent_credential)
+def run_one(worker_id: str, agent_credential: str, *, project_id: str, seconds: int = 30) -> dict:
+    lease = claim(worker_id, agent_credential=agent_credential, project_id=project_id, seconds=seconds)
     if lease is None:
         return {"status": "IDLE"}
     execution_id = lease["execution_id"]
@@ -16,5 +16,5 @@ def run_one(worker_id: str, credential: str, *, project_id: str, seconds: int = 
     # bounded marker, and cannot accept arbitrary Python or tool instructions.
     marker = {"kind": "aao.inert-worker.v1", "execution_id": execution_id,
               "recorded_at": datetime.now(UTC).isoformat()}
-    complete(execution_id, lease["token"], worker_id, marker, credential=credential, agent_credential=agent_credential)
+    complete(execution_id, lease["token"], worker_id, marker, agent_credential=agent_credential)
     return {"status": "SUCCEEDED", "execution_id": execution_id}

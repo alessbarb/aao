@@ -16,7 +16,6 @@ def test_reconciliation_requires_distinct_granted_reviewer(monkeypatch):
 
     from aao.execution_queue import claim, quarantine_expired, state
     from aao.execution_reconciliation import ReconciliationDenied, reconcile
-    from aao.legacy_worker_authentication import credential_digest
     from aao.postgresql_connection import connect_postgres
     from aao.work_management_api import app
 
@@ -28,13 +27,12 @@ def test_reconciliation_requires_distinct_granted_reviewer(monkeypatch):
     worker = {"X-Work-Token": "reconcile-worker"}
     worker_id = "worker-" + str(uuid4())
     auditor_id = "audit-" + str(uuid4())
-    secret = "token-" + str(uuid4())
-    with connect_postgres() as db:
-        db.execute(
-            "INSERT INTO worker_registrations(worker_id,token_digest,enabled) VALUES (%s,%s,true)",
-            (worker_id, credential_digest(secret)),
-        )
     with TestClient(app) as client:
+        issued = client.post("/v1/principals/credentials", headers=ceo, json={
+            "principal_id": worker_id, "kind": "AGENT",
+        })
+        assert issued.status_code == 201, issued.text
+        secret = issued.json()["token"]
         mid = client.post("/v1/mandates", headers=ceo, json={
             "title": "Recovery " + str(uuid4()), "objective": "Development only"
         }).json()["id"]
@@ -42,9 +40,13 @@ def test_reconciliation_requires_distinct_granted_reviewer(monkeypatch):
         project = client.post("/v1/projects", headers=ceo, json={
             "name": "Recovery project", "mandate_id": mid
         }).json()["id"]
-        for capability in ("work.create", "work.admit"):
+        for principal_id, capability in (
+            ("development-worker", "work.create"),
+            ("development-worker", "work.admit"),
+            (worker_id, "execution.claim"),
+        ):
             client.post(f"/v1/projects/{project}/grants", headers=ceo, json={
-                "principal_id": "development-worker", "capability": capability
+                "principal_id": principal_id, "capability": capability
             })
         wid = client.post(f"/v1/projects/{project}/work", headers=worker, json={
             "title": "Inert recovery", "author_id": "development-worker",
@@ -53,9 +55,7 @@ def test_reconciliation_requires_distinct_granted_reviewer(monkeypatch):
         client.post(f"/v1/work/{wid}/admit", headers=worker)
         eid = client.post(f"/v1/work/{wid}/stage-inert", headers=worker).json()["execution_id"]
     base = datetime.now(UTC)
-    with connect_postgres() as db:
-        db.execute("INSERT INTO project_grants(principal_id,project_id,capability) VALUES (%s,%s,'execution.claim')", (worker_id, project))
-    lease = claim(worker_id, credential=secret, project_id=project, now=base, seconds=1)
+    lease = claim(worker_id, agent_credential=secret, project_id=project, now=base, seconds=1)
     assert lease["execution_id"] == eid
     # Quarantine is global: previous tests may leave other expired leases.
     assert quarantine_expired(now=base + timedelta(seconds=2)) >= 1
@@ -76,9 +76,8 @@ def test_reconciliation_requires_distinct_granted_reviewer(monkeypatch):
                   disposition="RETRY_CONFIRMED_SAFE")
     assert reconcile(eid, reviewer_id=auditor_id, evidence=["inert-only confirmed"],
                      disposition="RETRY_CONFIRMED_SAFE") == "QUEUED"
-    with connect_postgres() as db:
-        db.execute("UPDATE worker_registrations SET enabled=false WHERE worker_id=%s",
-                   (worker_id,))
+    with TestClient(app) as client:
+        assert client.post(f"/v1/principals/{worker_id}/revoke", headers=ceo).status_code == 200
     from aao.execution_queue import ExecutionConflict
     with pytest.raises(ExecutionConflict):
-        claim(worker_id, credential=secret, project_id=project)
+        claim(worker_id, agent_credential=secret, project_id=project)

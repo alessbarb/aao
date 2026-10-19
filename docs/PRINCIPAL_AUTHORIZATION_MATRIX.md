@@ -34,7 +34,7 @@ transaction. The CEO credential is still a single static bearer.
 
 | Operation | Identity / capability check | Transaction boundary | Known boundary |
 | --- | --- | --- | --- |
-| `execution_queue.claim()` / `complete()` | Individual AGENT credential **or** legacy `worker_registrations`; requires unexpired `execution.claim` project grant | Credential and grant are checked with `FOR SHARE`; queue/project rows are locked. | Two credential registries remain. Completion captures caller-side `now` before lock acquisition; lease expiry and delayed completion races remain untested. |
+| `execution_queue.claim()` / `complete()` | Individual AGENT credential; requires unexpired `execution.claim` project grant | Credential and grant are checked with `FOR SHARE`; queue/project rows are locked. | Migration 006 transfers legacy identities and drops the old registry. Completion captures caller-side `now` before lock acquisition; lease expiry and delayed completion races remain untested. |
 | `execution_reconciliation.reconcile()` | Caller-supplied `reviewer_id`; unexpired `execution.reconcile` grant; rejects former worker ID | Locks queue/project and grant rows, but reviewer identity is not authenticated | No HTTP endpoint. Identity-string inequality is not proof of auditor identity; evidence references are not verified. Retry-vs-effect-proposal race is not serialized. |
 | `external_effect_registry.propose()` | No principal authentication or project grant check in this helper | Idempotency-key row is locked; execution existence is checked without a lock | Records proposals only; does not execute. It is not safe to treat as an authorization boundary. |
 | `external_effect_reconciliation.reject_unexecuted_proposal()` | Caller-supplied reviewer ID; unexpired `effect.reconcile` grant; rejects current worker ID | Locks effect, queue and grant rows, but not reviewer identity | No trusted reviewer binding or verified evidence; internal helper only. No external effect is executed. |
@@ -70,7 +70,7 @@ transaction. The CEO credential is still a single static bearer.
 - HTTP routes and auth helpers: `src/aao/work_management_api.py`
 - Credential resolution: `src/aao/principal_credentials.py`
 - Execution claims/completion: `src/aao/execution_queue.py`
-- Legacy worker credential authority: `src/aao/legacy_worker_authentication.py`
+- Legacy worker rows are transferred by `db/postgres/006_unified_execution_identity.sql`; no legacy runtime verifier remains.
 - Execution reconciliation: `src/aao/execution_reconciliation.py`
 - Effect proposal/reconciliation: `src/aao/external_effect_registry.py`,
   `src/aao/external_effect_reconciliation.py`

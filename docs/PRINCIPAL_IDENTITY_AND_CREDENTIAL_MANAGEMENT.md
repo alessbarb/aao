@@ -6,10 +6,13 @@ review and project-read routes, and AGENT credentials are accepted by queue
 claim/completion. The verified local baseline is recorded in
 `VERIFICATION_EVIDENCE_REGISTER.md`; the exact current HTTP/internal operation
 map is in `PRINCIPAL_AUTHORIZATION_MATRIX.md`. This remains development-only:
-shared worker/reviewer fallbacks and the separate legacy `worker_registrations`
-registry still exist, the CEO bearer is provisional, and concurrent grant
+shared worker/reviewer fallbacks remain, the CEO bearer is provisional, and concurrent grant
 revocation, reconciliation identity and independent review are unresolved.
 M2 is not accepted.
+
+Migration `006_unified_execution_identity` transfers legacy worker rows into
+the AGENT credential registry, aborts on identity or digest collisions, then
+drops the separate `worker_registrations` table.
 
 ## Initial implementation snapshot (historical)
 
