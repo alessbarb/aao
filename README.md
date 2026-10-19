@@ -5,6 +5,7 @@ An independently governed, private, multi-project AI organization. AAO is **not*
 ## Current milestone
 
 **M0 foundation candidate** — not a deployed autonomous agent system. This branch implements:
+
 - deterministic constitutional gates for reserved actions;
 - CEO-confirmed draft mandates (local development token only);
 - project creation against confirmed mandates;
@@ -65,6 +66,7 @@ The SQLite schema uses additive prototype initialization; PostgreSQL migrations,
 ## Latest increment: M1/M2 engineering candidates
 
 The branch also contains:
+
 - a PostgreSQL foundation schema (NOT wired to the API yet);
 - pure project-scoped grant checks with expiry;
 - a deterministic admission policy with resource/risk gates;
@@ -111,11 +113,13 @@ principal FK enforcement and is **not a production schema**.
 
 An opt-in integration test exists in `tests/test_project_workflow_integration.py`, `tests/test_execution_leases_integration.py`, `tests/test_execution_reconciliation_integration.py`, and `tests/test_principal_credential_lifecycle_integration.py`.
 Use it only on an explicitly disposable database:
+
 ```sh
 export AAO_TEST_POSTGRES_URL='postgresql://...disposable-test-database'
 export AAO_TEST_DB_DISPOSABLE=yes
 pytest -q tests/test_project_workflow_integration.py tests/test_execution_leases_integration.py tests/test_execution_reconciliation_integration.py tests/test_principal_credential_lifecycle_integration.py
 ```
+
 The test creates records and does not delete the database afterwards.
 
 **Tests and actual PostgreSQL server execution have not been verified here.**
