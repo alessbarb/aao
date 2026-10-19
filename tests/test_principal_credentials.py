@@ -1,5 +1,5 @@
 import pytest
-from aao.principal_credentials import PrincipalDenied, digest_token, authenticate
+from aao.principal_credentials import PrincipalDenied, authenticate, digest_token
 
 
 def test_credential_digest_is_stable_and_not_plaintext():
@@ -15,6 +15,7 @@ def test_unauthorized_inputs_rejected_without_database(value, kind):
 
 def test_grant_contract_accepts_execution_claim_only_as_exact_capability():
     from pydantic import ValidationError
+
     from aao.work_management_api import GrantRequest
 
     grant = GrantRequest(principal_id="agent-1", capability="execution.claim")
@@ -26,7 +27,8 @@ def test_grant_contract_accepts_execution_claim_only_as_exact_capability():
 
 def test_shared_development_credentials_can_be_disabled(monkeypatch):
     from fastapi import HTTPException
-    from aao.work_management_api import require_worker, require_reviewer, read_principal
+
+    from aao.work_management_api import read_principal, require_reviewer, require_worker
 
     monkeypatch.setenv("AAO_ENV", "production")
     monkeypatch.setenv("AAO_WORK_TOKEN", "dev-worker")
@@ -43,7 +45,7 @@ def test_shared_development_credentials_can_be_disabled(monkeypatch):
 
 def test_shared_development_credentials_require_opt_in(monkeypatch):
     from fastapi import HTTPException
-    from aao.work_management_api import require_worker, require_reviewer, shared_dev_tokens_enabled
+    from aao.work_management_api import require_reviewer, require_worker, shared_dev_tokens_enabled
 
     monkeypatch.setenv("AAO_ENV", "development")
     monkeypatch.setenv("AAO_ALLOW_SHARED_DEV_TOKENS", "false")
