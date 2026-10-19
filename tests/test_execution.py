@@ -1,10 +1,16 @@
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 
 import pytest
 
 from aao.execution import (
-    QueueConflict, claim, complete, enqueue, initialize,
-    quarantine_expired, reconcile, state,
+    QueueConflict,
+    claim,
+    complete,
+    enqueue,
+    initialize,
+    quarantine_expired,
+    reconcile,
+    state,
 )
 
 
@@ -26,7 +32,7 @@ def test_durable_claim_and_completion(tmp_path):
 def test_expiration_is_quarantined_not_retried_automatically(tmp_path):
     path = str(tmp_path / "jobs.db")
     initialize(path)
-    base = datetime(2026, 10, 18, tzinfo=timezone.utc)
+    base = datetime(2026, 10, 18, tzinfo=UTC)
     eid = enqueue(path, project_id="p1", work_id="w2", data={})
     lease = claim(path, worker_id="worker1", ttl_seconds=10, now=base)
     assert quarantine_expired(path, now=base+timedelta(seconds=11)) == 1
@@ -43,7 +49,7 @@ def test_expiration_is_quarantined_not_retried_automatically(tmp_path):
 def test_unsafe_work_is_not_retried(tmp_path):
     path = str(tmp_path / "jobs.db")
     initialize(path)
-    base = datetime(2026, 10, 18, tzinfo=timezone.utc)
+    base = datetime(2026, 10, 18, tzinfo=UTC)
     eid = enqueue(path, project_id="p1", work_id="w3", data={})
     claim(path, worker_id="worker1", ttl_seconds=1, now=base)
     quarantine_expired(path, now=base+timedelta(seconds=2))
