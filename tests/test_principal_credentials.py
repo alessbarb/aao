@@ -134,3 +134,51 @@ def test_shared_grant_rejected_when_development_fallback_disabled(monkeypatch):
     with pytest.raises(HTTPException) as exc:
         require_grant(_GrantQuery(None), "development-worker", "project-1", "work.create")
     assert exc.value.status_code == 403
+
+
+def test_project_listing_rechecks_active_reader_in_transaction(monkeypatch):
+    from contextlib import contextmanager
+
+    from fastapi import HTTPException
+
+    from aao import work_management_api
+
+    class ReaderDb:
+        def __init__(self, row):
+            self.row = row
+            self.queries = []
+
+        def execute(self, query, args=None):
+            self.queries.append((query, args))
+            return self
+
+        def fetchone(self):
+            return self.row
+
+        def fetchall(self):
+            return []
+
+    for record in (None, ("AGENT", False), ("AUDITOR", True)):
+        db = ReaderDb(record)
+
+        @contextmanager
+        def fake_tx():
+            yield db
+
+        monkeypatch.setattr(work_management_api, "tx", fake_tx)
+        with pytest.raises(HTTPException) as denied:
+            work_management_api.projects(principal="agent-1")
+        assert denied.value.status_code == 403
+        assert len(db.queries) == 1
+        assert "FOR SHARE" in db.queries[0][0]
+
+    active = ReaderDb(("AGENT", True))
+
+    @contextmanager
+    def active_tx():
+        yield active
+
+    monkeypatch.setattr(work_management_api, "tx", active_tx)
+    assert work_management_api.projects(principal="agent-1") == []
+    assert len(active.queries) == 2
+    assert active.queries[1][1] == ("agent-1",)
