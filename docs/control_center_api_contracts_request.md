@@ -60,9 +60,10 @@ En cumplimiento de las seis reglas operativas de AAO y la directiva de integraci
 
 ### Implementación Actual en Dominio Frontend (Sin Backend Nuevo)
 Dado que actualmente no existen endpoints dedicados de integración ni promoción en `src/aao/work_management_api.py`, la interfaz:
-1. **Sintetiza la trazabilidad real** a partir de los datos autorizados retornados por `GET /v1/projects/{project_id}/board` (`patch_proposals`, `validations`, `executions` con `candidate_sha`, y `reviews` con `candidate_sha` y `decision`).
-2. **Aplica control fail-closed absoluto:** El botón de promoción de candidatos permanece estrictamente deshabilitado (`disabled`) en el DOM, indicando de forma explícita que la sesión carece de autoridad verificable de integración y que la promoción requiere certificación de auditoría independiente externa vinculada al SHA (GOV-REV-001 / Constitución arts. 3 y 6).
-3. **No simula fusiones ni altera git:** Ningún candidato se promueve ni se altera `main`.
+1. **Diferenciación honesta de candidatos y comprobaciones:** Se distingue de manera rigurosa entre propuestas de parche formalmente registradas (`patch_proposals`) y comprobaciones técnicas sobre commits históricos (`executions` en sandbox), sin fabricar bases ni digest no registrados en la base de datos.
+2. **Presentación estricta de promociones no acreditadas:** El registro formal de promociones acredita fielmente que existen **0 promociones autorizadas** en el repositorio canónico. Las ramas de desarrollo externas (incluyendo PRs #10, #11, #15 y #16) se desglosan en una tabla separada etiquetadas expresamente como `NO ACREDITADA (Gate cerrado)`.
+3. **Control fail-closed absoluto:** El botón de promoción de candidatos permanece estrictamente deshabilitado (`disabled`) en el DOM, indicando de forma explícita que la sesión carece de autoridad verificable de integración y que la promoción requiere certificación de auditoría independiente externa vinculada al SHA (GOV-REV-001 / Constitución arts. 3 y 6).
+4. **No simula fusiones ni altera git:** Ningún candidato se promueve ni se altera `main`.
 
 ### Solicitud de Contratos a PM / Codex / Claude para Futuros Incrementos
 Para desacoplar la proyección del tablero de las consultas del conformity controller, se solicita la incorporación de los siguientes contratos en el runtime:

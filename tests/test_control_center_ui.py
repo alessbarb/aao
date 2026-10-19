@@ -231,13 +231,25 @@ def test_control_center_promotion_gate_strictly_fails_closed():
     assert "Constitución arts. 3 y 6" in html
 
 
-def test_control_center_git_lifecycle_veto_and_freeze_records():
+def test_control_center_git_lifecycle_veto_and_unaccredited_promotions():
     html = (Path(__file__).parents[1] / "frontend" / "index.html").read_text()
     # VETO triggers immediate veto status and blocks promotion
     assert 'r.decision === "VETO"' in html
     assert 'VETO ACTIVO' in html
     assert 'INTEGRACIÓN PROHIBIDA' in html
-    # Freeze records present in promotion history
-    assert "3fc9cda4ab5afb4732e8b4cca4ebd1a4c885d527" in html
+
+    # Historical checks are faithfully displayed without fabricated base SHAs
+    assert "Check Histórico" in html
+    assert "No aplica" in html
+    assert "Histórico · No acreditado para integración" in html
+
+    # Zero accredited promotions in repository
+    assert "Cero Promociones Acreditadas" in html
+    assert "No existen promociones acreditadas ni ejecutadas en el repositorio canónico" in html
+
+    # Unaccredited development branches explicitly separated in Table 4
+    assert 'id="git-unaccredited-candidates-table-body"' in html
+    assert "NO ACREDITADA (Gate cerrado)" in html
+    assert "142d6c5c542e6b6f790175f7a8cf14c23c6be73b" in html
     assert "91eb7543658fe92875cefa3de1e27704d830feb7" in html
     assert "ea549700ad82405dd0f64eb9121aa116d281a022" in html

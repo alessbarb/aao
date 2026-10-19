@@ -786,42 +786,45 @@
       <!-- Métricas del Ciclo Git -->
       <div class="git-metrics-grid" style="display:grid;grid-template-columns:repeat(auto-fit, minmax(220px, 1fr));gap:12px;margin:16px 0;">
         <div class="metric-card" style="background:var(--bg-panel);border:1px solid var(--border-subtle);border-radius:8px;padding:12px;">
-          <div style="font-size:0.75rem;color:var(--text-muted);text-transform:uppercase;font-weight:600;">Candidatos Evaluados</div>
-          <div id="metric-candidate-count" style="font-size:1.4rem;font-weight:700;color:var(--text-main);margin-top:4px;">0</div>
-          <div style="font-size:0.75rem;color:var(--text-dim);margin-top:2px;">En árboles y clones aislados</div>
+          <div style="font-size:0.75rem;color:var(--text-muted);text-transform:uppercase;font-weight:600;">Propuestas y Checks Evaluados</div>
+          <div id="metric-candidate-count" style="font-size:1.05rem;font-weight:700;color:var(--text-main);margin-top:4px;">0 propuestas · 2 checks</div>
+          <div style="font-size:0.75rem;color:var(--text-dim);margin-top:2px;">En árboles y sandbox aislados</div>
         </div>
         <div class="metric-card" style="background:var(--bg-panel);border:1px solid var(--border-subtle);border-radius:8px;padding:12px;">
           <div style="font-size:0.75rem;color:var(--text-muted);text-transform:uppercase;font-weight:600;">Estado de Veto</div>
-          <div id="metric-veto-status" style="font-size:1.1rem;font-weight:700;color:var(--status-ok);margin-top:6px;">Sin veto registrado</div>
-          <div style="font-size:0.75rem;color:var(--text-dim);margin-top:2px;">Veto de auditor detiene promoción</div>
+          <div id="metric-veto-status" style="font-size:1.05rem;font-weight:700;color:var(--status-ok);margin-top:4px;">Sin veto en DB</div>
+          <div style="font-size:0.75rem;color:var(--text-dim);margin-top:2px;">Auditoría externa no certificada</div>
         </div>
         <div class="metric-card" style="background:var(--bg-panel);border:1px solid var(--border-subtle);border-radius:8px;padding:12px;">
-          <div style="font-size:0.75rem;color:var(--text-muted);text-transform:uppercase;font-weight:600;">Punto de Congelación</div>
-          <div id="metric-freeze-sha" class="sha-mono" style="font-size:0.82rem;font-weight:700;color:var(--accent-primary);margin-top:6px;">3fc9cda4ab5a</div>
-          <div style="font-size:0.75rem;color:var(--text-dim);margin-top:2px;">Candidato formal congelado PR #15</div>
+          <div style="font-size:0.75rem;color:var(--text-muted);text-transform:uppercase;font-weight:600;">Promociones Acreditadas</div>
+          <div id="metric-promotions-count" style="font-size:1.3rem;font-weight:700;color:var(--badge-veto);margin-top:4px;">0</div>
+          <div style="font-size:0.75rem;color:var(--text-dim);margin-top:2px;">Cero promociones ejecutadas · Gate cerrado</div>
         </div>
         <div class="metric-card" style="background:var(--bg-panel);border:1px solid var(--border-subtle);border-radius:8px;padding:12px;">
           <div style="font-size:0.75rem;color:var(--text-muted);text-transform:uppercase;font-weight:600;">Canónico Protegido</div>
-          <div style="font-size:1.1rem;font-weight:700;color:var(--status-warn);margin-top:6px;">Sin cambios directos</div>
-          <div style="font-size:0.75rem;color:var(--text-dim);margin-top:2px;">main inalterado por agentes</div>
+          <div style="font-size:1.05rem;font-weight:700;color:var(--status-warn);margin-top:4px;">main inalterado</div>
+          <div style="font-size:0.75rem;color:var(--text-dim);margin-top:2px;">Sin fusiones por agentes</div>
         </div>
       </div>
 
-      <!-- Tabla 1: Candidatos y Trazabilidad Git -->
-      <h3 style="font-size:0.95rem;margin:18px 0 8px 0;">Candidatos de Código y Trazabilidad Git</h3>
+      <!-- Tabla 1: Propuestas de Parche y Comprobaciones de Commits Históricos -->
+      <h3 style="font-size:0.95rem;margin:18px 0 4px 0;">Propuestas de Parche y Comprobaciones de Commits Históricos</h3>
+      <p style="margin:0 0 10px 0;font-size:0.8rem;color:var(--text-muted);">
+        Distinción estricta entre propuestas de parche formalmente registradas y comprobaciones aisladas sobre commits históricos ejecutadas en sandbox.
+      </p>
       <div class="data-table-wrapper">
         <table class="data-table">
           <thead>
             <tr>
-              <th>Candidato / Propuesta</th>
+              <th>Registro / Tipo</th>
               <th>Tarea Asociada</th>
-              <th>Proponente</th>
+              <th>Proponente / Worker</th>
               <th>Base SHA</th>
               <th>SHA256 Parche</th>
-              <th>Árbol / Commit Candidato</th>
-              <th>Validación Aislada</th>
+              <th>Commit / Árbol Evaluado</th>
+              <th>Verificación Técnica</th>
               <th>Dictamen Auditor</th>
-              <th>Estado Integración</th>
+              <th>Estado de Integración</th>
             </tr>
           </thead>
           <tbody id="git-candidates-table-body"></tbody>
@@ -847,21 +850,45 @@
         </table>
       </div>
 
-      <!-- Tabla 3: Historial de Promoción y Candidatos Congelados -->
-      <h3 style="font-size:0.95rem;margin:24px 0 8px 0;">Historial de Promoción y Puntos de Congelación</h3>
+      <!-- Tabla 3: Registro de Promociones Acreditadas e Historial de Integración -->
+      <h3 style="font-size:0.95rem;margin:24px 0 4px 0;">Registro de Promociones Acreditadas e Historial de Integración</h3>
+      <p style="margin:0 0 10px 0;font-size:0.8rem;color:var(--text-muted);">
+        Registro inmutable de promociones formales autorizadas al repositorio canónico. Ningún candidato cuenta actualmente con promoción acreditada.
+      </p>
       <div class="data-table-wrapper">
         <table class="data-table">
           <thead>
             <tr>
-              <th>Candidato / Rama</th>
-              <th>SHA Exacto</th>
-              <th>Base de Integración</th>
-              <th>Estado del Gate</th>
-              <th>Autoridad Requerida</th>
-              <th>Justificación / Estado</th>
+              <th>Promoción / Candidato</th>
+              <th>SHA Promovido</th>
+              <th>Base Canónica</th>
+              <th>Acreditación GOV-REV-001</th>
+              <th>Autoridad de Integración</th>
+              <th>Estado de Integración</th>
             </tr>
           </thead>
           <tbody id="git-promotion-history-table-body"></tbody>
+        </table>
+      </div>
+
+      <!-- Tabla 4: Ramas Candidatas en Desarrollo (Sin Promoción Acreditada) -->
+      <h3 style="font-size:0.95rem;margin:24px 0 4px 0;">Ramas Candidatas en Desarrollo — Sin Promoción Acreditada</h3>
+      <p style="margin:0 0 10px 0;font-size:0.8rem;color:var(--text-muted);">
+        Ramas y PRs en curso de desarrollo. Ninguna cuenta con promoción acreditada; su listado se presenta exclusivamente a efectos de trazabilidad operativa sin conferir autorización de integración.
+      </p>
+      <div class="data-table-wrapper">
+        <table class="data-table">
+          <thead>
+            <tr>
+              <th>Rama / Candidato</th>
+              <th>SHA Candidato</th>
+              <th>Base de Rama</th>
+              <th>Estado de Promoción</th>
+              <th>Acreditación Faltante</th>
+              <th>Condición del Gate</th>
+            </tr>
+          </thead>
+          <tbody id="git-unaccredited-candidates-table-body"></tbody>
         </table>
       </div>
     </section>
@@ -981,6 +1008,8 @@
       document.querySelector("#git-candidates-table-body").replaceChildren();
       document.querySelector("#git-reviews-table-body").replaceChildren();
       document.querySelector("#git-promotion-history-table-body").replaceChildren();
+      const tbodyUnaccredited = document.querySelector("#git-unaccredited-candidates-table-body");
+      if (tbodyUnaccredited) tbodyUnaccredited.replaceChildren();
       message.textContent = "Sesión desconectada. Autenticación requerida para consultar el núcleo local.";
     }
 
@@ -1433,17 +1462,21 @@
     function renderGitLifecycle(work) {
       const tbodyCandidates = document.querySelector("#git-candidates-table-body");
       const tbodyReviews = document.querySelector("#git-reviews-table-body");
-      const tbodyHistory = document.querySelector("#git-promotion-history-table-body");
+      const tbodyPromotions = document.querySelector("#git-promotion-history-table-body");
+      const tbodyUnaccredited = document.querySelector("#git-unaccredited-candidates-table-body");
       const metricCandidates = document.querySelector("#metric-candidate-count");
       const metricVeto = document.querySelector("#metric-veto-status");
+      const metricPromotions = document.querySelector("#metric-promotions-count");
 
-      if (!tbodyCandidates || !tbodyReviews || !tbodyHistory) return;
+      if (!tbodyCandidates || !tbodyReviews || !tbodyPromotions) return;
 
       tbodyCandidates.replaceChildren();
       tbodyReviews.replaceChildren();
-      tbodyHistory.replaceChildren();
+      tbodyPromotions.replaceChildren();
+      if (tbodyUnaccredited) tbodyUnaccredited.replaceChildren();
 
-      const candidates = [];
+      const patchProposals = [];
+      const historicalChecks = [];
       let hasVeto = false;
       const allReviews = [];
 
@@ -1454,8 +1487,7 @@
         }
 
         for (const p of (task.patch_proposals || [])) {
-          candidates.push({
-            type: "patch_proposal",
+          patchProposals.push({
             id: p.id,
             taskTitle: task.title,
             taskId: task.id,
@@ -1473,33 +1505,29 @@
         for (const ex of (task.executions || [])) {
           const res = ex.result || {};
           if (res.candidate_sha) {
-            candidates.push({
-              type: "execution_check",
+            historicalChecks.push({
               id: ex.id,
               taskTitle: task.title,
               taskId: task.id,
-              proposerId: ex.worker_id || "worker-sandbox",
-              baseSha: "origin/HEAD",
-              patchSha256: "n/a (check directo)",
+              workerId: ex.worker_id || "worker-sandbox",
               candidateSha: res.candidate_sha,
-              changedPaths: [],
               status: ex.status,
-              validations: [{
-                id: ex.id,
-                validator_id: ex.worker_id || "worker",
-                candidate_tree: res.candidate_sha,
-                created_at: ex.created_at || ""
-              }],
-              applied: false,
-              taskReviews: task.reviews || [],
-              conclusion: res.conclusion,
-              checkId: res.check_id
+              conclusion: res.conclusion || ("código " + res.exit_code),
+              checkId: res.check_id || "check",
+              capabilityId: res.capability_id,
+              capabilityVersion: res.capability_version,
+              taskReviews: task.reviews || []
             });
           }
         }
       }
 
-      if (metricCandidates) metricCandidates.textContent = String(candidates.length);
+      if (metricCandidates) {
+        metricCandidates.textContent = patchProposals.length + " propuestas · " + historicalChecks.length + " checks";
+      }
+      if (metricPromotions) {
+        metricPromotions.textContent = "0";
+      }
       if (metricVeto) {
         if (hasVeto) {
           metricVeto.textContent = "VETO ACTIVO";
@@ -1507,56 +1535,56 @@
           const gatePill = document.querySelector("#gate-pill");
           if (gatePill) gatePill.textContent = "VETO ACTIVO · INTEGRACIÓN PROHIBIDA";
         } else {
-          metricVeto.textContent = "Sin veto registrado";
+          metricVeto.textContent = "Sin veto en DB";
           metricVeto.style.color = "var(--status-ok)";
         }
       }
 
-      // Tabla 1: Candidatos y Trazabilidad Git
-      if (!candidates.length) {
+      // Tabla 1: Propuestas de Parche y Comprobaciones de Commits Históricos
+      if (!patchProposals.length && !historicalChecks.length) {
         const tr = node("tr");
-        const td = node("td", "No hay candidatos de parche ni comprobaciones de árbol registradas en este proyecto.", "empty-state");
+        const td = node("td", "No hay propuestas de parche ni comprobaciones de commits registradas en este proyecto.", "empty-state");
         td.colSpan = 9;
         tr.append(td);
         tbodyCandidates.append(tr);
       } else {
-        for (const c of candidates) {
+        // Propuestas de parche activas
+        for (const p of patchProposals) {
           const tr = node("tr");
-          const tdCand = node("td");
-          tdCand.append(node("strong", (c.type === "patch_proposal" ? "Parche " + c.id.slice(0, 8) : "Check " + c.id.slice(0, 8))));
-          tr.append(tdCand);
+          const tdType = node("td");
+          tdType.append(node("strong", "Propuesta de Parche " + p.id.slice(0, 8)));
+          tr.append(tdType);
 
-          tr.append(node("td", c.taskTitle));
-          tr.append(node("td", c.proposerId));
+          tr.append(node("td", p.taskTitle));
+          tr.append(node("td", p.proposerId));
 
           const tdBase = node("td");
-          tdBase.append(node("code", (c.baseSha ? c.baseSha.slice(0, 12) : "—"), "sha-mono"));
+          tdBase.append(node("code", (p.baseSha ? p.baseSha.slice(0, 12) : "—"), "sha-mono"));
           tr.append(tdBase);
 
           const tdPatch = node("td");
-          tdPatch.append(node("code", (c.patchSha256 ? c.patchSha256.slice(0, 12) : "—"), "sha-mono"));
+          tdPatch.append(node("code", (p.patchSha256 ? p.patchSha256.slice(0, 12) : "—"), "sha-mono"));
           tr.append(tdPatch);
 
           const tdTree = node("td");
           let treeVal = "—";
-          if (c.candidateSha) treeVal = c.candidateSha;
-          else if (c.validations.length) treeVal = c.validations[0].candidate_tree;
+          if (p.validations.length) treeVal = p.validations[0].candidate_tree;
           tdTree.append(node("code", treeVal.slice(0, 12), "sha-mono"));
           tr.append(tdTree);
 
           const tdVal = node("td");
-          if (c.validations.length) {
+          if (p.validations.length) {
             tdVal.append(node("span", "Validado en árbol aislado", "pill approve"));
           } else {
-            tdVal.append(node("span", "Pendiente de validación", "pill reject"));
+            tdVal.append(node("span", "Validación aislada pendiente", "pill reject"));
           }
           tr.append(tdVal);
 
           const tdRev = node("td");
-          if (c.taskReviews.length) {
-            for (const r of c.taskReviews) {
+          if (p.taskReviews.length) {
+            for (const r of p.taskReviews) {
               const pillClass = r.decision === "VETO" ? "pill veto" : r.decision === "APPROVE" ? "pill approve" : "pill reject";
-              tdRev.append(node("span", r.decision + (r.sha_bound ? " (SHA)" : ""), pillClass));
+              tdRev.append(node("span", r.decision, pillClass));
             }
           } else {
             tdRev.append(node("span", "Sin dictamen", "pill"));
@@ -1565,6 +1593,46 @@
 
           const tdInt = node("td");
           tdInt.append(node("span", "Aislado (no aplicado al canónico)", "pill"));
+          tr.append(tdInt);
+
+          tbodyCandidates.append(tr);
+        }
+
+        // Comprobaciones históricas sobre commits
+        for (const hc of historicalChecks) {
+          const tr = node("tr");
+          const tdType = node("td");
+          tdType.append(node("strong", "Check Histórico " + hc.id.slice(0, 8)));
+          tdType.append(node("div", "Ejecución en sandbox", "meta-line"));
+          tr.append(tdType);
+
+          tr.append(node("td", hc.taskTitle));
+          tr.append(node("td", hc.workerId));
+
+          // Base SHA: No aplica
+          tr.append(node("td", "No aplica", "meta-line"));
+
+          // SHA256 Parche: No aplica
+          tr.append(node("td", "No aplica", "meta-line"));
+
+          // Commit Evaluado
+          const tdTree = node("td");
+          tdTree.append(node("code", hc.candidateSha.slice(0, 12), "sha-mono"));
+          tr.append(tdTree);
+
+          // Verificación Técnica
+          const tdVal = node("td");
+          tdVal.append(node("span", "Check: " + (hc.capabilityId ? hc.capabilityId + " (" + hc.conclusion + ")" : hc.conclusion), "pill execution"));
+          tr.append(tdVal);
+
+          // Dictamen Auditor
+          const tdRev = node("td");
+          tdRev.append(node("span", "Check técnico · No autoriza promoción", "pill"));
+          tr.append(tdRev);
+
+          // Estado de Integración
+          const tdInt = node("td");
+          tdInt.append(node("span", "Histórico · No acreditado para integración", "pill reject"));
           tr.append(tdInt);
 
           tbodyCandidates.append(tr);
@@ -1618,55 +1686,69 @@
         }
       }
 
-      // Tabla 3: Historial de Promoción y Puntos de Congelación
-      const promotionRecords = [
-        {
-          candidate: "PR #15 — AAO Control Center Daily UI",
-          sha: "3fc9cda4ab5afb4732e8b4cca4ebd1a4c885d527",
-          base: "origin/feat/capability-backed-repository-checks (91eb754)",
-          gateStatus: "BLOQUEADO (Freeze point)",
-          authority: "Autoridad técnica de integración + Auditoría independiente",
-          notes: "Candidato formal congelado. Bloqueado en espera de integración aguas arriba (#10 y #11)."
-        },
-        {
-          candidate: "PR #11 — Capability-backed repository checks",
-          sha: "91eb7543658fe92875cefa3de1e27704d830feb7",
-          base: "origin/feat/capability-registry-runtime (#10)",
-          gateStatus: "BLOQUEADO (Dependencia base)",
-          authority: "Dictamen independiente GOV-REV-001",
-          notes: "Contratos de inventario de grants expuestos. En espera de consolidación de #10."
-        },
-        {
-          candidate: "PR #10 — Capability registry runtime",
-          sha: "c35ff310135b9b76d5dc965d762acd6e4ebade10",
-          base: "main",
-          gateStatus: "EN ESTABILIZACIÓN",
-          authority: "Resolución de CI base y auditoría independiente",
-          notes: "Base canónica para ejecución aislada de checks."
-        },
-        {
-          candidate: "PR #16 — Universal Agent Operating Rules",
-          sha: "ea549700ad82405dd0f64eb9121aa116d281a022",
-          base: "main",
-          gateStatus: "BLOQUEADO (CI externo en tests/test_core.py)",
-          authority: "Auditoría independiente GOV-REV-001",
-          notes: "Preamble documental de 6 reglas. Sin adopción automática por runtime."
-        }
-      ];
+      // Tabla 3: Registro de Promociones Acreditadas e Historial de Integración
+      // Honest state: exactly 0 accredited promotions exist in the repository
+      const trPromoEmpty = node("tr");
+      const tdPromoEmpty = node("td", "", "empty-state");
+      tdPromoEmpty.colSpan = 6;
+      tdPromoEmpty.style.padding = "18px";
+      tdPromoEmpty.style.textAlign = "center";
+      tdPromoEmpty.append(node("div", "Cero Promociones Acreditadas", "strong"));
+      tdPromoEmpty.append(node("div", "No existen promociones acreditadas ni ejecutadas en el repositorio canónico. Ningún candidato cuenta con autorización verificable de integración ni certificación independiente de auditoría bajo GOV-REV-001 (Constitución arts. 3 y 6). La integración permanece estrictamente bloqueada (fail-closed).", "meta-line"));
+      trPromoEmpty.append(tdPromoEmpty);
+      tbodyPromotions.append(trPromoEmpty);
 
-      for (const rec of promotionRecords) {
-        const tr = node("tr");
-        tr.append(node("td", rec.candidate));
-        const tdSha = node("td");
-        tdSha.append(node("code", rec.sha.slice(0, 12), "sha-mono"));
-        tr.append(tdSha);
-        tr.append(node("td", rec.base));
-        const tdGate = node("td");
-        tdGate.append(node("span", rec.gateStatus, rec.gateStatus.includes("BLOQUEADO") ? "pill veto" : "pill reject"));
-        tr.append(tdGate);
-        tr.append(node("td", rec.authority));
-        tr.append(node("td", rec.notes));
-        tbodyHistory.append(tr);
+      // Tabla 4: Ramas Candidatas en Desarrollo (Sin Promoción Acreditada)
+      if (tbodyUnaccredited) {
+        const unaccreditedBranches = [
+          {
+            branch: "feat/control-center-daily-ui (PR #15)",
+            sha: "142d6c5c542e6b6f790175f7a8cf14c23c6be73b",
+            base: "origin/feat/capability-backed-repository-checks (91eb754)",
+            status: "NO ACREDITADA (Gate cerrado)",
+            missing: "Auditoría independiente externa certificada + Autoridad de integración",
+            condition: "Bloqueada en espera de estabilización de dependencias base (#10 y #11)"
+          },
+          {
+            branch: "feat/capability-backed-repository-checks (PR #11)",
+            sha: "91eb7543658fe92875cefa3de1e27704d830feb7",
+            base: "origin/feat/capability-registry-runtime (#10)",
+            status: "NO ACREDITADA (Gate cerrado)",
+            missing: "Dictamen independiente GOV-REV-001 vinculado a SHA exacto",
+            condition: "Bloqueada por consolidación pendiente de PR #10"
+          },
+          {
+            branch: "feat/capability-registry-runtime (PR #10)",
+            sha: "c35ff310135b9b76d5dc965d762acd6e4ebade10",
+            base: "main",
+            status: "NO ACREDITADA (Gate cerrado)",
+            missing: "Resolución de CI base y auditoría técnica independiente",
+            condition: "Base de la cadena de dependencias P0"
+          },
+          {
+            branch: "docs/agent-operating-rules (PR #16)",
+            sha: "ea549700ad82405dd0f64eb9121aa116d281a022",
+            base: "main",
+            status: "NO ACREDITADA (Gate cerrado)",
+            missing: "Auditoría independiente y resolución de CI externo en test_core.py",
+            condition: "Documento de reglas; sin adopción automática por agentes"
+          }
+        ];
+
+        for (const ub of unaccreditedBranches) {
+          const tr = node("tr");
+          tr.append(node("td", ub.branch));
+          const tdSha = node("td");
+          tdSha.append(node("code", ub.sha.slice(0, 12), "sha-mono"));
+          tr.append(tdSha);
+          tr.append(node("td", ub.base));
+          const tdStatus = node("td");
+          tdStatus.append(node("span", ub.status, "pill veto"));
+          tr.append(tdStatus);
+          tr.append(node("td", ub.missing));
+          tr.append(node("td", ub.condition));
+          tbodyUnaccredited.append(tr);
+        }
       }
     }
 

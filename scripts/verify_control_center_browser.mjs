@@ -176,11 +176,12 @@ try {
       const gitPanel = document.querySelector('#tab-git-lifecycle');
       const promoteBtn = document.querySelector('#btn-promote-candidate');
       const candidateRows = document.querySelectorAll('#git-candidates-table-body tr');
-      const historyRows = document.querySelectorAll('#git-promotion-history-table-body tr');
+      const promotionRows = document.querySelectorAll('#git-promotion-history-table-body tr');
+      const unaccreditedRows = document.querySelectorAll('#git-unaccredited-candidates-table-body tr');
       const gatePill = document.querySelector('#gate-pill');
       const metricCandidates = document.querySelector('#metric-candidate-count');
       const metricVeto = document.querySelector('#metric-veto-status');
-      const metricFreezeSha = document.querySelector('#metric-freeze-sha');
+      const metricPromotions = document.querySelector('#metric-promotions-count');
 
       return {
         tabActive: gitPanel ? gitPanel.classList.contains('active') : false,
@@ -189,11 +190,13 @@ try {
         gatePillText: gatePill ? gatePill.textContent.trim() : '',
         metricCandidates: metricCandidates ? metricCandidates.textContent.trim() : '',
         metricVeto: metricVeto ? metricVeto.textContent.trim() : '',
-        metricFreezeSha: metricFreezeSha ? metricFreezeSha.textContent.trim() : '',
+        metricPromotions: metricPromotions ? metricPromotions.textContent.trim() : '',
         candidateRowsCount: candidateRows.length,
         candidateSampleText: candidateRows[0] ? candidateRows[0].textContent.trim() : '',
-        historyRowsCount: historyRows.length,
-        historyFirstRow: historyRows[0] ? historyRows[0].textContent.trim() : ''
+        promotionRowsCount: promotionRows.length,
+        promotionEmptyText: promotionRows[0] ? promotionRows[0].textContent.trim() : '',
+        unaccreditedRowsCount: unaccreditedRows.length,
+        unaccreditedFirstRow: unaccreditedRows[0] ? unaccreditedRows[0].textContent.trim() : ''
       };
     })()
   `;
@@ -206,12 +209,15 @@ try {
   console.log('Botón de promoción deshabilitado (fail-closed):', gitData.promoteBtnDisabled);
   console.log('Texto del botón de promoción:', gitData.promoteBtnText);
   console.log('Estado del gate pill:', gitData.gatePillText);
-  console.log('Métrica de candidatos evaluados:', gitData.metricCandidates);
+  console.log('Métrica de propuestas y checks evaluados:', gitData.metricCandidates);
   console.log('Métrica de veto:', gitData.metricVeto);
-  console.log('SHA punto de congelación:', gitData.metricFreezeSha);
-  console.log('Filas de candidatos Git:', gitData.candidateRowsCount);
-  console.log('Filas en historial de promoción:', gitData.historyRowsCount);
-  console.log('Registro formal 1 de promoción:', gitData.historyFirstRow);
+  console.log('Métrica de promociones acreditadas:', gitData.metricPromotions);
+  console.log('Filas de comprobaciones históricas:', gitData.candidateRowsCount);
+  console.log('Texto de comprobación histórica 1:', gitData.candidateSampleText);
+  console.log('Filas en registro de promociones acreditadas:', gitData.promotionRowsCount);
+  console.log('Texto registro de promociones:', gitData.promotionEmptyText);
+  console.log('Filas de ramas candidatas no acreditadas:', gitData.unaccreditedRowsCount);
+  console.log('Registro 1 de rama no acreditada:', gitData.unaccreditedFirstRow);
 
   if (!gitData.tabActive) {
     throw new Error('La pestaña tab-git-lifecycle no se activó');
@@ -222,11 +228,17 @@ try {
   if (!gitData.gatePillText.includes('PROMOCIÓN BLOQUEADA')) {
     throw new Error('El estado del gate no indica PROMOCIÓN BLOQUEADA: ' + gitData.gatePillText);
   }
-  if (gitData.historyRowsCount !== 4) {
-    throw new Error('Se esperaban 4 registros de candidatos en el historial de promoción, obtenidos: ' + gitData.historyRowsCount);
+  if (!gitData.promotionEmptyText.includes('Cero Promociones Acreditadas')) {
+    throw new Error('El registro de promociones debe acreditar 0 promociones: ' + gitData.promotionEmptyText);
+  }
+  if (!gitData.candidateSampleText.includes('Check Histórico') || !gitData.candidateSampleText.includes('No aplica')) {
+    throw new Error('Las comprobaciones sobre commits históricos deben indicar que no aplica Base SHA: ' + gitData.candidateSampleText);
+  }
+  if (gitData.unaccreditedRowsCount !== 4) {
+    throw new Error('Se esperaban 4 ramas candidatas en desarrollo no acreditadas, obtenidas: ' + gitData.unaccreditedRowsCount);
   }
 
-  console.log('VERIFICACIÓN EN NAVEGADOR REAL EXITOSA: Datos reales leídos, ciclo Git validado y promoción bloqueada según GOV-REV-001.');
+  console.log('VERIFICACIÓN EN NAVEGADOR REAL EXITOSA: Candidatos históricos y promociones no acreditadas presentados fielmente según GOV-REV-001.');
 } finally {
   ws.close();
   chrome.kill();
