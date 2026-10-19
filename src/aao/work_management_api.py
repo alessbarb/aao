@@ -4,14 +4,15 @@ This is a separate development service, not a transparent migration of the
 SQLite API. No agent execution or external side effects are enabled.
 """
 import json
-
-from aao.environment_settings import load_local_env
-load_local_env()
 import os
 import secrets
-from pathlib import Path
 from contextlib import contextmanager
+from pathlib import Path
 from uuid import uuid4
+
+from aao.environment_settings import load_local_env
+
+load_local_env()
 
 from fastapi import Depends, FastAPI, Header, HTTPException
 from fastapi.responses import FileResponse
