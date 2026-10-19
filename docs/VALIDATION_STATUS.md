@@ -52,3 +52,12 @@ auditores fuera de desarrollo o al establecer
 ## Validación de autenticación transitoria — 2026-10-19
 
 El operador actualizó mediante `git pull --ff-only` hasta `cb65222` y ejecutó `AAO_ENV=test AAO_ENV_FILE=.env.test python -m pytest -v -rs` con Python 3.12.13: **46 passed, 0 failed, 0 skipped, 1 warning** en 2.45 s. Las tres pruebas negativas nuevas de tokens compartidos y credenciales individuales superaron la suite, así como la integración ampliada de lectura de proyectos/tableros. La advertencia sigue siendo Starlette/httpx. Esta evidencia procede del operador y no sustituye auditoría independiente ni aprobación de M2.
+
+## M2 ciclo gobernado de credenciales — pendiente de validación
+
+Se añadieron rutas de desarrollo de emisión, rotación y revocación de
+credenciales individuales protegidas por el token CEO provisional. Los tokens
+se generan aleatoriamente y solo se persisten como resúmenes; hay pruebas de
+control de autoridad, duplicados, invalidación por rotación, revocación y
+registros de eventos. **No hay todavía salida de ejecución local para esta
+revisión.** La referencia verificada continúa siendo la suite de 46 pruebas.
