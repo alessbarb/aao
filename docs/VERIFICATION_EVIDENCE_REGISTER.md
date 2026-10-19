@@ -1054,3 +1054,18 @@ coverage, independent review, or M2 acceptance.
   development project's task or review status. It is engineering verification
   only, not independent audit, CEO acceptance, or authorization to merge PR #6
   or enable further operations.
+
+## Auditor read path through the persisted isolated cycle — 2026-10-19
+
+- At source SHA `29d6fcdd70cb12bf97b9846b35efa0d70146b65a`, the PostgreSQL
+  end-to-end cycle additionally checks that the individual auditor cannot
+  enumerate or read the task before a grant, then can list the project and read
+  task detail/activity after CEO grants only `project.read`. The returned task
+  remains `IN_REVIEW`, has no reviews, and exposes the recorded execution
+  result SHA and PR SHA; approval remains rejected. This establishes API
+  authorization and data linkage with disposable test data, not the actual
+  persisted project or a browser session.
+- A fresh temporary PostgreSQL 16 database replayed migrations 001–009 and was
+  removed after the full suite. At that exact source SHA, compileall, Ruff,
+  `pytest -q -rs -W error` (**105 passed, 0 skipped**, 17.33 s), `pip check`,
+  and `git diff --check` passed. No CI result is implied by this local run.
