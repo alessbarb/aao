@@ -75,3 +75,62 @@ def test_individual_reader_cannot_fall_back_to_shared_credential(monkeypatch):
             x_agent_token="invalid-individual-token",
         )
     assert denied.value.status_code == 403
+
+
+class _GrantQuery:
+    def __init__(self, principal_row):
+        self.principal_row = principal_row
+        self.queries = []
+
+    def execute(self, sql, args):
+        self.queries.append((sql, args))
+        return self
+
+    def fetchone(self):
+        sql, _args = self.queries[-1]
+        if "FROM principal_credentials" in sql:
+            return self.principal_row
+        return (1,)
+
+
+def test_grant_rechecks_principal_inside_transaction(monkeypatch):
+    from fastapi import HTTPException
+
+    from aao.work_management_api import require_grant
+
+    for record in (None, ("AGENT", False), ("AUDITOR", True)):
+        db = _GrantQuery(record)
+        with pytest.raises(HTTPException) as exc:
+            require_grant(db, "agent-1", "project-1", "work.create")
+        assert exc.value.status_code == 403
+        assert len(db.queries) == 1
+        assert "FOR SHARE" in db.queries[0][0]
+
+    active = _GrantQuery(("AGENT", True))
+    require_grant(active, "agent-1", "project-1", "work.create")
+    assert len(active.queries) == 2
+    assert active.queries[1][1] == ("agent-1", "project-1", "work.create")
+
+
+def test_reviewer_grant_requires_individual_auditor_kind():
+    from fastapi import HTTPException
+
+    from aao.work_management_api import require_grant
+
+    with pytest.raises(HTTPException) as exc:
+        require_grant(_GrantQuery(("AGENT", True)), "agent-1", "project-1", "work.review")
+    assert exc.value.status_code == 403
+    db = _GrantQuery(("AUDITOR", True))
+    require_grant(db, "auditor-1", "project-1", "work.review")
+    assert len(db.queries) == 2
+
+
+def test_shared_grant_rejected_when_development_fallback_disabled(monkeypatch):
+    from fastapi import HTTPException
+
+    from aao.work_management_api import require_grant
+
+    monkeypatch.setenv("AAO_ENV", "production")
+    with pytest.raises(HTTPException) as exc:
+        require_grant(_GrantQuery(None), "development-worker", "project-1", "work.create")
+    assert exc.value.status_code == 403
