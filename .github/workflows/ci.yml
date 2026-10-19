@@ -5,11 +5,43 @@ on:
 jobs:
   test:
     runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: aao_test
+          POSTGRES_DB: aao_test
+          POSTGRES_HOST_AUTH_METHOD: trust
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U aao_test -d aao_test"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
         with:
           python-version: '3.12'
-      - run: python -m pip install -e '.[dev]'
-      - run: ruff check src tests
-      - run: pytest -q
+      - run: python -m pip install -e '.[dev,postgres]'
+      - name: Apply PostgreSQL schema to the disposable CI database
+        env:
+          AAO_TEST_POSTGRES_URL: postgresql://aao_test@localhost:5432/aao_test
+        run: |
+          for migration in db/postgres/001_foundation.sql \
+            db/postgres/002_dev_identity.sql \
+            db/postgres/003_execution.sql \
+            db/postgres/004_execution_guards.sql \
+            db/postgres/005_principal_credentials.sql; do
+            psql "$AAO_TEST_POSTGRES_URL" -v ON_ERROR_STOP=1 -f "$migration"
+          done
+      - run: python -m compileall -q src tests
+      - run: python -m ruff check src tests
+      - name: Run unit and PostgreSQL integration tests with warnings as errors
+        env:
+          AAO_ENV: test
+          AAO_TEST_POSTGRES_URL: postgresql://aao_test@localhost:5432/aao_test
+          AAO_TEST_DB_DISPOSABLE: "yes"
+        run: python -m pytest -q -rs -W error
+      - run: python -m pip check
