@@ -23,7 +23,7 @@ python -m pip install -e '.[dev]'
 export AAO_CEO_TOKEN='local-dev-only-change-me'
 export AAO_WORK_TOKEN='local-worker-only-change-me'
 export AAO_REVIEW_TOKEN='local-review-only-change-me'
-uvicorn aao.main:app --reload
+uvicorn aao.sqlite_api:app --reload
 pytest -q
 ```
 
@@ -47,7 +47,7 @@ See [Constitution](docs/CONSTITUTION.md).
 
 This branch adds declared work author identity, separate reviewer token, review decision records, and gated transitions into VERIFIED/DONE. Pause/resume is available to the development worker credential; cancellation requires CEO credentials. None of these tokens establish real actor identity or independent auditor authority. Read APIs are still unscoped and must remain on a trusted development network.
 
-The SQLite schema uses additive prototype initialization; PostgreSQL migrations, verified authN/authZ, actual evidence checking, independent audit, distributed execution and a UI remain necessary. See [M1 scope](docs/M1_SCOPE.md).
+The SQLite schema uses additive prototype initialization; PostgreSQL migrations, verified authN/authZ, actual evidence checking, independent audit, distributed execution and a UI remain necessary. See [M1 scope](docs/WORK_MANAGEMENT_SCOPE.md).
 
 ## Latest increment: M1/M2 engineering candidates
 
@@ -62,7 +62,7 @@ The execution queue is intentionally not callable by AI models, does not perform
 
 Critical remaining gates: database cutover, trusted identities, DB-scoped permissions and read isolation, independent reviewer attestation, effect ledger, external tool authorization, real worker runtime, evaluation suite and deployment controls.
 
-See [M1 scope](docs/M1_SCOPE.md), [PostgreSQL/authorization](docs/POSTGRES_AUTH_MIGRATION.md) and [M2 execution boundary](docs/M2_EXECUTION_BOUNDARY.md).
+See [M1 scope](docs/WORK_MANAGEMENT_SCOPE.md), [PostgreSQL/authorization](docs/DATABASE_AUTHENTICATION_TRANSITION.md) and [M2 execution boundary](docs/EXECUTION_SECURITY_BOUNDARIES.md).
 
 ## Read-only workboard and inert queue prototype
 
@@ -85,13 +85,13 @@ deploy until runtime verification and independent security review.
 
 ## PostgreSQL development service (M1 next slice)
 
-A separate API `aao.pg_work:app` now uses PostgreSQL transactions for actual
+A separate API `aao.work_management_api:app` now uses PostgreSQL transactions for actual
 mandate, project, project grant, work-item and READY-admission writes. This is
 **not** yet a cutover of the original SQLite application, and it has no
 agent execution, external integrations, secure production authentication,
 independent-review endpoint or full workflows.
 
-Read [PostgreSQL runtime setup](docs/POSTGRES_RUNTIME.md). It requires applying
+Read [PostgreSQL runtime setup](docs/POSTGRESQL_RUNTIME_OPERATIONS.md). It requires applying
 `001_foundation.sql` and `002_dev_identity.sql` to a **fresh isolated development**
 database, then running on localhost. The development identity migration relaxes
 principal FK enforcement and is **not a production schema**.
@@ -110,7 +110,7 @@ The test creates records and does not delete the database afterwards.
 ## M2 recovery increment
 
 Added a one-shot **inert** worker, a restricted effect-proposal rejection function,
-and an opt-in PostgreSQL concurrency test. See [M2 inert worker](docs/M2_INERT_WORKER.md).
+and an opt-in PostgreSQL concurrency test. See [M2 inert worker](docs/INERT_WORKER_BEHAVIOR.md).
 
 The worker is not scheduled automatically, no AI models are connected, and no
 external effect is performed. Database-backed tests still require a disposable
@@ -118,7 +118,7 @@ PostgreSQL instance. No verified test run or operational acceptance is claimed.
 
 ## Local configuration (development-only)
 
-See [Configuration](docs/CONFIGURATION.md). Copy the sanitized
+See [Configuration](docs/ENVIRONMENT_CONFIGURATION.md). Copy the sanitized
 [environment template](.env.example) to `.env.local` and replace placeholders.
 The Python services now load `.env.local` automatically without overriding
 already-exported process environment variables. To choose `.env.test`, run

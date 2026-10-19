@@ -6,7 +6,7 @@ from fastapi.testclient import TestClient
 
 
 def test_inert_queue_is_disabled_until_explicitly_enabled():
-    import aao.main as main
+    import aao.sqlite_api as main
     with TemporaryDirectory() as tmp:
         main.DB_PATH = os.path.join(tmp, "aao.db")
         main.CEO_TOKEN = "dev-ceo"
@@ -41,7 +41,7 @@ def test_inert_queue_is_disabled_until_explicitly_enabled():
 
 
 def test_cancelled_project_never_admitted_to_sandbox():
-    import aao.main as main
+    import aao.sqlite_api as main
     with TemporaryDirectory() as tmp:
         main.DB_PATH = os.path.join(tmp, "aao.db")
         main.CEO_TOKEN = "dev-ceo"

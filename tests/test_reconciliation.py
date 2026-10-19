@@ -1,6 +1,6 @@
 import pytest
 
-from aao.pg_reconciliation import ReconciliationDenied, reconcile
+from aao.execution_reconciliation import ReconciliationDenied, reconcile
 
 
 @pytest.mark.parametrize("disposition", ["RETRY", "UNKNOWN", "", "APPROVE"])

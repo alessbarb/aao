@@ -1,4 +1,4 @@
-from aao.worker_auth import credential_digest, dev_worker_bootstrap, verify_registered_worker
+from aao.legacy_worker_authentication import credential_digest, dev_worker_bootstrap, verify_registered_worker
 
 
 def test_worker_verifier_requires_exact_live_credential():
