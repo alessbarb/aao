@@ -319,3 +319,25 @@ def test_inert_worker_concurrent_claims_never_duplicate(monkeypatch):
     assert set(claimed) == set(ids)
     assert len(claimed) == len(set(claimed)) == 4
     assert all(state(eid)["status"] == "RUNNING" for eid in ids)
+
+
+@pytest.mark.skipif(
+    not os.getenv("AAO_TEST_POSTGRES_URL") or os.getenv("AAO_TEST_DB_DISPOSABLE") != "yes",
+    reason="Explicit disposable PostgreSQL database required",
+)
+def test_postgres_workboard_requires_ceo_read_credentials(monkeypatch):
+    """The browser and API share an origin, but project reads stay protected."""
+    from aao.pg_work import app
+    monkeypatch.setenv("AAO_POSTGRES_URL", os.environ["AAO_TEST_POSTGRES_URL"])
+    monkeypatch.setenv("AAO_CEO_TOKEN", "read-only-test-ceo")
+    with TestClient(app) as client:
+        page = client.get("/")
+        assert page.status_code == 200
+        assert "AAO" in page.text
+        assert client.get("/v1/projects").status_code == 403
+        assert client.get("/v1/projects", headers={"X-CEO-Token": "wrong"}).status_code == 403
+        allowed = client.get(
+            "/v1/projects", headers={"X-CEO-Token": "read-only-test-ceo"}
+        )
+        assert allowed.status_code == 200
+        assert isinstance(allowed.json(), list)
