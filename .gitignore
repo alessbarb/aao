@@ -1,0 +1,16 @@
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.ruff_cache/
+.venv/
+.env
+.env.*
+data/
+*.sqlite3
+.coverage
+dist/
+build/
+*.egg-info/
+
+# Only sanitized template is tracked.
+!.env.example
