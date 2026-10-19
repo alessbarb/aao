@@ -480,6 +480,7 @@ def test_ceo_governed_principal_issue_rotate_revoke(monkeypatch):
     reason="Explicit disposable PostgreSQL database required",
 )
 def test_http_request_context_rejects_token_rotated_before_protected_transaction(monkeypatch):
+    from aao.postgresql_connection import connect_postgres
     from aao.work_management_api import (
         AuthenticatedPrincipal,
         app,
@@ -490,6 +491,22 @@ def test_http_request_context_rejects_token_rotated_before_protected_transaction
     monkeypatch.setenv("AAO_CEO_TOKEN", "http-rotation-gap-ceo")
     identity = "agent-rotation-gap-" + str(uuid4())
     ceo = {"X-CEO-Token": "http-rotation-gap-ceo"}
+
+    def wait_for_lock_wait(connect, query_pattern, blocker_pid):
+        deadline = time.monotonic() + 5
+        while time.monotonic() < deadline:
+            with connect() as observer:
+                row = observer.execute(
+                    "SELECT pid FROM pg_stat_activity WHERE query LIKE %s "
+                    "AND wait_event_type='Lock' "
+                    "AND %s=ANY(pg_blocking_pids(pid)) LIMIT 1",
+                    (query_pattern, blocker_pid),
+                ).fetchone()
+                if row:
+                    return row[0]
+            time.sleep(0.01)
+        raise AssertionError(f"query did not wait on expected blocker: {query_pattern}")
+
     with TestClient(app) as client:
         issued = client.post("/v1/principals/credentials", headers=ceo, json={
             "principal_id": identity, "kind": "AGENT",
@@ -536,5 +553,30 @@ def test_http_request_context_rejects_token_rotated_before_protected_transaction
             assert revoked.status_code == 204, revoked.text
             denied = client.get(f"/v1/projects/{project}/board")
             assert denied.status_code == 403, denied.text
+
+            assert client.post(f"/v1/projects/{project}/grants", headers=ceo, json={
+                "principal_id": identity, "capability": "project.read",
+            }).status_code == 201
+            with ThreadPoolExecutor(max_workers=2) as pool, connect_postgres() as blocker:
+                blocker_pid = blocker.execute("SELECT pg_backend_pid()").fetchone()[0]
+                blocker.execute(
+                    "SELECT project_id FROM project_grants WHERE principal_id=%s "
+                    "AND project_id=%s AND capability='project.read' FOR UPDATE",
+                    (identity, project),
+                )
+                revocation = pool.submit(
+                    client.delete,
+                    f"/v1/projects/{project}/grants/{identity}/project.read",
+                    headers=ceo,
+                )
+                revoker_pid = wait_for_lock_wait(
+                    connect_postgres, "DELETE FROM project_grants%", blocker_pid,
+                )
+                board_read = pool.submit(client.get, f"/v1/projects/{project}/board")
+                wait_for_lock_wait(
+                    connect_postgres, "SELECT 1 FROM project_grants%", revoker_pid,
+                )
+            assert revocation.result(timeout=5).status_code == 204
+            assert board_read.result(timeout=5).status_code == 403
         finally:
             app.dependency_overrides.pop(read_principal, None)
