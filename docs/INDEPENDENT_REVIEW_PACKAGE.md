@@ -6,7 +6,7 @@ only of M2-A's bounded PostgreSQL-backed, development-identity, inert execution
 candidate. M2-B and M2-C requirements remain in the compliance matrix and are
 not acceptance claims or implementation authorization.
 
-**Implementation candidate:** `9fa503c334f17e3a7b6ef962a5df3a6428b280e8` on
+**Implementation candidate:** `dc084417a2ba683fe4737342f89e9cd1036b38ad` on
 `feat/aao-m0-foundation`, with 83-test local evidence recorded in the evidence
 register. The earlier base implementation is `99760c7339323600368e5dbb145b088d83ad0715`.
 The reviewer must separately identify the exact packaging revision containing

@@ -907,3 +907,23 @@ coverage, independent review, or M2 acceptance.
   were updated after the code commit; no code changed after that test run.
 - This is local disposable PostgreSQL evidence, not CI, independent review,
   production behavior, external-effect idempotency, or M2-A acceptance.
+
+## M2-A review follow-up — API lease fencing and edge normalization — 2026-10-19
+
+- Exact implementation candidate: `dc084417a2ba683fe4737342f89e9cd1036b38ad`.
+  The proposal-race fallback now normalizes PostgreSQL UUID values before
+  comparing to the API string identifier. The lease integration test now
+  pauses and resumes a project through the CEO API while holding a live lease,
+  proves that completion is denied while paused and remains denied after
+  resume, and retains the controlled concurrent completion schedule.
+- Full disposable PostgreSQL suite at this source tree:
+  **83 passed, 0 failed, 0 skipped, 0 warnings** in **19.74 s** with
+  `AAO_ENV=test AAO_ENV_FILE=.env.test python -m pytest -q -rs -W error`.
+  The focused lease integration suite passed **8 tests**. `compileall`, Ruff,
+  `pip check`, and `git diff --check` passed.
+- This resolves the internal review's A-07 end-to-end coverage gap and a
+  low-probability UUID normalization inconsistency. The concurrent proposal
+  test remains contention coverage; it does not deterministically prove entry
+  into PostgreSQL's conflict-fallback branch. No external effects are enabled.
+  This evidence is not CI, formal independent review, production evidence, or
+  M2-A acceptance.

@@ -7,22 +7,22 @@ authorize models, tools, providers, production deployment, or external effects.
 
 ## Candidate revisions
 
-- **Implementation candidate:** `9fa503c334f17e3a7b6ef962a5df3a6428b280e8`,
+- **Implementation candidate:** `dc084417a2ba683fe4737342f89e9cd1036b38ad`,
   including production-mode denial for development principal credentials,
   audited CEO-authenticated project suspension, and race-safe inert proposal
   idempotency. The earlier baseline implementation source was
   `99760c7339323600368e5dbb145b088d83ad0715`.
 - **Prior evidence package:** `b15dea4f69823bcb894cb58eda54dcffdb48d602`
   passed 80 tests and static checks. Following the identified fixes, the current
-  candidate `9fa503c` passed 83 tests, zero failures/skips/warnings, plus
+  candidate `dc08441` passed 83 tests, zero failures/skips/warnings, plus
   compileall, Ruff, `pip check`, and diff checks. Fresh replay of migrations
   001–009 predates these code-only fixes; they do not change schema.
 - **Review vehicle:** [draft GitHub PR #2](https://github.com/alessbarb/aao/pull/2).
   At the pre-fix live check, local `HEAD`, both remote refs and PR head matched
   `b15dea4f69823bcb894cb58eda54dcffdb48d602`. After committing the fixes,
   the current local implementation candidate is
-  `9fa503c334f17e3a7b6ef962a5df3a6428b280e8`; remote refs and live PR must be
-  updated/rechecked before formal review. The review report must identify
+  `dc084417a2ba683fe4737342f89e9cd1036b38ad`; the new package/code commit must
+  be pushed and live PR refs rechecked before formal review. The review report must identify
   package and source revisions separately.
 
 ## What M2-A evidence demonstrates
@@ -56,11 +56,11 @@ acceptance.
    path; the full suite passed against it and the scratch database was dropped.
    Exact local evidence is recorded in the verification register.
 2. **Engineering checks:** full suite and static checks are recorded at the
-   exact implementation source SHA `9fa503c`; the subsequent package commits
-   through `4e8fa48` contain documentation only. Re-run only if code changes or
+   exact implementation source SHA `dc08441`; the subsequent package commits
+   are documentation only. Re-run only if code changes or
    the formal reviewer cannot reproduce the recorded environment. Obtain a
    qualified independent security/architecture review of exact package SHA
-   `4e8fa48` and code SHA `9fa503c`. The reviewer must be different from the
+   final pushed package SHA and code SHA `dc08441`. The reviewer must be different from the
    implementer and provide an attributable report with methods and findings.
 3. Resolve or explicitly disposition review findings within the M2-A boundary.
 4. Present exact-SHA evidence and the residual-risk list below for competent

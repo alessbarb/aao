@@ -46,18 +46,20 @@ remains `99760c7339323600368e5dbb145b088d83ad0715`. Subsequent code fixes and
 their evidence are recorded separately; recheck exact live refs before review
 and acceptance.
 
-Suspension, credential-boundary, and inert proposal idempotency follow-ups are
-implemented at `9fa503c334f17e3a7b6ef962a5df3a6428b280e8`; their exact local
-evidence is in the verification register. At the earlier `8b8c036` checkpoint,
+Suspension, credential-boundary, inert proposal idempotency, and lease-fencing
+follow-ups are implemented at `dc084417a2ba683fe4737342f89e9cd1036b38ad`;
+their exact local evidence is in the verification register. At the earlier
+`8b8c036` checkpoint,
 PR #2's reported head lagged the branch. That historical mismatch was
 subsequently corrected and rechecked. At the current package checkpoint, local
 `HEAD`, `origin/feat/aao-m0-foundation`, `origin/review/m2-inert-candidate`,
 and live PR #2 head all equal
-`4e8fa48e91c1e8ee5b6a375dc61ecf2cf3f457b8`. PR #2 remains OPEN and DRAFT.
-The implementation source candidate remains
-`9fa503c334f17e3a7b6ef962a5df3a6428b280e8`; commits after it are
-documentation-only. Reviewers must pin and report both package and
-implementation SHAs; no validated code history was rewritten.
+`4e8fa48e91c1e8ee5b6a375dc61ecf2cf3f457b8` before the current review
+follow-up. PR #2 remains OPEN and DRAFT. The new implementation candidate is
+`dc084417a2ba683fe4737342f89e9cd1036b38ad`; it must be pushed and live PR refs
+rechecked before the final review request pin is considered current. Reviewers
+must pin and report both package and implementation SHAs; no validated code
+history was rewritten.
 
 ## M2-A measurable acceptance criteria
 
