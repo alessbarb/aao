@@ -399,3 +399,126 @@ def test_reconciliation_serializes_with_auditor_credential_revocation(
                 execution_id, auditor_credential=auditor_token,
                 evidence=["retry after revocation"], disposition=disposition,
             )
+
+
+@pytest.mark.skipif(
+    not os.getenv("AAO_TEST_POSTGRES_URL") or os.getenv("AAO_TEST_DB_DISPOSABLE") != "yes",
+    reason="Explicit disposable PostgreSQL database required",
+)
+def test_effect_proposal_serializes_with_agent_credential_revocation(monkeypatch):
+    """A proposal holding its credential lock commits before revocation."""
+    from aao.execution_queue import claim
+    from aao.external_effect_registry import EffectConflict, propose
+    from aao.postgresql_connection import connect_postgres
+    from aao.work_management_api import app
+
+    monkeypatch.setenv("AAO_POSTGRES_URL", os.environ["AAO_TEST_POSTGRES_URL"])
+    monkeypatch.setenv("AAO_CEO_TOKEN", "proposal-revoke-ceo")
+    monkeypatch.setenv("AAO_SANDBOX_QUEUE_ENABLED", "true")
+    ceo = {"X-CEO-Token": "proposal-revoke-ceo"}
+    worker_id = "proposal-worker-" + str(uuid4())
+    with TestClient(app) as client:
+        issued = client.post("/v1/principals/credentials", headers=ceo, json={
+            "principal_id": worker_id, "kind": "AGENT",
+        })
+        assert issued.status_code == 201, issued.text
+        credential = issued.json()["token"]
+        worker = {"X-Agent-Token": credential}
+        mandate = client.post("/v1/mandates", headers=ceo, json={
+            "title": "Proposal revoke " + str(uuid4()),
+            "objective": "Serialize effect proposal and credential revocation",
+        }).json()["id"]
+        assert client.post(f"/v1/mandates/{mandate}/confirm", headers=ceo).status_code == 200
+        project = client.post("/v1/projects", headers=ceo, json={
+            "name": "Proposal revoke", "mandate_id": mandate,
+        }).json()["id"]
+        for capability in ("work.create", "work.admit", "execution.claim", "effect.propose"):
+            response = client.post(f"/v1/projects/{project}/grants", headers=ceo, json={
+                "principal_id": worker_id, "capability": capability,
+            })
+            assert response.status_code == 201, response.text
+        work_id = client.post(f"/v1/projects/{project}/work", headers=worker, json={
+            "title": "Proposal revoke", "author_id": worker_id,
+            "acceptance_criteria": ["proposal recorded before revocation"],
+        }).json()["id"]
+        assert client.post(f"/v1/work/{work_id}/admit", headers=worker).status_code == 200
+        execution_id = client.post(
+            f"/v1/work/{work_id}/stage-inert", headers=worker,
+        ).json()["execution_id"]
+        lease = claim(worker_id, agent_credential=credential, project_id=project)
+        assert lease and lease["execution_id"] == execution_id
+
+        def make_proposal():
+            return propose(
+                execution_id=execution_id, worker_id=worker_id,
+                lease_token=lease["token"], agent_credential=credential,
+                idempotency_key="revoke-race-" + str(uuid4()),
+                capability="test.inert", request={"kind": "test-only"},
+            )
+
+        def wait_for_blocked_query(pattern, blocker_pid):
+            deadline = time.monotonic() + 5
+            while time.monotonic() < deadline:
+                with connect_postgres() as observer:
+                    row = observer.execute(
+                        "SELECT pid FROM pg_stat_activity WHERE query LIKE %s "
+                        "AND wait_event_type='Lock' LIMIT 1", (pattern,),
+                    ).fetchone()
+                    if row and observer.execute(
+                        "SELECT %s=ANY(pg_blocking_pids(%s))", (blocker_pid, row[0]),
+                    ).fetchone()[0]:
+                        return row[0]
+                time.sleep(0.01)
+            raise AssertionError(f"query did not wait on expected lock: {pattern}")
+
+        # The proposal reaches its journal write only after it has checked and
+        # locked the effect.propose grant. Hold that write so grant revocation
+        # must wait for the proposal transaction to commit.
+        with ThreadPoolExecutor(max_workers=2) as pool, connect_postgres() as blocker:
+            blocker.execute("LOCK TABLE execution_journal IN ACCESS EXCLUSIVE MODE")
+            proposal_future = pool.submit(make_proposal)
+            proposal_pid = wait_for_blocked_query(
+                "INSERT INTO execution_journal%", blocker.execute(
+                    "SELECT pg_backend_pid()",
+                ).fetchone()[0],
+            )
+            revoke_grant_future = pool.submit(
+                client.delete,
+                f"/v1/projects/{project}/grants/{worker_id}/effect.propose",
+                headers=ceo,
+            )
+            wait_for_blocked_query(
+                "DELETE FROM project_grants%", proposal_pid,
+            )
+        proposal = proposal_future.result(timeout=5)
+        assert proposal["status"] == "PROPOSED"
+        revoked_grant = revoke_grant_future.result(timeout=5)
+        assert revoked_grant.status_code == 204, revoked_grant.text
+        with pytest.raises(EffectConflict, match="proposal grant required"):
+            make_proposal()
+        regrant = client.post(f"/v1/projects/{project}/grants", headers=ceo, json={
+            "principal_id": worker_id, "capability": "effect.propose",
+        })
+        assert regrant.status_code == 201, regrant.text
+
+        with ThreadPoolExecutor(max_workers=2) as pool, connect_postgres() as blocker:
+            blocker_pid = blocker.execute("SELECT pg_backend_pid()").fetchone()[0]
+            blocker.execute(
+                "SELECT id FROM execution_queue WHERE id=%s FOR UPDATE", (execution_id,),
+            )
+            proposal_future = pool.submit(make_proposal)
+            proposal_pid = wait_for_blocked_query(
+                "SELECT q.status,q.project_id%", blocker_pid,
+            )
+            revoke_future = pool.submit(
+                client.post, f"/v1/principals/{worker_id}/revoke", headers=ceo,
+            )
+            wait_for_blocked_query(
+                "UPDATE principal_credentials SET enabled=false%", proposal_pid,
+            )
+        proposal = proposal_future.result(timeout=5)
+        assert proposal["status"] == "PROPOSED"
+        revoked = revoke_future.result(timeout=5)
+        assert revoked.status_code == 200, revoked.text
+        with pytest.raises(EffectConflict, match="credential required"):
+            make_proposal()
