@@ -427,7 +427,8 @@ reconciliation-versus-grant-revocation schedules, and independent review.
 
 ## Reconciliation retry and auditor revocation schedule
 
-The test change parameterizes
+The test change at
+`9247f7a3e8708efcbddce6652ab5f56d13bb1aa4` parameterizes
 `test_reconciliation_serializes_with_auditor_credential_revocation` across
 `MARK_FAILED` and `RETRY_CONFIRMED_SAFE`. Both controlled PostgreSQL schedules
 observed reconciliation blocked at its journal write while auditor credential
@@ -438,5 +439,6 @@ repetitions remain unverified.
 
 Local verification: focused reconciliation integration file passed **3 tests**;
 full disposable PostgreSQL suite passed **61 tests**, zero skips or warnings;
-compileall, Ruff, `pip check`, and `git diff --check` succeeded. Exact test SHA
-and CI run are to be recorded after commit and CI completion.
+compileall, Ruff, `pip check`, and `git diff --check` succeeded. GitHub CI run
+`39258935861` passed for this exact test SHA with a disposable PostgreSQL
+service, compileall, Ruff, warnings-as-errors suite, and `pip check`.

@@ -59,15 +59,16 @@ amendment or CEO-confirmed constitutional rule.
    cover AGENT denial, authorized AUDITOR paths, and an AUDITOR credential
    authentication/revocation lock schedule. No HTTP exposure exists; evidence
    verification and independent review remain open. A PostgreSQL integration
-   schedule verifies a reconciliation transaction commits before concurrent
-   auditor credential revocation; other reviewer-operation races remain open.
+   schedules verify both reconciliation dispositions commit before concurrent
+   auditor credential revocation; grant revocation and other orderings remain
+   open.
 4. Lease expiry is now computed and checked by PostgreSQL clock. Integration
    tests prove delayed completion is rejected after expiry during a queue-row
    lock wait and run three competing completion/quarantine schedules, all
    ending `UNCERTAIN`. Effect proposals now require an active AGENT credential,
    the dedicated project `effect.propose` grant, and the matching live lease;
    they append proposer identity to the journal and remain inert. Three focused
-  local reruns exercised a controlled execution-row-lock schedule: the test
+   local reruns exercised a controlled execution-row-lock schedule: the test
   observed proposal blocked while completion competed. A
   previously described proposal/retry race was not a valid concurrency case:
   proposal requires `RUNNING` while retry requires `UNCERTAIN`; it was replaced

@@ -1,7 +1,7 @@
 # Principal authorization matrix
 
 **Scope:** current development API and internal execution/reconciliation
-operations, updated through `22f7310822c2ca3bfe59b8e2ccbb9d8dbc856b0d`.
+operations, updated through `9247f7a3e8708efcbddce6652ab5f56d13bb1aa4`.
 This is an engineering inventory, not a production authorization policy or
 independent security review. The PostgreSQL API and its internal helpers are
 not a claim of M2 acceptance.
@@ -66,7 +66,7 @@ inside their transaction. The CEO credential is still a single static bearer.
   queue completion against credential revocation. Other business writes,
   alternative operation/revocation orderings, reconciliation against grant
   revocation, and hostile schedules remain untested.
-- The current full local suite has 60 tests, including grant-row, auditor
+- The current full local suite has 61 tests, including grant-row, auditor
   credential-lock, and completion-after-lease-expiry-during-row-lock-wait
   coverage, AGENT authentication/rotation, and selected protected-operation
   revocation schedules. Three
@@ -79,9 +79,10 @@ inside their transaction. The CEO credential is still a single static bearer.
   restart has been manually verified for one expired lease; broad restart and
   crash-recovery schedules remain open.
 - GitHub CI configures a fresh disposable PostgreSQL service and runs the
-  guarded integration suite; runs `39258084851` and `39258576394` passed on code SHAs
-  `424016daabda4f2cb0cd337be449b71d687d4cac` and
-  `22f7310822c2ca3bfe59b8e2ccbb9d8dbc856b0d`, respectively. Current exact local results and
+  guarded integration suite; runs `39258084851`, `39258576394`, and
+  `39258935861` passed on code SHAs `424016daabda4f2cb0cd337be449b71d687d4cac`,
+  `22f7310822c2ca3bfe59b8e2ccbb9d8dbc856b0d`, and
+  `9247f7a3e8708efcbddce6652ab5f56d13bb1aa4`, respectively. Current exact local results and
   prior candidate SHA-specific CI runs are recorded in the evidence register;
   this is not independent review or M2 acceptance.
 - Grant expiry uses `clock_timestamp()` when the locked authorization query is
