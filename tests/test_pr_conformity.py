@@ -130,3 +130,17 @@ def test_new_commit_invalidates_prior_signed_report(tmp_path, trust_bundle):
                       successful_checks(repository), "implementer")
     assert not result.conformant
     assert "audit report targets a different candidate SHA" in result.reasons
+
+
+def test_github_duplicate_checks_require_all_runs_to_pass_same_sha():
+    from aao.pr_conformity import aggregate_github_check_runs
+
+    sha = "a" * 40
+    runs = [
+        {"name": "test", "head_sha": sha, "conclusion": "success"},
+        {"name": "test", "head_sha": sha, "conclusion": "failure"},
+        {"name": "lint", "head_sha": "b" * 40, "conclusion": "success"},
+    ]
+    result = aggregate_github_check_runs(sha, runs)
+    assert result["test"] == {"head_sha": sha, "conclusion": "failure"}
+    assert result["lint"] == {"head_sha": "mismatch", "conclusion": "failure"}

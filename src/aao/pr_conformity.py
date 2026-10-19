@@ -42,6 +42,49 @@ def current_commit(repository: Path) -> str:
     return result.stdout.strip()
 
 
+def aggregate_github_check_runs(candidate_sha: str, check_runs: list[dict[str, Any]]) -> dict[str, dict[str, str]]:
+    """Aggregate GitHub check-runs; duplicate names pass only if every run passes this SHA."""
+    grouped: dict[str, list[dict[str, Any]]] = {}
+    for item in check_runs:
+        name = item.get("name")
+        if isinstance(name, str):
+            grouped.setdefault(name, []).append(item)
+    aggregated: dict[str, dict[str, str]] = {}
+    for name, runs in grouped.items():
+        exact = all(item.get("head_sha") == candidate_sha for item in runs)
+        passed = exact and all(item.get("conclusion") == "success" for item in runs)
+        aggregated[name] = {
+            "head_sha": candidate_sha if exact else "mismatch",
+            "conclusion": "success" if passed else "failure",
+        }
+    return aggregated
+
+
+def fetch_github_pr_checks(repository_slug: str, pull_request_number: int) -> tuple[str, dict[str, dict[str, str]]]:
+    """Read a PR and its check-runs via gh; performs no GitHub writes."""
+    if not repository_slug or "/" not in repository_slug or pull_request_number <= 0:
+        raise ValueError("repository and PR number are invalid")
+    try:
+        pull = subprocess.run(
+            ["gh", "api", f"repos/{repository_slug}/pulls/{pull_request_number}"],
+            check=True, capture_output=True, text=True,
+        )
+        pull_data = json.loads(pull.stdout)
+        if pull_data.get("state") != "open":
+            raise ValueError("pull request is not open")
+        sha = pull_data["head"]["sha"]
+        response = subprocess.run(
+            ["gh", "api", f"repos/{repository_slug}/commits/{sha}/check-runs"],
+            check=True, capture_output=True, text=True,
+        )
+        check_runs = json.loads(response.stdout)["check_runs"]
+        if not isinstance(check_runs, list):
+            raise TypeError("GitHub check-run response is malformed")
+        return sha, aggregate_github_check_runs(sha, check_runs)
+    except (OSError, subprocess.SubprocessError, ValueError, KeyError, TypeError) as error:
+        raise ValueError("could not obtain a valid read-only GitHub PR snapshot") from error
+
+
 def evaluate(
     repository: Path,
     policy_path: Path,
@@ -148,11 +191,16 @@ def main() -> int:
     parser.add_argument("--policy", type=Path, required=True, help="trusted policy outside the candidate checkout")
     parser.add_argument("--report", type=Path)
     parser.add_argument("--signature", type=Path)
-    parser.add_argument("--checks", type=Path, required=True, help="JSON object of check name to conclusion")
+    check_source = parser.add_mutually_exclusive_group(required=True)
+    check_source.add_argument("--checks", type=Path, help="JSON object of check name to conclusion and SHA")
+    check_source.add_argument("--github-pr", nargs=2, metavar=("REPOSITORY", "NUMBER"), help="fetch read-only PR checks through gh")
     parser.add_argument("--implementer", required=True, help="implementer principal from trusted CI context")
     args = parser.parse_args()
     try:
-        check_results = json.loads(args.checks.read_text(encoding="utf-8"))
+        if args.github_pr:
+            _, check_results = fetch_github_pr_checks(args.github_pr[0], int(args.github_pr[1]))
+        else:
+            check_results = json.loads(args.checks.read_text(encoding="utf-8"))
         if not isinstance(check_results, dict) or any(
             not isinstance(name, str) or not isinstance(item, dict)
             or not isinstance(item.get("conclusion"), str) or not isinstance(item.get("head_sha"), str)
@@ -160,7 +208,7 @@ def main() -> int:
         ):
             raise ValueError("check results must map names to conclusion and head_sha records")
     except (OSError, ValueError):
-        print(json.dumps({"conformant": False, "reasons": ["check results are missing or malformed"]}))
+        print(json.dumps({"conformant": False, "reasons": ["check results are missing, malformed, or unavailable"]}))
         return 1
     result = evaluate(args.repository, args.policy, args.report, args.signature, check_results, args.implementer)
     print(json.dumps({"conformant": result.conformant, "candidate_sha": result.candidate_sha, "reasons": result.reasons}, sort_keys=True))
