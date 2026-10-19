@@ -29,7 +29,9 @@ for migration in db/postgres/001_foundation.sql \
   db/postgres/007_fence_leases_across_project_state_changes.sql \
   db/postgres/008_content_addressed_evidence.sql \
   db/postgres/009_prevent_evidence_truncation.sql \
-  db/postgres/010_capability_registry.sql; do
+  db/postgres/010_capability_registry.sql \
+  db/postgres/011_sha_bound_reviews_and_veto.sql \
+  db/postgres/012_patch_proposals.sql; do
   psql "$AAO_POSTGRES_URL" -v ON_ERROR_STOP=1 -f "$migration"
 done
 export AAO_CEO_TOKEN='locally-generated-secret'

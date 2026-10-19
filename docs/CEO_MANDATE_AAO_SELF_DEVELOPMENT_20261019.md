@@ -77,7 +77,30 @@ is verifiable at exact revisions.
 
 Source: the CEO-confirmed directive titled **“AAO — Mandato CEO confirmado:
 primer proyecto AAO Self Development”**, dated 2026-10-19 and supplied in the
-project continuity context. Runtime mandate and project identifiers and
-confirmation/creation event identifiers are intentionally not asserted here;
-they must be read from the authorized development API and recorded as runtime
-evidence, not inferred from this file.
+project continuity context. The runtime mandate/project identifiers and
+confirmation/creation event identifiers below were subsequently read from the
+authorized development API; they are runtime evidence, not inferred from this
+documentary decision.
+
+## Development-instance persistence record
+
+The following state was verified through the authorized development APIs on
+2026-10-19. The API was served on loopback at `http://127.0.0.1:8001`; its
+readiness route reported PostgreSQL available. The mandate inventory was read
+using the configured development CEO authorization, without printing or
+persisting the credential. The associated project list was independently
+visible to the existing individual AGENT identity through its scoped API.
+
+| Record | Identifier / evidence |
+|---|---|
+| Confirmed mandate | `65563e55-eb01-4cd6-a5cc-778acc55d2af` |
+| Mandate state | `CONFIRMED` |
+| Persisted objective | Matches the bootstrap's canonical AAO Self Development objective, including the authentic shared-backend-state requirement. |
+| Confirmation event | `db96571d-c9f5-49c1-acac-02377ec26bec` (`mandate.confirmed`, `2026-10-19T17:35:02.16918+00:00`) |
+| Active project | `9d17d6c1-d644-424a-a425-fe7e084c3d91`, `AAO — Self Development` |
+| Project creation event | `b92790c1-e3ab-424e-b3db-014deebdc114` (`project.created`, `2026-10-19T17:35:02.181103+00:00`) |
+
+This is persistence evidence for the local development instance only. It is not
+production state, proof of end-to-end MVP acceptance, independent audit, or
+authorization to expand execution. Project registration remains distinct from
+provisioning or validating identities and grants.
