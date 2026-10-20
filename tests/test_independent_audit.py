@@ -84,7 +84,7 @@ def run_audit(env, sha, name="run", **kwargs):
                            output=env["auditor"] / name, ledger=env["auditor"] / "ledger.jsonl", **options)
 
 
-def gate(env, sha, name="run", implementer="implementer", checkout_name=None):
+def gate(env, sha, name="run", implementer="implementer", checkout_name=None, base=None):
     checkout = env["auditor"] / f"merge-{checkout_name or name}"
     subprocess.run(["git", "clone", "-q", str(env["repo"]), str(checkout)], check=True)
     git(checkout, "checkout", "-q", "--detach", sha)
@@ -92,7 +92,7 @@ def gate(env, sha, name="run", implementer="implementer", checkout_name=None):
     signature = out / "report.sig"
     return promotion_decision(checkout, env["auditor"] / "policy.json", out / "report.json",
                               signature if signature.exists() else None, ci(sha), implementer,
-                              env["auditor"] / "ledger.jsonl")
+                              env["auditor"] / "ledger.jsonl", current_base_sha=base or env["base"])
 
 
 def test_clean_candidate_is_approved_signed_and_promotable(env):
@@ -208,3 +208,21 @@ def test_sandbox_has_read_only_candidate_and_no_network(tmp_path):
     code, out, _ = run_sandboxed(tmp_path, ["-c", probe], timeout_seconds=30)
     assert code == 0 and "RO" in out and "NONET" in out
     assert (tmp_path / "f").read_text() == "x"
+
+
+def test_base_moving_invalidates_the_verdict(env):
+    sha = commit(env["repo"], {"src/app.py": "X = 11\n"}, "change")
+    with pytest.raises(AuditError, match="base moved"):
+        run_audit(env, sha, name="moving", current_base=lambda: "f" * 40)
+    run_audit(env, sha)
+    assert gate(env, sha).conformant
+    reasons = gate(env, sha, checkout_name="newbase", base="e" * 40).reasons
+    assert "audit report targets a different base than the current pull request base" in reasons
+
+
+def test_gate_rejects_report_from_auditor_revision_no_longer_trusted(env):
+    sha = commit(env["repo"], {"src/app.py": "X = 12\n"}, "change")
+    run_audit(env, sha)
+    env["policy"](trusted_auditor_revisions=["c" * 40])
+    reasons = gate(env, sha).reasons
+    assert "audit report was produced by an auditor revision the policy does not trust" in reasons

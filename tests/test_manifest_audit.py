@@ -33,6 +33,9 @@ def commit(repo, files, message):
 
 def ok_runner(tree, argv):
     assert (tree / "src" / "app.py").is_file()
+    parents = subprocess.run(["git", "-C", str(tree), "rev-list", "--parents", "-n", "1", "HEAD"], check=True,
+                             capture_output=True, text=True).stdout.split()
+    assert len(parents) == 3  # checks see git metadata of a [target, candidate] merge commit
     return 0, "1 passed", ""
 
 
@@ -268,3 +271,11 @@ def test_protected_path_in_result_tree_blocks(env):
     assert report["verdict"] == "reject"
     assert "protected-path:src/aao/pr_conformity.py" in report["blocking_findings"]
     assert not gate(env, path)[0]
+
+
+def test_gate_rejects_report_from_auditor_revision_no_longer_trusted(env):
+    path, _ = manifest(env)
+    audit(env, path)
+    env["configure"]({"trusted_auditor_revisions": ["c" * 40]})
+    reasons = gate(env, path)[1]
+    assert "report was produced by an auditor revision the anchored policy does not trust" in reasons

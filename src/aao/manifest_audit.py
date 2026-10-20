@@ -138,6 +138,23 @@ def _derive(manifest: dict[str, Any], clone: Path) -> None:
         raise AuditError("result_tree does not match the merge of candidate into target")
 
 
+def _checkout_result(clone: Path, manifest: dict[str, Any]) -> Path:
+    """Check out a fixed-metadata commit of result_tree (parents target, candidate) so git-aware tests run."""
+    identity = {"GIT_AUTHOR_NAME": "aao-audit", "GIT_AUTHOR_EMAIL": "aao-audit@invalid",
+                "GIT_COMMITTER_NAME": "aao-audit", "GIT_COMMITTER_EMAIL": "aao-audit@invalid",
+                "GIT_AUTHOR_DATE": "1970-01-01T00:00:00Z", "GIT_COMMITTER_DATE": "1970-01-01T00:00:00Z"}
+    commit = subprocess.run(
+        ["git", "-C", str(clone), "commit-tree", manifest["result_tree"], "-p", manifest["target_sha"],
+         "-p", manifest["candidate_sha"], "-m", "aao audit result tree"],
+        check=True, capture_output=True, text=True, env={**_GIT_ENV, **identity},
+    ).stdout.strip()
+    _git(clone, "-c", "core.hooksPath=/dev/null", "checkout", "--quiet", "--detach", commit)
+    if _git(clone, "rev-parse", "HEAD^{tree}").strip() != manifest["result_tree"] or _git(
+            clone, "status", "--porcelain", "--untracked-files=all").strip():
+        raise AuditError("result tree checkout is not exact")
+    return clone
+
+
 def _ref_value(manifest: dict[str, Any]) -> str:
     try:
         return _git(Path(manifest["repository"]), "rev-parse", "--verify", f"{manifest['target_ref']}^{{commit}}").strip()
@@ -190,12 +207,9 @@ def audit_manifest(
             raise AuditError(f"{secret} would be readable by candidate code inside the sandbox")
     ledger = _ledger(anchor)
     with tempfile.TemporaryDirectory(prefix="aao-manifest-audit-") as temporary:
-        clone, tree = Path(temporary) / "repo", Path(temporary) / "result"
+        clone = Path(temporary) / "repo"
         _derive(manifest, clone)
-        tree.mkdir()
-        index = {**_GIT_ENV, "GIT_INDEX_FILE": str(Path(temporary) / "index")}
-        subprocess.run(["git", "-C", str(clone), "read-tree", manifest["result_tree"]], check=True, env=index)
-        subprocess.run(["git", "-C", str(clone), "checkout-index", "--all", f"--prefix={tree}/"], check=True, env=index)
+        tree = _checkout_result(clone, manifest)
         findings = adversarial_findings(clone, manifest["target_sha"], manifest["result_tree"], policy)
         authors = _git(clone, "log", "--format=%ae", f"{manifest['target_sha']}..{manifest['candidate_sha']}")
         implementers = sorted({manifest["producer"], *authors.split()})
@@ -266,6 +280,8 @@ def verify_promotion(
                 "policy_sha256": anchor["policy_sha256"], "anchor_sha256": anchor["anchor_sha256"],
                 "auditor_uid": anchor["auditor_uid"], "verdict": "approve", "veto": False, "blocking_findings": []}
     reasons += [f"report {k} is not {v!r}" for k, v in expected.items() if report.get(k) != v]
+    if report.get("auditor_revision") not in anchor["policy"]["trusted_auditor_revisions"]:
+        reasons.append("report was produced by an auditor revision the anchored policy does not trust")
     if _canonical(report) != raw:
         reasons.append("report is not in canonical signed form")
     if signature_path is None or not signature_path.is_file():
