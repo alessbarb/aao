@@ -183,6 +183,68 @@ These are proposals for interface alignment, not changes to other teams' code:
    authorization state. It must not cache the result as permission or retry a
    denied operation with another principal or stronger credential.
 
+## Local Git transition contract (runtime-owned proposal)
+
+The runtime team is preparing a local-only transition path while preserving
+GitHub as a read-only/temporary remote. The initial controller in
+`aao.local_candidate_controller` accepts exact target and candidate commit
+SHAs plus an explicit full `refs/heads/...` target ref that must resolve to the
+declared target SHA. Registration writes the audit team's exact
+`aao.candidate-manifest.v1` schema to the private state directory with the
+candidate tree, proposed result tree, and a producer label containing the
+effective UID. That label is attribution only; it is not an authenticated
+identity or proof of independence. The controller revalidates the target ref,
+manifest digest, and both trees before testing. It evaluates a synthetic
+two-parent integration commit in a disposable detached worktree, runs only the
+fixed `core-unit` sandbox check, then stores the result with integration SHA,
+manifest digest, and evidence digest. Ref movement or manifest/tree mismatch
+fails closed. The manifest is an untrusted selector for a separately governed
+audit service, not a verdict. The controller does not move refs, modify the
+canonical checkout, push, merge, or authorize promotion. Promotion is
+intentionally disabled.
+
+The local candidate record uses schema version 2; integration evidence uses
+`aao.local-integration-evidence.v3` and includes SHA-256 digests of the exact
+controller and sandbox-check runner source files. These identify the local
+verifier implementation, not its operator or an independent auditor. The
+candidate identifier includes the target ref, target SHA, and candidate SHA;
+this avoids reusing a prior pair's evidence under a different target ref.
+Records from prior local-only schemas remain untouched and are not treated as
+conformant v2 candidates.
+
+Reproduction from the repository root (using a new private state directory):
+
+```bash
+python -m aao.local_candidate_controller register \
+  --repository "$PWD" --target-sha <full-target-sha> \
+  --target-ref refs/heads/<target-branch> \
+  --candidate-sha <full-candidate-sha> --state-directory <private-state-directory>
+python -m aao.local_candidate_controller check \
+  --repository "$PWD" --candidate-id <returned-candidate-id> \
+  --state-directory <same-private-state-directory>
+```
+
+Consumer proposals for the other teams (to be routed by the PM before adoption):
+
+1. **Control Center:** when an agreed read API exists, display candidate SHA,
+   target SHA, synthetic integration SHA, check conclusion, evidence digest,
+   and the explicit `promotion=disabled` state. Do not treat local evidence as
+   an auditor verdict or expose controller state as a new source of task truth.
+2. **Audit service:** PR #19's proposed contract consumes the generated
+   `aao.candidate-manifest.v1` file as an untrusted selector, recomputes its
+   trees, and binds its own report to the exact manifest. The producer label is
+   not an identity attestation. Do not accept the controller's successful
+   check as approval or change the audit engine through this proposal.
+3. **Project management:** associate contracts and task references with exact
+   SHAs and route ownership/discrepancies to the runtime owner. This proposal
+   does not add or infer grants, a reviewer identity, or integration authority.
+
+These are local interface proposals, not published endpoint guarantees. No
+frontend or audit-service implementation is part of this runtime change. Until
+the PM confirms the consumer contracts and a valid conformity/audit policy is
+available, the controller remains a developer tool whose evidence cannot
+promote a branch or PR.
+
 ## Explicit non-contracts and unresolved ownership
 
 - No guarantee of independent audit, automatic promotion, merge authorization,
