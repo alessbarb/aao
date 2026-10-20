@@ -5,6 +5,14 @@ from fastapi.testclient import TestClient
 from aao.work_management_api import app
 
 
+def control_center_source() -> str:
+    frontend = Path(__file__).parents[1] / "frontend"
+    return "\n".join(
+        (frontend / name).read_text()
+        for name in ("index.html", "control-center.css", "control-center.js")
+    )
+
+
 def test_control_center_served_at_root():
     with TestClient(app) as client:
         response = client.get("/")
@@ -14,7 +22,7 @@ def test_control_center_served_at_root():
 
 
 def test_control_center_navigation_and_views_present():
-    html = (Path(__file__).parents[1] / "frontend" / "index.html").read_text()
+    html = control_center_source()
 
     # Navigation tabs
     assert 'role="tablist"' in html
@@ -37,7 +45,7 @@ def test_control_center_navigation_and_views_present():
 
 
 def test_control_center_kanban_six_lifecycle_states():
-    html = (Path(__file__).parents[1] / "frontend" / "index.html").read_text()
+    html = control_center_source()
     assert 'id="board"' in html
     assert 'const states = ["INBOX", "READY", "IN_PROGRESS", "IN_REVIEW", "VERIFIED", "DONE"];' in html
     assert 'INBOX: "Entrada"' in html
@@ -49,7 +57,7 @@ def test_control_center_kanban_six_lifecycle_states():
 
 
 def test_control_center_agents_and_identity_management():
-    html = (Path(__file__).parents[1] / "frontend" / "index.html").read_text()
+    html = control_center_source()
     assert '"/v1/principals/me"' in html
     assert 'id="agents-table-body"' in html
     assert 'id="session-badge"' in html
@@ -59,7 +67,7 @@ def test_control_center_agents_and_identity_management():
 
 
 def test_control_center_skills_and_capabilities_as_first_class_citizens():
-    html = (Path(__file__).parents[1] / "frontend" / "index.html").read_text()
+    html = control_center_source()
     assert 'id="capabilities"' in html
     assert 'id="filter-cap-type"' in html
     assert 'value="agent_skill">Habilidades de Agente (Skills)<' in html
@@ -73,7 +81,7 @@ def test_control_center_skills_and_capabilities_as_first_class_citizens():
 
 
 def test_control_center_code_proposals_transparency():
-    html = (Path(__file__).parents[1] / "frontend" / "index.html").read_text()
+    html = control_center_source()
     assert 'id="proposals-table-body"' in html
     assert 'Propuestas de Código (Patch Proposals)' in html
     assert 'p.base_sha' in html
@@ -85,7 +93,7 @@ def test_control_center_code_proposals_transparency():
 
 
 def test_control_center_executions_and_logs():
-    html = (Path(__file__).parents[1] / "frontend" / "index.html").read_text()
+    html = control_center_source()
     assert 'id="executions-table-body"' in html
     assert 'Ejecuciones Técnicas (Execution Queue)' in html
     assert 'e.worker_id' in html
@@ -95,7 +103,7 @@ def test_control_center_executions_and_logs():
 
 
 def test_control_center_audits_and_evidence():
-    html = (Path(__file__).parents[1] / "frontend" / "index.html").read_text()
+    html = control_center_source()
     assert 'id="evidence-table-body"' in html
     assert 'Evidencias de Integridad y Dictámenes de Auditoría' in html
     assert 'rev.reviewer_id' in html
@@ -105,7 +113,7 @@ def test_control_center_audits_and_evidence():
 
 
 def test_control_center_ephemeral_security_controls():
-    html = (Path(__file__).parents[1] / "frontend" / "index.html").read_text()
+    html = control_center_source()
     # Memory-only token
     assert 'let readerToken = null;' in html
     assert 'function clearReaderSession()' in html
@@ -117,7 +125,7 @@ def test_control_center_ephemeral_security_controls():
 
 
 def test_control_center_task_detail_modal_inspector():
-    html = (Path(__file__).parents[1] / "frontend" / "index.html").read_text()
+    html = control_center_source()
     assert 'id="drawer-overlay"' in html
     assert 'id="drawer-acceptance-criteria"' in html
     assert 'id="drawer-evidence-list"' in html
@@ -129,7 +137,7 @@ def test_control_center_task_detail_modal_inspector():
 
 
 def test_control_center_authentication_and_revocation_behavior():
-    html = (Path(__file__).parents[1] / "frontend" / "index.html").read_text()
+    html = control_center_source()
     # 401 / 403 error handling immediately purges reader session
     assert "if (r.status === 401 || r.status === 403)" in html
     assert "clearReaderSession();" in html
@@ -141,7 +149,7 @@ def test_control_center_authentication_and_revocation_behavior():
 
 
 def test_control_center_loading_and_error_states():
-    html = (Path(__file__).parents[1] / "frontend" / "index.html").read_text()
+    html = control_center_source()
     assert "Cargando datos reales de PostgreSQL…" in html
     assert "No se pudo cargar el tablero: " in html
     assert "Sin proyectos autorizados para esta identidad" in html
@@ -154,7 +162,7 @@ def test_control_center_loading_and_error_states():
 
 
 def test_control_center_tab_navigation_logic():
-    html = (Path(__file__).parents[1] / "frontend" / "index.html").read_text()
+    html = control_center_source()
     assert 'tab.addEventListener("click"' in html
     assert 't.classList.remove("active");' in html
     assert 't.setAttribute("aria-selected", "false");' in html
@@ -163,7 +171,7 @@ def test_control_center_tab_navigation_logic():
 
 
 def test_control_center_governance_strictly_separates_evaluations_from_executions():
-    html = (Path(__file__).parents[1] / "frontend" / "index.html").read_text()
+    html = control_center_source()
     # Capabilities and evaluations must never be represented as executions
     assert 'card.append(node("div", "Ejecución autorizada: no", "meta-line disclaimer"));' in html
     assert 'card.append(node("div", "Registro sin permiso de ejecución implícito", "meta-line"));' in html
@@ -172,14 +180,14 @@ def test_control_center_governance_strictly_separates_evaluations_from_execution
 
 
 def test_control_center_governance_strictly_avoids_claiming_independent_audit():
-    html = (Path(__file__).parents[1] / "frontend" / "index.html").read_text()
+    html = control_center_source()
     # Safety note warns that records are not certified independent audits
     assert "Los dictámenes de auditoría son registros almacenados y no sustituyen una certificación de auditoría independiente." in html
     assert "Registro almacenado; independencia y validez no certificadas." in html
 
 
 def test_control_center_governance_does_not_treat_in_review_tasks_as_approved():
-    html = (Path(__file__).parents[1] / "frontend" / "index.html").read_text()
+    html = control_center_source()
     # IN_REVIEW status is mapped to "Revisión", never "Aprobado"
     assert 'IN_REVIEW: "Revisión"' in html
     # Approval reviews are noted as stored auditor reviews, not task completion or certified state
@@ -199,7 +207,7 @@ def test_patch_proposal_diff_inspection_requires_auditor_token():
 
 
 def test_control_center_git_lifecycle_tab_and_views_present():
-    html = (Path(__file__).parents[1] / "frontend" / "index.html").read_text()
+    html = control_center_source()
     assert 'data-tab="tab-git-lifecycle"' in html
     assert 'Ciclo Git e Integración' in html
     assert 'id="tab-git-lifecycle"' in html
@@ -207,7 +215,7 @@ def test_control_center_git_lifecycle_tab_and_views_present():
 
 
 def test_control_center_git_lifecycle_tables_and_exact_shas_present():
-    html = (Path(__file__).parents[1] / "frontend" / "index.html").read_text()
+    html = control_center_source()
     assert 'id="git-candidates-table-body"' in html
     assert 'id="git-reviews-table-body"' in html
     assert 'id="git-promotion-history-table-body"' in html
@@ -219,7 +227,7 @@ def test_control_center_git_lifecycle_tables_and_exact_shas_present():
 
 
 def test_control_center_promotion_gate_strictly_fails_closed():
-    html = (Path(__file__).parents[1] / "frontend" / "index.html").read_text()
+    html = control_center_source()
     # Promotion button is permanently disabled in the DOM without verifiable authority
     assert 'id="btn-promote-candidate" class="primary" disabled aria-disabled="true"' in html
     assert 'PROMOCIÓN BLOQUEADA' in html
@@ -232,7 +240,7 @@ def test_control_center_promotion_gate_strictly_fails_closed():
 
 
 def test_control_center_git_lifecycle_veto_and_unaccredited_promotions():
-    html = (Path(__file__).parents[1] / "frontend" / "index.html").read_text()
+    html = control_center_source()
     # VETO triggers immediate veto status and blocks promotion
     assert 'r.decision === "VETO"' in html
     assert 'VETO ACTIVO' in html
@@ -253,3 +261,25 @@ def test_control_center_git_lifecycle_veto_and_unaccredited_promotions():
     assert "142d6c5c542e6b6f790175f7a8cf14c23c6be73b" in html
     assert "91eb7543658fe92875cefa3de1e27704d830feb7" in html
     assert "ea549700ad82405dd0f64eb9121aa116d281a022" in html
+
+
+def test_control_center_assets_are_separate_same_origin_resources():
+    with TestClient(app) as client:
+        page = client.get("/")
+        stylesheet = client.get("/assets/control-center.css")
+        script = client.get("/assets/control-center.js")
+
+    assert page.status_code == stylesheet.status_code == script.status_code == 200
+    assert 'href="/assets/control-center.css"' in page.text
+    assert 'src="/assets/control-center.js" defer' in page.text
+    assert "text/css" in stylesheet.headers["content-type"]
+    assert "javascript" in script.headers["content-type"]
+    assert "<style" not in page.text
+    assert "<script>" not in page.text
+
+
+def test_control_center_markup_has_no_inline_style_attributes():
+    html = (Path(__file__).parents[1] / "frontend" / "index.html").read_text()
+    assert "style=" not in html
+    assert html.count("<html") == html.count("</html>") == 1
+    assert html.count("<body") == html.count("</body>") == 1

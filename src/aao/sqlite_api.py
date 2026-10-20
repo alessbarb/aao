@@ -101,6 +101,22 @@ def workboard_ui():
     return FileResponse(Path(__file__).resolve().parents[2] / "frontend" / "index.html")
 
 
+@app.get("/assets/control-center.css", include_in_schema=False)
+def control_center_stylesheet():
+    return FileResponse(
+        Path(__file__).resolve().parents[2] / "frontend" / "control-center.css",
+        media_type="text/css",
+    )
+
+
+@app.get("/assets/control-center.js", include_in_schema=False)
+def control_center_script():
+    return FileResponse(
+        Path(__file__).resolve().parents[2] / "frontend" / "control-center.js",
+        media_type="text/javascript",
+    )
+
+
 @app.get("/health")
 def health():
     return {"status": "ok", "autonomous_execution": False}
