@@ -2,7 +2,11 @@ from pathlib import Path
 
 
 def test_control_center_renders_project_scoped_capability_registry_as_non_authorizing():
-    html = (Path(__file__).parents[1] / "frontend" / "index.html").read_text()
+    frontend = Path(__file__).parents[1] / "frontend"
+    html = "\n".join(
+        (frontend / name).read_text()
+        for name in ("index.html", "control-center.css", "control-center.js")
+    )
     assert 'id="capabilities"' in html
     assert '"/v1/projects/"+encodeURIComponent(project.value)+"/capabilities"' in html
     assert '"/v1/projects/"+encodeURIComponent(project.value)+"/capability-evaluations"' in html
