@@ -3,8 +3,1931 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>AAO — Internal Workboard</title>
+  <title>AAO Control Center — Operaciones Organizativas</title>
   <style>
+    :root {
+      --bg-canvas: #0c1017;
+      --bg-panel: #141b24;
+      --bg-surface: #1b2431;
+      --bg-hover: #222e3e;
+      --bg-active: #2a3a4e;
+      --border-subtle: #253344;
+      --border-strong: #37485e;
+      --text-main: #f0f4f9;
+      --text-muted: #9ab0c8;
+      --text-dim: #647890;
+      --accent-primary: #38bdf8;
+      --accent-focus: #7dd3fc;
+      --status-ok: #34d399;
+      --status-warn: #fbbf24;
+      --status-danger: #f87171;
+      --status-info: #60a5fa;
+      --badge-veto: #ef4444;
+      --badge-approve: #10b981;
+      --badge-reject: #f59e0b;
+      --font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+      --font-mono: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, monospace;
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      background: var(--bg-canvas);
+      color: var(--text-main);
+      font-family: var(--font-family);
+      font-size: 14px;
+      line-height: 1.5;
+    }
+    .layout-shell {
+      max-width: 1400px;
+      margin: 0 auto;
+      padding: 20px 24px 60px;
+    }
+    header.app-header {
+      display: flex;
+      flex-wrap: wrap;
+      align-items: center;
+      justify-content: space-between;
+      gap: 16px;
+      padding-bottom: 18px;
+      border-bottom: 1px solid var(--border-subtle);
+    }
+    .brand-group {
+      display: flex;
+      align-items: center;
+      gap: 14px;
+    }
+    .brand-group .logo-badge {
+      display: inline-grid;
+      place-items: center;
+      width: 40px;
+      height: 40px;
+      background: linear-gradient(135deg, #1e293b, #0f172a);
+      border: 1px solid var(--border-strong);
+      border-radius: 8px;
+      font-weight: 800;
+      font-size: 1.15rem;
+      color: var(--accent-primary);
+      letter-spacing: -0.05em;
+    }
+    .brand-group h1 {
+      margin: 0;
+      font-size: 1.25rem;
+      font-weight: 700;
+      color: var(--text-main);
+      letter-spacing: -0.01em;
+    }
+    .brand-group .tagline {
+      margin: 0;
+      font-size: 0.8rem;
+      color: var(--text-muted);
+    }
+    .header-controls {
+      display: flex;
+      flex-wrap: wrap;
+      align-items: center;
+      gap: 10px;
+    }
+    button, select, input {
+      font-family: inherit;
+      font-size: 0.85rem;
+      color: var(--text-main);
+      background: var(--bg-surface);
+      border: 1px solid var(--border-subtle);
+      border-radius: 6px;
+      padding: 8px 12px;
+      transition: background 0.15s, border-color 0.15s;
+    }
+    button {
+      cursor: pointer;
+      font-weight: 600;
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+    }
+    button:hover {
+      background: var(--bg-hover);
+      border-color: var(--border-strong);
+    }
+    button.primary {
+      background: #1e3a5f;
+      border-color: #2b568c;
+      color: #93c5fd;
+    }
+    button.primary:hover {
+      background: #254876;
+    }
+    button:focus-visible, select:focus-visible, input:focus-visible {
+      outline: 2px solid var(--accent-focus);
+      outline-offset: 1px;
+    }
+    .auth-banner {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 12px;
+      background: #16202c;
+      border: 1px solid #233448;
+      border-radius: 8px;
+      padding: 12px 16px;
+      margin: 16px 0;
+      font-size: 0.85rem;
+    }
+    .auth-form {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      flex-wrap: wrap;
+    }
+    .auth-form label {
+      color: var(--text-muted);
+      font-size: 0.8rem;
+    }
+    .auth-form input[type="password"] {
+      width: 260px;
+    }
+    .session-badge {
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
+      font-size: 0.8rem;
+      background: #0f2720;
+      color: #a7f3d0;
+      border: 1px solid #065f46;
+      border-radius: 9999px;
+      padding: 4px 12px;
+    }
+    .session-badge .pulse-dot {
+      width: 7px;
+      height: 7px;
+      border-radius: 50%;
+      background: #10b981;
+    }
+    .safety-note {
+      margin: 14px 0 20px;
+      padding: 12px 16px;
+      border: 1px solid #854d0e;
+      border-radius: 8px;
+      background: #2a1f0a;
+      color: #fef08a;
+      font-size: 0.85rem;
+      line-height: 1.45;
+    }
+    .safety-note strong {
+      color: #fde047;
+    }
+    .status-bar {
+      margin-bottom: 16px;
+      font-size: 0.82rem;
+      color: var(--text-muted);
+    }
+    .nav-tabs {
+      display: flex;
+      gap: 4px;
+      border-bottom: 1px solid var(--border-subtle);
+      margin-bottom: 20px;
+      overflow-x: auto;
+      padding-bottom: 2px;
+    }
+    .nav-tab {
+      background: transparent;
+      border: none;
+      border-bottom: 2px solid transparent;
+      border-radius: 0;
+      padding: 10px 16px;
+      color: var(--text-muted);
+      font-weight: 500;
+      white-space: nowrap;
+    }
+    .nav-tab:hover {
+      background: transparent;
+      color: var(--text-main);
+    }
+    .nav-tab.active {
+      color: var(--accent-primary);
+      border-bottom-color: var(--accent-primary);
+      font-weight: 600;
+    }
+    .tab-content {
+      display: none;
+    }
+    .tab-content.active {
+      display: block;
+    }
+    /* Kanban View */
+    .kanban-grid {
+      display: grid;
+      grid-template-columns: repeat(6, minmax(200px, 1fr));
+      gap: 12px;
+      overflow-x: auto;
+      padding-bottom: 14px;
+    }
+    .kanban-col {
+      background: var(--bg-panel);
+      border: 1px solid var(--border-subtle);
+      border-radius: 8px;
+      padding: 12px;
+      display: flex;
+      flex-direction: column;
+      gap: 10px;
+      min-height: 380px;
+    }
+    .kanban-header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding-bottom: 8px;
+      border-bottom: 1px solid var(--border-subtle);
+    }
+    .kanban-header h2 {
+      margin: 0;
+      font-size: 0.88rem;
+      font-weight: 600;
+      color: var(--text-main);
+    }
+    .kanban-header .count-pill {
+      font-size: 0.72rem;
+      font-weight: 600;
+      background: var(--bg-surface);
+      color: var(--text-dim);
+      padding: 2px 7px;
+      border-radius: 9999px;
+    }
+    .task-card {
+      background: var(--bg-surface);
+      border: 1px solid var(--border-subtle);
+      border-radius: 6px;
+      padding: 10px 12px;
+      display: flex;
+      flex-direction: column;
+      gap: 8px;
+      cursor: pointer;
+      transition: border-color 0.15s, transform 0.1s;
+    }
+    .task-card:hover {
+      border-color: var(--border-strong);
+      background: var(--bg-hover);
+    }
+    .task-card-title {
+      font-weight: 600;
+      font-size: 0.88rem;
+      color: var(--text-main);
+      margin: 0;
+    }
+    .task-meta {
+      font-size: 0.75rem;
+      color: var(--text-muted);
+      display: flex;
+      flex-wrap: wrap;
+      align-items: center;
+      gap: 6px;
+    }
+    .pill {
+      font-size: 0.72rem;
+      font-weight: 500;
+      padding: 2px 6px;
+      border-radius: 4px;
+      background: #1e293b;
+      color: #94a3b8;
+      border: 1px solid #334155;
+    }
+    .pill.veto { background: #450a0a; color: #fca5a5; border-color: #991b1b; font-weight: 700; }
+    .pill.approve { background: #064e3b; color: #6ee7b7; border-color: #047857; }
+    .pill.reject { background: #451a03; color: #fdba74; border-color: #9a3412; }
+    .pill.proposal { background: #172554; color: #93c5fd; border-color: #1e40af; }
+    .pill.execution { background: #13271f; color: #86efac; border-color: #166534; }
+    .pill.skill { background: #3b0764; color: #d8b4fe; border-color: #7e22ce; }
+    /* Table / Lists */
+    .data-table-wrapper {
+      background: var(--bg-panel);
+      border: 1px solid var(--border-subtle);
+      border-radius: 8px;
+      overflow-x: auto;
+    }
+    table.data-table {
+      width: 100%;
+      border-collapse: collapse;
+      text-align: left;
+      font-size: 0.82rem;
+    }
+    table.data-table th, table.data-table td {
+      padding: 10px 14px;
+      border-bottom: 1px solid var(--border-subtle);
+    }
+    table.data-table th {
+      background: var(--bg-surface);
+      color: var(--text-muted);
+      font-weight: 600;
+      text-transform: uppercase;
+      font-size: 0.72rem;
+      letter-spacing: 0.05em;
+    }
+    table.data-table tr:hover td {
+      background: var(--bg-hover);
+    }
+    /* Grid for Capabilities */
+    .catalog-header {
+      margin-bottom: 16px;
+      display: flex;
+      flex-wrap: wrap;
+      align-items: center;
+      justify-content: space-between;
+      gap: 12px;
+    }
+    .capability-list {
+      display: grid;
+      grid-template-columns: repeat(auto-fill, minmax(320px, 1fr));
+      gap: 14px;
+    }
+    .catalog-card {
+      background: var(--bg-panel);
+      border: 1px solid var(--border-subtle);
+      border-radius: 8px;
+      padding: 14px;
+      display: flex;
+      flex-direction: column;
+      gap: 8px;
+    }
+    .catalog-card.is-skill {
+      border-color: #6b21a8;
+      background: linear-gradient(180deg, #181224 0%, #141b24 100%);
+    }
+    .card-title-row {
+      display: flex;
+      align-items: flex-start;
+      justify-content: space-between;
+      gap: 8px;
+    }
+    .catalog-card strong {
+      font-size: 0.95rem;
+      color: var(--text-main);
+    }
+    .catalog-card p {
+      margin: 4px 0;
+      color: var(--text-muted);
+      font-size: 0.82rem;
+    }
+    .meta-line {
+      font-size: 0.78rem;
+      color: var(--text-dim);
+      word-break: break-word;
+    }
+    .meta-line.disclaimer {
+      color: #f87171;
+      font-weight: 600;
+      margin-top: 4px;
+    }
+    /* Modal / Inspector Drawer */
+    .drawer-overlay {
+      position: fixed;
+      top: 0; left: 0; right: 0; bottom: 0;
+      background: rgba(0, 0, 0, 0.75);
+      display: none;
+      justify-content: flex-end;
+      z-index: 1000;
+    }
+    .drawer-overlay.open {
+      display: flex;
+    }
+    .drawer-panel {
+      width: min(680px, 92vw);
+      background: var(--bg-panel);
+      border-left: 1px solid var(--border-strong);
+      height: 100%;
+      overflow-y: auto;
+      padding: 24px;
+      display: flex;
+      flex-direction: column;
+      gap: 18px;
+    }
+    .drawer-header {
+      display: flex;
+      align-items: flex-start;
+      justify-content: space-between;
+      gap: 12px;
+      padding-bottom: 14px;
+      border-bottom: 1px solid var(--border-subtle);
+    }
+    .drawer-section {
+      background: var(--bg-surface);
+      border: 1px solid var(--border-subtle);
+      border-radius: 6px;
+      padding: 14px;
+    }
+    .drawer-section h3 {
+      margin: 0 0 10px 0;
+      font-size: 0.88rem;
+      color: var(--accent-primary);
+      text-transform: uppercase;
+      letter-spacing: 0.05em;
+    }
+    pre.code-block {
+      background: #090d13;
+      border: 1px solid var(--border-subtle);
+      border-radius: 6px;
+      padding: 10px 12px;
+      font-family: var(--font-mono);
+      font-size: 0.75rem;
+      color: #cbd5e1;
+      overflow-x: auto;
+      white-space: pre-wrap;
+      word-break: break-all;
+    }
+    .empty-state {
+      padding: 32px 16px;
+      text-align: center;
+      color: var(--text-dim);
+      font-style: italic;
+    }
+    .filter-bar {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      margin-bottom: 14px;
+    }
+    @media (max-width: 900px) {
+      .kanban-grid { grid-template-columns: repeat(3, minmax(200px, 1fr)); }
+      .app-header { flex-direction: column; align-items: flex-start; }
+    }
+    @media (max-width: 600px) {
+      .kanban-grid { grid-template-columns: 1fr; }
+    }
+    /* Gate de Promoción y Ciclo Git */
+    .gate-card {
+      background: #171c26;
+      border: 1px solid #7f1d1d;
+      border-left: 4px solid #ef4444;
+      border-radius: 8px;
+      padding: 16px;
+      margin-bottom: 18px;
+    }
+    .gate-header {
+      display: flex;
+      flex-wrap: wrap;
+      align-items: center;
+      justify-content: space-between;
+      gap: 14px;
+    }
+    .gate-info {
+      flex: 1 1 500px;
+    }
+    .gate-actions button:disabled {
+      opacity: 0.55;
+      cursor: not-allowed;
+      background: #1e293b;
+      border-color: #334155;
+      color: #94a3b8;
+    }
+    .gate-reasons {
+      margin-top: 12px;
+      padding-top: 10px;
+      border-top: 1px solid #2d3748;
+      display: flex;
+      flex-direction: column;
+      gap: 6px;
+      font-size: 0.8rem;
+      color: var(--text-muted);
+    }
+    .gate-reason-item {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+    .sha-mono {
+      font-family: var(--font-mono);
+      font-size: 0.78rem;
+      background: #1e293b;
+      padding: 2px 5px;
+      border-radius: 4px;
+      border: 1px solid #334155;
+      color: #7dd3fc;
+    }
+  </style>
+</head>
+<body>
+  <div class="layout-shell">
+    <header class="app-header">
+      <div class="brand-group">
+        <div class="logo-badge" aria-hidden="true">A</div>
+        <div>
+          <h1>AAO Control Center</h1>
+          <p class="tagline">Consola de Operaciones Organizativas · Uso Cotidiano · Solo Lectura</p>
+        </div>
+      </div>
+      <div class="header-controls">
+        <div id="session-container">
+          <span id="session-badge" class="session-badge" style="display:none;">
+            <span class="pulse-dot"></span>
+            <span id="session-agent-id">Agente autenticado</span>
+          </span>
+        </div>
+        <label for="project" style="color:var(--text-muted);font-size:0.8rem;">Proyecto:</label>
+        <select id="project" aria-label="Proyecto"></select>
+        <button id="reload" type="button" class="primary" title="Consultar cambios en PostgreSQL">Actualizar</button>
+        <button id="disconnect" type="button" style="display:none;" title="Limpiar token y datos de la pestaña">Desconectar</button>
+      </div>
+    </header>
+
+    <div id="auth-panel" class="auth-banner">
+      <div>
+        <strong>Autenticación de Lector (In-Memory)</strong>
+        <p style="margin:2px 0 0 0;font-size:0.75rem;color:var(--text-muted);">
+          Credencial AGENT con grant <code>project.read</code>. Se conserva exclusivamente en memoria volátil de esta pestaña (sin persistencia en disco ni URL).
+        </p>
+      </div>
+      <form id="auth-form" class="auth-form" autocomplete="off">
+        <label for="auth-token">Token AGENT:</label>
+        <input id="auth-token" type="password" placeholder="Token secreto de agente" required autocomplete="new-password">
+        <button type="submit">Autenticar</button>
+      </form>
+    </div>
+
+    <aside class="safety-note" role="note">
+      <strong>Gate Técnico y Gobernanza Activa:</strong> Esta consola presenta información en tiempo real directamente leída del núcleo local de PostgreSQL.
+      El registro de una capacidad o habilidad <em>no</em> concede permiso de ejecución implícito.
+      Los dictámenes de auditoría son registros almacenados y no sustituyen una certificación de auditoría independiente.
+      Las propuestas de código permanecen aisladas y no se aplican al repositorio canónico.
+    </aside>
+
+    <div id="message" role="status" class="status-bar">Iniciando Control Center…</div>
+
+    <!-- Navigation Tabs -->
+    <nav class="nav-tabs" role="tablist" aria-label="Vistas del Control Center">
+      <button class="nav-tab active" data-tab="tab-kanban" role="tab" aria-selected="true">Kanban</button>
+      <button class="nav-tab" data-tab="tab-tasks" role="tab" aria-selected="false">Tareas</button>
+      <button class="nav-tab" data-tab="tab-agents" role="tab" aria-selected="false">Agentes e Identidad</button>
+      <button class="nav-tab" data-tab="tab-capabilities" role="tab" aria-selected="false">Capacidades y Skills</button>
+      <button class="nav-tab" data-tab="tab-proposals" role="tab" aria-selected="false">Propuestas de Código</button>
+      <button class="nav-tab" data-tab="tab-executions" role="tab" aria-selected="false">Ejecuciones</button>
+      <button class="nav-tab" data-tab="tab-evidence" role="tab" aria-selected="false">Evidencias y Auditorías</button>
+      <button class="nav-tab" data-tab="tab-git-lifecycle" role="tab" aria-selected="false">Ciclo Git e Integración</button>
+    </nav>
+
+    <!-- TAB: Kanban -->
+    <main id="tab-kanban" class="tab-content active" role="tabpanel">
+      <section id="board" class="kanban-grid" aria-label="Kanban"></section>
+    </main>
+
+    <!-- TAB: Tareas -->
+    <section id="tab-tasks" class="tab-content" role="tabpanel">
+      <div class="filter-bar">
+        <label for="filter-task-status" style="font-size:0.8rem;color:var(--text-muted);">Filtrar por estado:</label>
+        <select id="filter-task-status">
+          <option value="ALL">Todos los estados</option>
+          <option value="INBOX">Entrada (INBOX)</option>
+          <option value="READY">Preparado (READY)</option>
+          <option value="IN_PROGRESS">En curso (IN_PROGRESS)</option>
+          <option value="IN_REVIEW">En revisión (IN_REVIEW)</option>
+          <option value="VERIFIED">Verificado (VERIFIED)</option>
+          <option value="DONE">Completado (DONE)</option>
+        </select>
+      </div>
+      <div class="data-table-wrapper">
+        <table class="data-table">
+          <thead>
+            <tr>
+              <th>ID</th>
+              <th>Título</th>
+              <th>Estado</th>
+              <th>Criterios</th>
+              <th>Ejecuciones</th>
+              <th>Revisiones</th>
+              <th>Propuestas</th>
+              <th>Acción</th>
+            </tr>
+          </thead>
+          <tbody id="tasks-table-body"></tbody>
+        </table>
+      </div>
+    </section>
+
+    <!-- TAB: Agentes e Identidad -->
+    <section id="tab-agents" class="tab-content" role="tabpanel">
+      <div style="margin-bottom:16px;">
+        <h2 style="font-size:1.05rem;margin:0 0 6px 0;">Identidad y Principales del Proyecto</h2>
+        <p style="margin:0;font-size:0.82rem;color:var(--text-muted);">
+          Identidad individual de sesión autenticada vía <code>/v1/principals/me</code> y agentes registrados en actividades del proyecto.
+        </p>
+      </div>
+      <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(320px,1fr));gap:14px;margin-bottom:20px;">
+        <div class="catalog-card">
+          <div class="card-title-row">
+            <strong>Sesión Actual</strong>
+            <span class="pill" id="agent-me-status">Desconectado</span>
+          </div>
+          <p id="agent-me-desc">Sin credencial de agente en memoria.</p>
+          <div id="agent-me-details" class="meta-line"></div>
+        </div>
+      </div>
+      <h3 style="font-size:0.95rem;margin:16px 0 8px 0;color:var(--text-main);">Agentes y Participantes Observados</h3>
+      <div class="data-table-wrapper">
+        <table class="data-table">
+          <thead>
+            <tr>
+              <th>Principal ID</th>
+              <th>Rol en Proyecto</th>
+              <th>Interacciones Registradas</th>
+            </tr>
+          </thead>
+          <tbody id="agents-table-body"></tbody>
+        </table>
+      </div>
+    </section>
+
+    <!-- TAB: Capacidades y Skills -->
+    <section id="tab-capabilities" class="tab-content" role="tabpanel">
+      <div class="catalog-header">
+        <div>
+          <h2 style="font-size:1.05rem;margin:0 0 4px 0;">Capacidades y Habilidades (Skills) del Proyecto</h2>
+          <p style="margin:0;font-size:0.82rem;color:var(--text-muted);">
+            El registro no concede permiso. El uso requiere un grant de ejecución y queda ligado a tarea y resultado.
+          </p>
+        </div>
+        <div class="filter-bar" style="margin:0;">
+          <label for="filter-cap-type" style="font-size:0.8rem;color:var(--text-muted);">Tipo:</label>
+          <select id="filter-cap-type">
+            <option value="ALL">Todas las capacidades</option>
+            <option value="agent_skill">Habilidades de Agente (Skills)</option>
+            <option value="agent">Agentes</option>
+            <option value="cli_script">Scripts CLI</option>
+            <option value="library">Librerías</option>
+            <option value="application_service">Servicios</option>
+            <option value="workflow">Workflows</option>
+            <option value="knowledge_procedure">Procedimientos</option>
+          </select>
+        </div>
+      </div>
+
+      <div id="capabilities" class="capability-list"></div>
+
+      <div style="margin-top:28px;">
+        <h3 style="font-size:0.95rem;margin:0 0 4px 0;">Evaluaciones vinculadas a tareas</h3>
+        <p style="margin:0 0 12px 0;font-size:0.8rem;color:var(--text-muted);">
+          Comparativa técnica multicriterio conforme a gobernanza. Las evaluaciones no autorizan ejecución.
+        </p>
+        <div id="capability-evaluations" class="capability-list"></div>
+      </div>
+    </section>
+
+    <!-- TAB: Propuestas de Código -->
+    <section id="tab-proposals" class="tab-content" role="tabpanel">
+      <div style="margin-bottom:14px;">
+        <h2 style="font-size:1.05rem;margin:0 0 4px 0;">Propuestas de Código (Patch Proposals)</h2>
+        <p style="margin:0;font-size:0.82rem;color:var(--text-muted);">
+          Parches propuestos por agentes autorizados con grant <code>code.propose</code>. Las validaciones ocurren en clones y árboles candidatos aislados; la inspección del diff completo está reservada a credenciales AUDITOR en revisión (HTTP 403 para agentes) y ningún parche se aplica al repositorio canónico.
+        </p>
+      </div>
+      <div class="data-table-wrapper">
+        <table class="data-table">
+          <thead>
+            <tr>
+              <th>ID Propuesta</th>
+              <th>Tarea Asociada</th>
+              <th>Proponente</th>
+              <th>SHA Base</th>
+              <th>Digest SHA-256</th>
+              <th>Rutas Afectadas</th>
+              <th>Estado</th>
+              <th>Validación Aislada</th>
+              <th>Aplicación</th>
+            </tr>
+          </thead>
+          <tbody id="proposals-table-body"></tbody>
+        </table>
+      </div>
+    </section>
+
+    <!-- TAB: Ejecuciones -->
+    <section id="tab-executions" class="tab-content" role="tabpanel">
+      <div style="margin-bottom:14px;">
+        <h2 style="font-size:1.05rem;margin:0 0 4px 0;">Ejecuciones Técnicas (Execution Queue)</h2>
+        <p style="margin:0;font-size:0.82rem;color:var(--text-muted);">
+          Procesos y verificaciones registrados en la cola de ejecución. Muestra worker asignado, comprobación, SHA evaluado y registros de salida técnica.
+        </p>
+      </div>
+      <div class="data-table-wrapper">
+        <table class="data-table">
+          <thead>
+            <tr>
+              <th>ID Ejecución</th>
+              <th>Tarea</th>
+              <th>Estado</th>
+              <th>Worker</th>
+              <th>Intentos</th>
+              <th>Capacidad / Check</th>
+              <th>SHA Candidato</th>
+              <th>Salida / Logs</th>
+            </tr>
+          </thead>
+          <tbody id="executions-table-body"></tbody>
+        </table>
+      </div>
+    </section>
+
+    <!-- TAB: Evidencias y Auditorías -->
+    <section id="tab-evidence" class="tab-content" role="tabpanel">
+      <div style="margin-bottom:14px;">
+        <h2 style="font-size:1.05rem;margin:0 0 4px 0;">Evidencias de Integridad y Dictámenes de Auditoría</h2>
+        <p style="margin:0;font-size:0.82rem;color:var(--text-muted);">
+          Trazabilidad entre criterios de aceptación, referencias de evidencia y revisiones formales vinculadas a SHA.
+        </p>
+      </div>
+      <div class="data-table-wrapper">
+        <table class="data-table">
+          <thead>
+            <tr>
+              <th>Tarea</th>
+              <th>Referencias de Evidencia</th>
+              <th>Dictámenes de Auditor</th>
+              <th>Revisor</th>
+              <th>SHA Vinculado</th>
+              <th>Fecha</th>
+            </tr>
+          </thead>
+          <tbody id="evidence-table-body"></tbody>
+        </table>
+      </div>
+    </section>
+
+    <!-- TAB: Ciclo Git e Integración -->
+    <section id="tab-git-lifecycle" class="tab-content" role="tabpanel">
+      <div style="margin-bottom:14px;">
+        <h2 style="font-size:1.05rem;margin:0 0 4px 0;">Ciclo de Integración Git Local y Control de Promoción</h2>
+        <p style="margin:0;font-size:0.82rem;color:var(--text-muted);">
+          Trazabilidad del ciclo de vida de integración: candidatos Git, SHAs exactos, validaciones en árboles aislados, dictámenes, veto efectivo, bloqueos activos y control de promoción según GOV-REV-001.
+        </p>
+      </div>
+
+      <!-- Gate de Promoción / Control Fail-Closed -->
+      <div class="gate-card" id="promotion-gate-card">
+        <div class="gate-header">
+          <div class="gate-info">
+            <div style="display:flex;align-items:center;gap:8px;">
+              <span class="pill veto" id="gate-pill">PROMOCIÓN BLOQUEADA</span>
+              <strong style="font-size:0.95rem;">Gate de Integración y Promoción GOV-REV-001</strong>
+            </div>
+            <p style="margin:6px 0 0 0;font-size:0.82rem;color:var(--text-muted);">
+              <strong>Controlador no autorizado:</strong> La interfaz no permite promover candidatos mientras el controlador local no disponga de autorización verificable ni de una auditoría técnica verdaderamente independiente externa vinculada al SHA.
+              La aprobación del autor o el paso de CI verde en GitHub <em>no</em> autorizan la fusión en ramas protegidas (Constitución arts. 3 y 6).
+            </p>
+          </div>
+          <div class="gate-actions">
+            <button id="btn-promote-candidate" class="primary" disabled aria-disabled="true" title="Promoción bloqueada: requiere autoridad verificable de integración y auditoría independiente">
+              Promover Candidato a Integración (Bloqueado)
+            </button>
+          </div>
+        </div>
+        <div class="gate-reasons" id="gate-reasons-list">
+          <div class="gate-reason-item">❌ <strong>Falta de Autoridad de Promoción:</strong> La sesión ordinaria de agente no posee permisos reservados de integración ni credenciales con grant de promoción.</div>
+          <div class="gate-reason-item">❌ <strong>Falta de Certificación de Auditoría Independiente:</strong> No se dispone de dictamen independiente externo certificado para el HEAD candidato.</div>
+          <div class="gate-reason-item">❌ <strong>Dependencias Base Pendientes:</strong> Bloqueado por estabilización aguas arriba (PR #10, #11 y #16).</div>
+        </div>
+      </div>
+
+      <!-- Métricas del Ciclo Git -->
+      <div class="git-metrics-grid" style="display:grid;grid-template-columns:repeat(auto-fit, minmax(220px, 1fr));gap:12px;margin:16px 0;">
+        <div class="metric-card" style="background:var(--bg-panel);border:1px solid var(--border-subtle);border-radius:8px;padding:12px;">
+          <div style="font-size:0.75rem;color:var(--text-muted);text-transform:uppercase;font-weight:600;">Propuestas y Checks Evaluados</div>
+          <div id="metric-candidate-count" style="font-size:1.05rem;font-weight:700;color:var(--text-main);margin-top:4px;">0 propuestas · 2 checks</div>
+          <div style="font-size:0.75rem;color:var(--text-dim);margin-top:2px;">En árboles y sandbox aislados</div>
+        </div>
+        <div class="metric-card" style="background:var(--bg-panel);border:1px solid var(--border-subtle);border-radius:8px;padding:12px;">
+          <div style="font-size:0.75rem;color:var(--text-muted);text-transform:uppercase;font-weight:600;">Estado de Veto</div>
+          <div id="metric-veto-status" style="font-size:1.05rem;font-weight:700;color:var(--status-ok);margin-top:4px;">Sin veto en DB</div>
+          <div style="font-size:0.75rem;color:var(--text-dim);margin-top:2px;">Auditoría externa no certificada</div>
+        </div>
+        <div class="metric-card" style="background:var(--bg-panel);border:1px solid var(--border-subtle);border-radius:8px;padding:12px;">
+          <div style="font-size:0.75rem;color:var(--text-muted);text-transform:uppercase;font-weight:600;">Promociones Acreditadas</div>
+          <div id="metric-promotions-count" style="font-size:1.3rem;font-weight:700;color:var(--badge-veto);margin-top:4px;">0</div>
+          <div style="font-size:0.75rem;color:var(--text-dim);margin-top:2px;">Cero promociones ejecutadas · Gate cerrado</div>
+        </div>
+        <div class="metric-card" style="background:var(--bg-panel);border:1px solid var(--border-subtle);border-radius:8px;padding:12px;">
+          <div style="font-size:0.75rem;color:var(--text-muted);text-transform:uppercase;font-weight:600;">Canónico Protegido</div>
+          <div style="font-size:1.05rem;font-weight:700;color:var(--status-warn);margin-top:4px;">main inalterado</div>
+          <div style="font-size:0.75rem;color:var(--text-dim);margin-top:2px;">Sin fusiones por agentes</div>
+        </div>
+      </div>
+
+      <!-- Tabla 1: Propuestas de Parche y Comprobaciones de Commits Históricos -->
+      <h3 style="font-size:0.95rem;margin:18px 0 4px 0;">Propuestas de Parche y Comprobaciones de Commits Históricos</h3>
+      <p style="margin:0 0 10px 0;font-size:0.8rem;color:var(--text-muted);">
+        Distinción estricta entre propuestas de parche formalmente registradas y comprobaciones aisladas sobre commits históricos ejecutadas en sandbox.
+      </p>
+      <div class="data-table-wrapper">
+        <table class="data-table">
+          <thead>
+            <tr>
+              <th>Registro / Tipo</th>
+              <th>Tarea Asociada</th>
+              <th>Proponente / Worker</th>
+              <th>Base SHA</th>
+              <th>SHA256 Parche</th>
+              <th>Commit / Árbol Evaluado</th>
+              <th>Verificación Técnica</th>
+              <th>Dictamen Auditor</th>
+              <th>Estado de Integración</th>
+            </tr>
+          </thead>
+          <tbody id="git-candidates-table-body"></tbody>
+        </table>
+      </div>
+
+      <!-- Tabla 2: Dictámenes, Veto y Bloqueos de Auditoría -->
+      <h3 style="font-size:0.95rem;margin:24px 0 8px 0;">Dictámenes, Veto y Bloqueos de Auditoría</h3>
+      <div class="data-table-wrapper">
+        <table class="data-table">
+          <thead>
+            <tr>
+              <th>Tarea / Candidato</th>
+              <th>Auditor Revisor</th>
+              <th>Dictamen</th>
+              <th>Veto Efectivo</th>
+              <th>SHA Vinculado</th>
+              <th>Evidencia Registrada</th>
+              <th>Bloqueo de Promoción</th>
+            </tr>
+          </thead>
+          <tbody id="git-reviews-table-body"></tbody>
+        </table>
+      </div>
+
+      <!-- Tabla 3: Registro de Promociones Acreditadas e Historial de Integración -->
+      <h3 style="font-size:0.95rem;margin:24px 0 4px 0;">Registro de Promociones Acreditadas e Historial de Integración</h3>
+      <p style="margin:0 0 10px 0;font-size:0.8rem;color:var(--text-muted);">
+        Registro inmutable de promociones formales autorizadas al repositorio canónico. Ningún candidato cuenta actualmente con promoción acreditada.
+      </p>
+      <div class="data-table-wrapper">
+        <table class="data-table">
+          <thead>
+            <tr>
+              <th>Promoción / Candidato</th>
+              <th>SHA Promovido</th>
+              <th>Base Canónica</th>
+              <th>Acreditación GOV-REV-001</th>
+              <th>Autoridad de Integración</th>
+              <th>Estado de Integración</th>
+            </tr>
+          </thead>
+          <tbody id="git-promotion-history-table-body"></tbody>
+        </table>
+      </div>
+
+      <!-- Tabla 4: Ramas Candidatas en Desarrollo (Sin Promoción Acreditada) -->
+      <h3 style="font-size:0.95rem;margin:24px 0 4px 0;">Ramas Candidatas en Desarrollo — Sin Promoción Acreditada</h3>
+      <p style="margin:0 0 10px 0;font-size:0.8rem;color:var(--text-muted);">
+        Ramas y PRs en curso de desarrollo. Ninguna cuenta con promoción acreditada; su listado se presenta exclusivamente a efectos de trazabilidad operativa sin conferir autorización de integración.
+      </p>
+      <div class="data-table-wrapper">
+        <table class="data-table">
+          <thead>
+            <tr>
+              <th>Rama / Candidato</th>
+              <th>SHA Candidato</th>
+              <th>Base de Rama</th>
+              <th>Estado de Promoción</th>
+              <th>Acreditación Faltante</th>
+              <th>Condición del Gate</th>
+            </tr>
+          </thead>
+          <tbody id="git-unaccredited-candidates-table-body"></tbody>
+        </table>
+      </div>
+    </section>
+  </div>
+
+  <!-- Task Detail Drawer / Modal -->
+  <div id="drawer-overlay" class="drawer-overlay" aria-hidden="true">
+    <div class="drawer-panel" role="dialog" aria-modal="true" aria-labelledby="drawer-title">
+      <div class="drawer-header">
+        <div>
+          <span id="drawer-task-status" class="pill">IN_PROGRESS</span>
+          <h2 id="drawer-title" style="margin:6px 0 2px 0;font-size:1.15rem;">Detalle de Tarea</h2>
+          <span id="drawer-task-id" style="font-family:var(--font-mono);font-size:0.75rem;color:var(--text-dim);"></span>
+        </div>
+        <button id="drawer-close" type="button" aria-label="Cerrar detalle">✕ Cerrar</button>
+      </div>
+
+      <div class="drawer-section">
+        <h3>Criterios de Aceptación</h3>
+        <ul id="drawer-acceptance-criteria" style="margin:0;padding-left:18px;color:var(--text-muted);font-size:0.85rem;"></ul>
+      </div>
+
+      <div class="drawer-section">
+        <h3>Evidencias Registradas</h3>
+        <div id="drawer-evidence-list"></div>
+      </div>
+
+      <div class="drawer-section">
+        <h3>Ejecuciones Técnicas</h3>
+        <div id="drawer-executions-list"></div>
+      </div>
+
+      <div class="drawer-section">
+        <h3>Dictámenes de Revisión y Auditoría</h3>
+        <div id="drawer-reviews-list"></div>
+      </div>
+
+      <div class="drawer-section">
+        <h3>Propuestas de Código Asociadas</h3>
+        <div id="drawer-proposals-list"></div>
+      </div>
+    </div>
+  </div>
+
+  <script>
+    "use strict";
+    const states = ["INBOX", "READY", "IN_PROGRESS", "IN_REVIEW", "VERIFIED", "DONE"];
+    const labels = {
+      INBOX: "Entrada",
+      READY: "Preparado",
+      IN_PROGRESS: "En curso",
+      IN_REVIEW: "Revisión",
+      VERIFIED: "Verificado",
+      DONE: "Completado"
+    };
+
+    const project = document.querySelector("#project");
+    const board = document.querySelector("#board");
+    const message = document.querySelector("#message");
+    const capabilities = document.querySelector("#capabilities");
+    const evaluations = document.querySelector("#capability-evaluations");
+    const authPanel = document.querySelector("#auth-panel");
+    const authForm = document.querySelector("#auth-form");
+    const authTokenInput = document.querySelector("#auth-token");
+    const sessionBadge = document.querySelector("#session-badge");
+    const sessionAgentId = document.querySelector("#session-agent-id");
+    const disconnectBtn = document.querySelector("#disconnect");
+    const reloadBtn = document.querySelector("#reload");
+
+    // Drawer elements
+    const drawerOverlay = document.querySelector("#drawer-overlay");
+    const drawerClose = document.querySelector("#drawer-close");
+    const drawerTitle = document.querySelector("#drawer-title");
+    const drawerTaskId = document.querySelector("#drawer-task-id");
+    const drawerTaskStatus = document.querySelector("#drawer-task-status");
+    const drawerAcceptance = document.querySelector("#drawer-acceptance-criteria");
+    const drawerEvidence = document.querySelector("#drawer-evidence-list");
+    const drawerExecutions = document.querySelector("#drawer-executions-list");
+    const drawerReviews = document.querySelector("#drawer-reviews-list");
+    const drawerProposals = document.querySelector("#drawer-proposals-list");
+
+    // Project reader credential stays in tab memory (never in browser persistent storage).
+    let readerToken = null;
+    let currentPrincipal = null;
+    let currentWorkItems = [];
+    let currentCapabilities = [];
+    let currentEvaluations = [];
+
+    function node(tag, text, cls) {
+      const e = document.createElement(tag);
+      if (text !== undefined && text !== null) e.textContent = text;
+      if (cls) e.className = cls;
+      return e;
+    }
+
+    function clearReaderSession() {
+      readerToken = null;
+      currentPrincipal = null;
+      currentWorkItems = [];
+      currentCapabilities = [];
+      currentEvaluations = [];
+      authTokenInput.value = "";
+      authPanel.style.display = "flex";
+      sessionBadge.style.display = "none";
+      disconnectBtn.style.display = "none";
+      document.querySelector("#agent-me-status").textContent = "Desconectado";
+      document.querySelector("#agent-me-desc").textContent = "Sin credencial de agente en memoria.";
+      document.querySelector("#agent-me-details").textContent = "";
+      board.replaceChildren();
+      capabilities.replaceChildren();
+      evaluations.replaceChildren();
+      document.querySelector("#tasks-table-body").replaceChildren();
+      document.querySelector("#proposals-table-body").replaceChildren();
+      document.querySelector("#executions-table-body").replaceChildren();
+      document.querySelector("#evidence-table-body").replaceChildren();
+      document.querySelector("#agents-table-body").replaceChildren();
+      document.querySelector("#git-candidates-table-body").replaceChildren();
+      document.querySelector("#git-reviews-table-body").replaceChildren();
+      document.querySelector("#git-promotion-history-table-body").replaceChildren();
+      const tbodyUnaccredited = document.querySelector("#git-unaccredited-candidates-table-body");
+      if (tbodyUnaccredited) tbodyUnaccredited.replaceChildren();
+      message.textContent = "Sesión desconectada. Autenticación requerida para consultar el núcleo local.";
+    }
+
+    async function json(url) {
+      if (!readerToken) {
+        throw new Error("Se requiere identidad AGENT con acceso de lectura al proyecto");
+      }
+      let r = await fetch(url, { credentials: "same-origin", headers:{"X-Agent-Token":readerToken} });
+      if (r.status === 401 || r.status === 403) {
+        clearReaderSession();
+        throw new Error("Credencial rechazada o revocada por el núcleo local (HTTP " + r.status + ")");
+      }
+      if (!r.ok) throw new Error("HTTP " + r.status);
+      return r.json();
+    }
+
+    async function checkCurrentPrincipal() {
+      if (!readerToken) return;
+      try {
+        const res = await json("/v1/principals/me");
+        currentPrincipal = res;
+        sessionAgentId.textContent = "Agente: " + res.principal_id;
+        sessionBadge.style.display = "inline-flex";
+        disconnectBtn.style.display = "inline-flex";
+        authPanel.style.display = "none";
+        document.querySelector("#agent-me-status").textContent = res.enabled ? "Activo" : "Deshabilitado";
+        document.querySelector("#agent-me-desc").textContent = "Identidad validada: " + res.principal_id + " (" + res.kind + ")";
+        document.querySelector("#agent-me-details").textContent = "Permisos de consulta activos vía grant project.read.";
+      } catch (err) {
+        currentPrincipal = null;
+      }
+    }
+
+    async function loadProjects() {
+      try {
+        const projects = await json("/v1/projects");
+        const previous = project.value;
+        project.replaceChildren();
+        for (const p of projects) {
+          const opt = node("option", p.name + " · " + p.state);
+          opt.value = p.id;
+          project.append(opt);
+        }
+        if (projects.some(p => p.id === previous)) {
+          project.value = previous;
+        }
+        if (projects.length) {
+          await checkCurrentPrincipal();
+          await loadBoard();
+        } else {
+          board.replaceChildren();
+          capabilities.replaceChildren();
+          evaluations.replaceChildren();
+          message.textContent = "Sin proyectos autorizados para esta identidad";
+        }
+      } catch (err) {
+        message.replaceChildren(node("p", "No se pudieron consultar los proyectos: " + err.message, "meta"));
+      }
+    }
+
+    async function loadBoard() {
+      if (!project.value) return;
+      message.textContent = "Cargando datos reales de PostgreSQL…";
+      try {
+        const work = await json("/v1/projects/"+encodeURIComponent(project.value)+"/board");
+        const available = await json("/v1/projects/"+encodeURIComponent(project.value)+"/capabilities");
+        const assessments = await json("/v1/projects/"+encodeURIComponent(project.value)+"/capability-evaluations");
+
+        currentWorkItems = work;
+        currentCapabilities = available;
+        currentEvaluations = assessments;
+
+        renderKanban(work);
+        renderTasksTable(work);
+        renderCapabilities(available, assessments);
+        renderEvaluations(assessments);
+        renderProposals(work);
+        renderExecutions(work);
+        renderEvidence(work);
+        renderAgents(work);
+        renderGitLifecycle(work);
+
+        const executionCount = work.reduce((count, task) => count + (Array.isArray(task.executions) ? task.executions.length : 0), 0);
+        message.textContent = "Mostrando " + work.length + " tareas · " + executionCount + " ejecuciones registradas · " + available.length + " capacidades";
+      } catch (e) {
+        message.replaceChildren(node("p", "No se pudo cargar el tablero: " + e.message, "meta"));
+      }
+    }
+
+    function renderKanban(work) {
+      board.replaceChildren();
+      for (const state of states) {
+        const col = node("section", "", "kanban-col");
+        const header = node("div", "", "kanban-header");
+        header.append(node("h2", labels[state]));
+        const tasks = work.filter(w => w.status === state);
+        header.append(node("span", tasks.length + " tareas", "count-pill"));
+        col.append(header);
+
+        if (!tasks.length) {
+          col.append(node("div", "Sin tareas", "empty-state"));
+        }
+
+        for (const task of tasks) {
+          const card = node("article", "", "task-card");
+          card.tabIndex = 0;
+          card.setAttribute("role", "button");
+          card.setAttribute("aria-label", "Ver detalle de " + task.title);
+
+          const titleRow = node("div", "", "card-title-row");
+          titleRow.append(node("h3", task.title, "task-card-title"));
+          card.append(titleRow);
+
+          const meta = node("div", "", "task-meta");
+          meta.append(node("span", task.id.slice(0, 8), "pill"));
+
+          const criteriaCount = Array.isArray(task.acceptance_criteria) ? task.acceptance_criteria.length : 0;
+          meta.append(node("span", criteriaCount + " criterios", "pill"));
+
+          const executions = Array.isArray(task.executions) ? task.executions : [];
+          if (executions.length) {
+            meta.append(node("span", executions.length + " ejecuciones", "pill execution"));
+          }
+
+          const reviews = Array.isArray(task.reviews) ? task.reviews : [];
+          for (const rev of reviews) {
+            if (rev.decision === "VETO") meta.append(node("span", "VETO ACTIVO", "pill veto"));
+            else if (rev.decision === "APPROVE") meta.append(node("span", "Aprobación registrada", "pill approve"));
+            else if (rev.decision === "REJECT") meta.append(node("span", "Rechazado", "pill reject"));
+          }
+
+          const proposals = Array.isArray(task.patch_proposals) ? task.patch_proposals : [];
+          if (proposals.length) {
+            meta.append(node("span", proposals.length + " parches", "pill proposal"));
+          }
+
+          card.append(meta);
+          card.addEventListener("click", () => openTaskDrawer(task));
+          card.addEventListener("keydown", (ev) => {
+            if (ev.key === "Enter" || ev.key === " ") {
+              ev.preventDefault();
+              openTaskDrawer(task);
+            }
+          });
+          col.append(card);
+        }
+        board.append(col);
+      }
+    }
+
+    function renderTasksTable(work) {
+      const tbody = document.querySelector("#tasks-table-body");
+      const filterStatus = document.querySelector("#filter-task-status").value;
+      tbody.replaceChildren();
+
+      const filtered = filterStatus === "ALL" ? work : work.filter(w => w.status === filterStatus);
+      if (!filtered.length) {
+        const tr = node("tr");
+        const td = node("td", "No hay tareas registradas para este filtro.", "empty-state");
+        td.colSpan = 8;
+        tr.append(td);
+        tbody.append(tr);
+        return;
+      }
+
+      for (const t of filtered) {
+        const tr = node("tr");
+        tr.append(node("td", t.id.slice(0, 8)));
+        tr.append(node("td", t.title));
+        tr.append(node("td", labels[t.status] || t.status));
+        tr.append(node("td", String(Array.isArray(t.acceptance_criteria) ? t.acceptance_criteria.length : 0)));
+        tr.append(node("td", String(Array.isArray(t.executions) ? t.executions.length : 0)));
+        tr.append(node("td", String(Array.isArray(t.reviews) ? t.reviews.length : 0)));
+        tr.append(node("td", String(Array.isArray(t.patch_proposals) ? t.patch_proposals.length : 0)));
+
+        const actionTd = node("td");
+        const btn = node("button", "Ver detalle");
+        btn.type = "button";
+        btn.addEventListener("click", () => openTaskDrawer(t));
+        actionTd.append(btn);
+        tr.append(actionTd);
+        tbody.append(tr);
+      }
+    }
+
+    function renderCapabilities(available, assessments) {
+      capabilities.replaceChildren();
+      const filterType = document.querySelector("#filter-cap-type").value;
+      const filtered = filterType === "ALL" ? available : available.filter(c => c.capability_type === filterType);
+
+      if (!filtered.length) {
+        capabilities.append(node("p", "No hay capacidades registradas para este proyecto.", "meta-line"));
+        return;
+      }
+
+      for (const capability of filtered) {
+        const isSkill = capability.capability_type === "agent_skill" || capability.capability_type === "agent";
+        const card = node("article", "", "catalog-card" + (isSkill ? " is-skill" : ""));
+
+        const titleRow = node("div", "", "card-title-row");
+        titleRow.append(node("strong", capability.capability_id+" · "+capability.version));
+        if (isSkill) {
+          titleRow.append(node("span", "Habilidad (Skill)", "pill skill"));
+        } else {
+          titleRow.append(node("span", capability.capability_type, "pill"));
+        }
+        card.append(titleRow);
+
+        card.append(node("div", capability.capability_type + " · " + capability.status, "meta-line"));
+        card.append(node("p", typeof capability.contract.purpose === "string" ? capability.contract.purpose : "Contrato registrado; propósito no especificado."));
+
+        card.append(node("div", "Procedencia: "+JSON.stringify(capability.provenance), "meta-line"));
+        card.append(node("div", "Permisos declarados: " + (capability.required_permissions.join(", ") || "ninguno"), "meta-line"));
+        card.append(node("div", "Riesgos y límites: " + (capability.risks.join(", ") || "no declarados"), "meta-line"));
+        card.append(node("div", "Pruebas y evidencia: " + [...capability.tests, ...(capability.evidence || [])].join(", "), "meta-line"));
+
+        const assessedBy = assessments.filter(item => item.details.capability_id === capability.capability_id && item.details.version === capability.version);
+        card.append(node("div", assessedBy.length ? "Evaluada en tareas: " + assessedBy.map(item => item.task_title).join(", ") : "Evaluada en tareas: Sin evaluaciones vinculadas a tareas.", "meta-line"));
+
+        card.append(node("div", "Ejecución autorizada: no", "meta-line disclaimer"));
+        card.append(node("div", "Registro sin permiso de ejecución implícito", "meta-line"));
+
+        capabilities.append(card);
+      }
+    }
+
+    function renderEvaluations(assessments) {
+      evaluations.replaceChildren();
+      if (!assessments.length) {
+        evaluations.append(node("p", "No hay evaluaciones registradas.", "meta-line"));
+        return;
+      }
+
+      for (const assessment of assessments) {
+        const details = assessment.details;
+        const card = node("article", "", "catalog-card");
+        const recommendation = details.recommendation || "Sin recomendación única (empate)";
+
+        card.append(node("strong", assessment.task_title + " · " + recommendation));
+        card.append(node("div", "Tarea: " + assessment.task_id, "meta-line"));
+        card.append(node("p", details.rationale));
+
+        const scoreStr = Object.entries(details.scores || {}).map(([name, score]) => name + " " + score).join(" · ");
+        card.append(node("div", "Puntuaciones: " + scoreStr, "meta-line"));
+        card.append(node("div", "Evidencia: " + (details.evidence || []).join(", "), "meta-line"));
+        card.append(node("div", "Evaluación no autoriza ejecución.", "meta-line disclaimer"));
+
+        evaluations.append(card);
+      }
+    }
+
+    function renderProposals(work) {
+      const tbody = document.querySelector("#proposals-table-body");
+      tbody.replaceChildren();
+
+      const allProposals = [];
+      for (const task of work) {
+        const proposals = Array.isArray(task.patch_proposals) ? task.patch_proposals : [];
+        for (const p of proposals) {
+          allProposals.push({ taskTitle: task.title, taskId: task.id, proposal: p });
+        }
+      }
+
+      if (!allProposals.length) {
+        const tr = node("tr");
+        const td = node("td", "No hay propuestas de código registradas en este proyecto.", "empty-state");
+        td.colSpan = 9;
+        tr.append(td);
+        tbody.append(tr);
+        return;
+      }
+
+      for (const item of allProposals) {
+        const p = item.proposal;
+        const tr = node("tr");
+        tr.append(node("td", p.id.slice(0, 8)));
+        tr.append(node("td", item.taskTitle));
+        tr.append(node("td", p.proposer_id));
+        tr.append(node("td", p.base_sha.slice(0, 8)));
+        tr.append(node("td", p.patch_sha256.slice(0, 10)));
+        tr.append(node("td", (p.changed_paths || []).join(", ") || "sin rutas"));
+        tr.append(node("td", p.status));
+
+        const validations = Array.isArray(p.validations) ? p.validations : [];
+        if (validations.length) {
+          const valSummary = validations.map(v => v.validator_id + " (árbol " + v.candidate_tree.slice(0, 7) + ")").join(", ");
+          tr.append(node("td", valSummary));
+        } else {
+          tr.append(node("td", "Pendiente de validación"));
+        }
+
+        tr.append(node("td", "No disponible (aislado)"));
+        tbody.append(tr);
+      }
+    }
+
+    function renderExecutions(work) {
+      const tbody = document.querySelector("#executions-table-body");
+      tbody.replaceChildren();
+
+      const allExecutions = [];
+      for (const task of work) {
+        const execs = Array.isArray(task.executions) ? task.executions : [];
+        for (const e of execs) {
+          allExecutions.push({ taskTitle: task.title, taskId: task.id, execution: e });
+        }
+      }
+
+      if (!allExecutions.length) {
+        const tr = node("tr");
+        const td = node("td", "No hay ejecuciones registradas en este proyecto.", "empty-state");
+        td.colSpan = 8;
+        tr.append(td);
+        tbody.append(tr);
+        return;
+      }
+
+      for (const item of allExecutions) {
+        const e = item.execution;
+        const res = e.result || {};
+        const tr = node("tr");
+        tr.append(node("td", e.id.slice(0, 8)));
+        tr.append(node("td", item.taskTitle));
+        tr.append(node("td", e.status));
+        tr.append(node("td", e.worker_id || "No asignado"));
+        tr.append(node("td", String(e.attempts || 1)));
+        tr.append(node("td", (res.capability_id ? res.capability_id + "@" + res.capability_version : "Check: " + (res.check_id || "genérico"))));
+        tr.append(node("td", res.candidate_sha ? res.candidate_sha.slice(0, 8) : "no ligado"));
+
+        const logTd = node("td");
+        if (res.stdout || res.stderr) {
+          const details = node("details");
+          details.append(node("summary", "Ver salida (" + (res.conclusion || "código " + res.exit_code) + ")"));
+          if (res.stdout) details.append(node("pre", res.stdout, "code-block"));
+          if (res.stderr) details.append(node("pre", res.stderr, "code-block"));
+          logTd.append(details);
+        } else {
+          logTd.textContent = "Sin salida registrada";
+        }
+        tr.append(logTd);
+        tbody.append(tr);
+      }
+    }
+
+    function renderEvidence(work) {
+      const tbody = document.querySelector("#evidence-table-body");
+      tbody.replaceChildren();
+
+      let hasEvidenceOrReviews = false;
+      for (const task of work) {
+        const evidenceRefs = Array.isArray(task.evidence) ? task.evidence : [];
+        const reviews = Array.isArray(task.reviews) ? task.reviews : [];
+
+        if (evidenceRefs.length || reviews.length) {
+          hasEvidenceOrReviews = true;
+          const tr = node("tr");
+          tr.append(node("td", task.title));
+          tr.append(node("td", evidenceRefs.join(", ") || "Sin referencias directas"));
+
+          if (reviews.length) {
+            const decs = reviews.map(r => r.decision + (r.sha_bound ? " (SHA ligado)" : "")).join(" · ");
+            tr.append(node("td", decs));
+            tr.append(node("td", reviews.map(r => r.reviewer_id).join(", ")));
+            tr.append(node("td", reviews.map(r => r.candidate_sha ? r.candidate_sha.slice(0, 8) : "sin SHA").join(", ")));
+            tr.append(node("td", reviews.map(r => r.created_at).join(", ")));
+          } else {
+            tr.append(node("td", "Sin dictamen de auditor"));
+            tr.append(node("td", "—"));
+            tr.append(node("td", "—"));
+            tr.append(node("td", "—"));
+          }
+          tbody.append(tr);
+        }
+      }
+
+      if (!hasEvidenceOrReviews) {
+        const tr = node("tr");
+        const td = node("td", "No hay evidencias ni revisiones registradas en este proyecto.", "empty-state");
+        td.colSpan = 6;
+        tr.append(td);
+        tbody.append(tr);
+      }
+    }
+
+    function renderAgents(work) {
+      const tbody = document.querySelector("#agents-table-body");
+      tbody.replaceChildren();
+
+      const participants = new Map();
+      if (currentPrincipal) {
+        participants.set(currentPrincipal.principal_id, {
+          role: "Sesión Lector Activo (" + currentPrincipal.kind + ")",
+          interactions: "Consultas de tablero, catálogo y evidencias"
+        });
+      }
+
+      for (const task of work) {
+        if (task.author_id) {
+          const prev = participants.get(task.author_id) || { role: "Autor de Tarea", interactions: "" };
+          participants.set(task.author_id, prev);
+        }
+        for (const e of (task.executions || [])) {
+          if (e.worker_id) {
+            const prev = participants.get(e.worker_id) || { role: "Worker Ejecutor", interactions: "" };
+            prev.interactions = (prev.interactions ? prev.interactions + "; " : "") + "Ejecución " + e.id.slice(0, 8);
+            participants.set(e.worker_id, prev);
+          }
+        }
+        for (const r of (task.reviews || [])) {
+          if (r.reviewer_id) {
+            const prev = participants.get(r.reviewer_id) || { role: "Auditor Revisor", interactions: "" };
+            prev.interactions = (prev.interactions ? prev.interactions + "; " : "") + "Dictamen " + r.decision;
+            participants.set(r.reviewer_id, prev);
+          }
+        }
+        for (const p of (task.patch_proposals || [])) {
+          if (p.proposer_id) {
+            const prev = participants.get(p.proposer_id) || { role: "Agente Proponente", interactions: "" };
+            prev.interactions = (prev.interactions ? prev.interactions + "; " : "") + "Propuesta " + p.id.slice(0, 8);
+            participants.set(p.proposer_id, prev);
+          }
+          for (const v of (p.validations || [])) {
+            if (v.validator_id) {
+              const prev = participants.get(v.validator_id) || { role: "Validador Aislado", interactions: "" };
+              prev.interactions = (prev.interactions ? prev.interactions + "; " : "") + "Validación en árbol " + v.candidate_tree.slice(0, 7);
+              participants.set(v.validator_id, prev);
+            }
+          }
+        }
+      }
+
+      if (!participants.size) {
+        const tr = node("tr");
+        const td = node("td", "No hay identidades registradas en las actividades de este proyecto.", "empty-state");
+        td.colSpan = 3;
+        tr.append(td);
+        tbody.append(tr);
+        return;
+      }
+
+      for (const [id, data] of participants.entries()) {
+        const tr = node("tr");
+        tr.append(node("td", id));
+        tr.append(node("td", data.role));
+        tr.append(node("td", data.interactions || "Participación registrada"));
+        tbody.append(tr);
+      }
+    }
+
+    function renderGitLifecycle(work) {
+      const tbodyCandidates = document.querySelector("#git-candidates-table-body");
+      const tbodyReviews = document.querySelector("#git-reviews-table-body");
+      const tbodyPromotions = document.querySelector("#git-promotion-history-table-body");
+      const tbodyUnaccredited = document.querySelector("#git-unaccredited-candidates-table-body");
+      const metricCandidates = document.querySelector("#metric-candidate-count");
+      const metricVeto = document.querySelector("#metric-veto-status");
+      const metricPromotions = document.querySelector("#metric-promotions-count");
+
+      if (!tbodyCandidates || !tbodyReviews || !tbodyPromotions) return;
+
+      tbodyCandidates.replaceChildren();
+      tbodyReviews.replaceChildren();
+      tbodyPromotions.replaceChildren();
+      if (tbodyUnaccredited) tbodyUnaccredited.replaceChildren();
+
+      const patchProposals = [];
+      const historicalChecks = [];
+      let hasVeto = false;
+      const allReviews = [];
+
+      for (const task of work) {
+        for (const r of (task.reviews || [])) {
+          if (r.decision === "VETO") hasVeto = true;
+          allReviews.push({ taskTitle: task.title, taskId: task.id, review: r });
+        }
+
+        for (const p of (task.patch_proposals || [])) {
+          patchProposals.push({
+            id: p.id,
+            taskTitle: task.title,
+            taskId: task.id,
+            proposerId: p.proposer_id,
+            baseSha: p.base_sha,
+            patchSha256: p.patch_sha256,
+            changedPaths: p.changed_paths || [],
+            status: p.status,
+            validations: p.validations || [],
+            applied: p.applied || false,
+            taskReviews: task.reviews || []
+          });
+        }
+
+        for (const ex of (task.executions || [])) {
+          const res = ex.result || {};
+          if (res.candidate_sha) {
+            historicalChecks.push({
+              id: ex.id,
+              taskTitle: task.title,
+              taskId: task.id,
+              workerId: ex.worker_id || "worker-sandbox",
+              candidateSha: res.candidate_sha,
+              status: ex.status,
+              conclusion: res.conclusion || ("código " + res.exit_code),
+              checkId: res.check_id || "check",
+              capabilityId: res.capability_id,
+              capabilityVersion: res.capability_version,
+              taskReviews: task.reviews || []
+            });
+          }
+        }
+      }
+
+      if (metricCandidates) {
+        metricCandidates.textContent = patchProposals.length + " propuestas · " + historicalChecks.length + " checks";
+      }
+      if (metricPromotions) {
+        metricPromotions.textContent = "0";
+      }
+      if (metricVeto) {
+        if (hasVeto) {
+          metricVeto.textContent = "VETO ACTIVO";
+          metricVeto.style.color = "var(--badge-veto)";
+          const gatePill = document.querySelector("#gate-pill");
+          if (gatePill) gatePill.textContent = "VETO ACTIVO · INTEGRACIÓN PROHIBIDA";
+        } else {
+          metricVeto.textContent = "Sin veto en DB";
+          metricVeto.style.color = "var(--status-ok)";
+        }
+      }
+
+      // Tabla 1: Propuestas de Parche y Comprobaciones de Commits Históricos
+      if (!patchProposals.length && !historicalChecks.length) {
+        const tr = node("tr");
+        const td = node("td", "No hay propuestas de parche ni comprobaciones de commits registradas en este proyecto.", "empty-state");
+        td.colSpan = 9;
+        tr.append(td);
+        tbodyCandidates.append(tr);
+      } else {
+        // Propuestas de parche activas
+        for (const p of patchProposals) {
+          const tr = node("tr");
+          const tdType = node("td");
+          tdType.append(node("strong", "Propuesta de Parche " + p.id.slice(0, 8)));
+          tr.append(tdType);
+
+          tr.append(node("td", p.taskTitle));
+          tr.append(node("td", p.proposerId));
+
+          const tdBase = node("td");
+          tdBase.append(node("code", (p.baseSha ? p.baseSha.slice(0, 12) : "—"), "sha-mono"));
+          tr.append(tdBase);
+
+          const tdPatch = node("td");
+          tdPatch.append(node("code", (p.patchSha256 ? p.patchSha256.slice(0, 12) : "—"), "sha-mono"));
+          tr.append(tdPatch);
+
+          const tdTree = node("td");
+          let treeVal = "—";
+          if (p.validations.length) treeVal = p.validations[0].candidate_tree;
+          tdTree.append(node("code", treeVal.slice(0, 12), "sha-mono"));
+          tr.append(tdTree);
+
+          const tdVal = node("td");
+          if (p.validations.length) {
+            tdVal.append(node("span", "Validado en árbol aislado", "pill approve"));
+          } else {
+            tdVal.append(node("span", "Validación aislada pendiente", "pill reject"));
+          }
+          tr.append(tdVal);
+
+          const tdRev = node("td");
+          if (p.taskReviews.length) {
+            for (const r of p.taskReviews) {
+              const pillClass = r.decision === "VETO" ? "pill veto" : r.decision === "APPROVE" ? "pill approve" : "pill reject";
+              tdRev.append(node("span", r.decision, pillClass));
+            }
+          } else {
+            tdRev.append(node("span", "Sin dictamen", "pill"));
+          }
+          tr.append(tdRev);
+
+          const tdInt = node("td");
+          tdInt.append(node("span", "Aislado (no aplicado al canónico)", "pill"));
+          tr.append(tdInt);
+
+          tbodyCandidates.append(tr);
+        }
+
+        // Comprobaciones históricas sobre commits
+        for (const hc of historicalChecks) {
+          const tr = node("tr");
+          const tdType = node("td");
+          tdType.append(node("strong", "Check Histórico " + hc.id.slice(0, 8)));
+          tdType.append(node("div", "Ejecución en sandbox", "meta-line"));
+          tr.append(tdType);
+
+          tr.append(node("td", hc.taskTitle));
+          tr.append(node("td", hc.workerId));
+
+          // Base SHA: No aplica
+          tr.append(node("td", "No aplica", "meta-line"));
+
+          // SHA256 Parche: No aplica
+          tr.append(node("td", "No aplica", "meta-line"));
+
+          // Commit Evaluado
+          const tdTree = node("td");
+          tdTree.append(node("code", hc.candidateSha.slice(0, 12), "sha-mono"));
+          tr.append(tdTree);
+
+          // Verificación Técnica
+          const tdVal = node("td");
+          tdVal.append(node("span", "Check: " + (hc.capabilityId ? hc.capabilityId + " (" + hc.conclusion + ")" : hc.conclusion), "pill execution"));
+          tr.append(tdVal);
+
+          // Dictamen Auditor
+          const tdRev = node("td");
+          tdRev.append(node("span", "Check técnico · No autoriza promoción", "pill"));
+          tr.append(tdRev);
+
+          // Estado de Integración
+          const tdInt = node("td");
+          tdInt.append(node("span", "Histórico · No acreditado para integración", "pill reject"));
+          tr.append(tdInt);
+
+          tbodyCandidates.append(tr);
+        }
+      }
+
+      // Tabla 2: Dictámenes, Veto y Bloqueos de Auditoría
+      if (!allReviews.length) {
+        const tr = node("tr");
+        const td = node("td", "No hay revisiones ni dictámenes registrados para las tareas de este proyecto.", "empty-state");
+        td.colSpan = 7;
+        tr.append(td);
+        tbodyReviews.append(tr);
+      } else {
+        for (const item of allReviews) {
+          const r = item.review;
+          const tr = node("tr");
+          tr.append(node("td", item.taskTitle));
+          tr.append(node("td", r.reviewer_id));
+
+          const tdDec = node("td");
+          const pillClass = r.decision === "VETO" ? "pill veto" : r.decision === "APPROVE" ? "pill approve" : "pill reject";
+          tdDec.append(node("span", r.decision, pillClass));
+          tr.append(tdDec);
+
+          const tdVeto = node("td");
+          if (r.decision === "VETO") {
+            tdVeto.append(node("strong", "SÍ — INTEGRACIÓN DETENIDA", "pill veto"));
+          } else {
+            tdVeto.append(node("span", "No"));
+          }
+          tr.append(tdVeto);
+
+          const tdSha = node("td");
+          tdSha.append(node("code", (r.candidate_sha ? r.candidate_sha.slice(0, 12) : "sin SHA ligado"), "sha-mono"));
+          tr.append(tdSha);
+
+          tr.append(node("td", (r.evidence || []).join(", ") || "Sin referencias"));
+
+          const tdBlock = node("td");
+          if (r.decision === "VETO") {
+            tdBlock.append(node("span", "Veto activo: promoción estrictamente prohibida", "pill veto"));
+          } else if (r.decision === "REJECT") {
+            tdBlock.append(node("span", "Rechazo activo: requiere subsanación previa", "pill reject"));
+          } else {
+            tdBlock.append(node("span", "Bloqueada: revisión local no certifica independencia externa", "pill"));
+          }
+          tr.append(tdBlock);
+
+          tbodyReviews.append(tr);
+        }
+      }
+
+      // Tabla 3: Registro de Promociones Acreditadas e Historial de Integración
+      // Honest state: exactly 0 accredited promotions exist in the repository
+      const trPromoEmpty = node("tr");
+      const tdPromoEmpty = node("td", "", "empty-state");
+      tdPromoEmpty.colSpan = 6;
+      tdPromoEmpty.style.padding = "18px";
+      tdPromoEmpty.style.textAlign = "center";
+      tdPromoEmpty.append(node("div", "Cero Promociones Acreditadas", "strong"));
+      tdPromoEmpty.append(node("div", "No existen promociones acreditadas ni ejecutadas en el repositorio canónico. Ningún candidato cuenta con autorización verificable de integración ni certificación independiente de auditoría bajo GOV-REV-001 (Constitución arts. 3 y 6). La integración permanece estrictamente bloqueada (fail-closed).", "meta-line"));
+      trPromoEmpty.append(tdPromoEmpty);
+      tbodyPromotions.append(trPromoEmpty);
+
+      // Tabla 4: Ramas Candidatas en Desarrollo (Sin Promoción Acreditada)
+      if (tbodyUnaccredited) {
+        const unaccreditedBranches = [
+          {
+            branch: "feat/control-center-daily-ui (PR #15)",
+            sha: "142d6c5c542e6b6f790175f7a8cf14c23c6be73b",
+            base: "origin/feat/capability-backed-repository-checks (91eb754)",
+            status: "NO ACREDITADA (Gate cerrado)",
+            missing: "Auditoría independiente externa certificada + Autoridad de integración",
+            condition: "Bloqueada en espera de estabilización de dependencias base (#10 y #11)"
+          },
+          {
+            branch: "feat/capability-backed-repository-checks (PR #11)",
+            sha: "91eb7543658fe92875cefa3de1e27704d830feb7",
+            base: "origin/feat/capability-registry-runtime (#10)",
+            status: "NO ACREDITADA (Gate cerrado)",
+            missing: "Dictamen independiente GOV-REV-001 vinculado a SHA exacto",
+            condition: "Bloqueada por consolidación pendiente de PR #10"
+          },
+          {
+            branch: "feat/capability-registry-runtime (PR #10)",
+            sha: "c35ff310135b9b76d5dc965d762acd6e4ebade10",
+            base: "main",
+            status: "NO ACREDITADA (Gate cerrado)",
+            missing: "Resolución de CI base y auditoría técnica independiente",
+            condition: "Base de la cadena de dependencias P0"
+          },
+          {
+            branch: "docs/agent-operating-rules (PR #16)",
+            sha: "ea549700ad82405dd0f64eb9121aa116d281a022",
+            base: "main",
+            status: "NO ACREDITADA (Gate cerrado)",
+            missing: "Auditoría independiente y resolución de CI externo en test_core.py",
+            condition: "Documento de reglas; sin adopción automática por agentes"
+          }
+        ];
+
+        for (const ub of unaccreditedBranches) {
+          const tr = node("tr");
+          tr.append(node("td", ub.branch));
+          const tdSha = node("td");
+          tdSha.append(node("code", ub.sha.slice(0, 12), "sha-mono"));
+          tr.append(tdSha);
+          tr.append(node("td", ub.base));
+          const tdStatus = node("td");
+          tdStatus.append(node("span", ub.status, "pill veto"));
+          tr.append(tdStatus);
+          tr.append(node("td", ub.missing));
+          tr.append(node("td", ub.condition));
+          tbodyUnaccredited.append(tr);
+        }
+      }
+    }
+
+    function openTaskDrawer(task) {
+      drawerTitle.textContent = task.title;
+      drawerTaskId.textContent = "ID de tarea: " + task.id;
+      drawerTaskStatus.textContent = labels[task.status] || task.status;
+
+      // Acceptance Criteria
+      drawerAcceptance.replaceChildren();
+      const criteria = Array.isArray(task.acceptance_criteria) ? task.acceptance_criteria : [];
+      if (criteria.length) {
+        for (const c of criteria) {
+          drawerAcceptance.append(node("li", c));
+        }
+      } else {
+        drawerAcceptance.append(node("li", "Sin criterios de aceptación explícitos."));
+      }
+
+      // Evidence
+      drawerEvidence.replaceChildren();
+      const evidence = Array.isArray(task.evidence) ? task.evidence : [];
+      if (evidence.length) {
+        const ul = node("ul");
+        for (const ev of evidence) ul.append(node("li", ev));
+        drawerEvidence.append(ul);
+      } else {
+        drawerEvidence.append(node("div", "Sin referencias de evidencia registradas.", "meta-line"));
+      }
+
+      // Executions
+      drawerExecutions.replaceChildren();
+      const executions = Array.isArray(task.executions) ? task.executions : [];
+      if (executions.length) {
+        for (const ex of executions) {
+          const res = ex.result || {};
+          const card = node("div", "", "catalog-card");
+          card.append(node("strong", "Ejecución " + ex.id + " · " + ex.status));
+          card.append(node("div", "Worker: " + (ex.worker_id || "no asignado") + " · Intentos: " + ex.attempts, "meta-line"));
+          if (res.capability_id) card.append(node("div", "Capacidad: " + res.capability_id + " · " + res.capability_version, "meta-line"));
+          if (res.check_id) card.append(node("div", "Check: " + res.check_id + " · " + (res.conclusion || "sin dictamen"), "meta-line"));
+          if (res.candidate_sha) card.append(node("div", "SHA Candidato: " + res.candidate_sha, "meta-line"));
+          if (res.exit_code !== undefined) card.append(node("div", "Código de salida: " + res.exit_code, "meta-line"));
+          if (res.stdout) card.append(node("pre", res.stdout, "code-block"));
+          if (res.stderr) card.append(node("pre", res.stderr, "code-block"));
+          drawerExecutions.append(card);
+        }
+      } else {
+        drawerExecutions.append(node("div", "Sin ejecuciones registradas.", "meta-line"));
+      }
+
+      // Reviews
+      drawerReviews.replaceChildren();
+      const reviews = Array.isArray(task.reviews) ? task.reviews : [];
+      if (reviews.length) {
+        for (const rev of reviews) {
+          const card = node("div", "", "catalog-card");
+          const disposition = rev.decision === "VETO" ? "VETO ACTIVO" :
+            rev.decision === "APPROVE" ? "Aprobación registrada" :
+            rev.decision === "REJECT" ? "Rechazo registrado" : "Dictamen histórico";
+          card.append(node("strong", disposition + " · " + (rev.sha_bound ? "SHA " + rev.candidate_sha : "sin SHA verificable")));
+          card.append(node("div", "Revisor: " + rev.reviewer_id, "meta-line"));
+          card.append(node("div", "Referencias: " + ((rev.evidence || []).join(", ") || "sin referencias"), "meta-line"));
+          card.append(node("div", "Fecha: " + rev.created_at, "meta-line"));
+          card.append(node("div", "Registro almacenado; independencia y validez no certificadas.", "meta-line"));
+          drawerReviews.append(card);
+        }
+      } else {
+        drawerReviews.append(node("div", "Sin dictámenes de auditor registrados.", "meta-line"));
+      }
+
+      // Proposals
+      drawerProposals.replaceChildren();
+      const proposals = Array.isArray(task.patch_proposals) ? task.patch_proposals : [];
+      if (proposals.length) {
+        for (const p of proposals) {
+          const card = node("div", "", "catalog-card");
+          card.append(node("strong", "Parche " + p.status + " · no aplicado"));
+          card.append(node("div", "Agente proponente: " + p.proposer_id, "meta-line"));
+          card.append(node("div", "SHA base: " + p.base_sha, "meta-line"));
+          card.append(node("div", "Digest del parche: " + p.patch_sha256, "meta-line"));
+          card.append(node("div", "Rutas: " + (p.changed_paths || []).join(", "), "meta-line"));
+          card.append(node("div", "Fecha: " + p.created_at, "meta-line"));
+          const validations = Array.isArray(p.validations) ? p.validations : [];
+          if (validations.length) {
+            for (const v of validations) {
+              card.append(node("div", "Validado por " + v.validator_id + " · árbol " + v.candidate_tree, "meta-line"));
+            }
+          } else {
+            card.append(node("div", "Validación aislada pendiente", "meta-line"));
+          }
+          card.append(node("div", "Contenido del diff: reservado a credencial AUDITOR en revisión (HTTP 403 para agentes)", "meta-line"));
+          card.append(node("div", "Aplicación al repositorio: no disponible", "meta-line disclaimer"));
+          drawerProposals.append(card);
+        }
+      } else {
+        drawerProposals.append(node("div", "Sin propuestas de parche registradas.", "meta-line"));
+      }
+
+      drawerOverlay.classList.add("open");
+      drawerOverlay.setAttribute("aria-hidden", "false");
+    }
+
+    function closeTaskDrawer() {
+      drawerOverlay.classList.remove("open");
+      drawerOverlay.setAttribute("aria-hidden", "true");
+    }
+
+    // Navigation Tabs Event Listeners
+    document.querySelectorAll(".nav-tab").forEach(tab => {
+      tab.addEventListener("click", () => {
+        document.querySelectorAll(".nav-tab").forEach(t => {
+          t.classList.remove("active");
+          t.setAttribute("aria-selected", "false");
+        });
+        document.querySelectorAll(".tab-content").forEach(tc => tc.classList.remove("active"));
+        tab.classList.add("active");
+        tab.setAttribute("aria-selected", "true");
+        const targetId = tab.dataset.tab;
+        const targetEl = document.querySelector("#" + targetId);
+        if (targetEl) targetEl.classList.add("active");
+      });
+    });
+
+    // Form and Controls Event Listeners
+    authForm.addEventListener("submit", (e) => {
+      e.preventDefault();
+      const val = authTokenInput.value.trim();
+      if (!val) return;
+      readerToken = val;
+      loadProjects().catch(err => {
+        clearReaderSession();
+        message.replaceChildren(node("p", "Error al autenticar: " + err.message, "meta"));
+      });
+    });
+
+    disconnectBtn.addEventListener("click", () => {
+      clearReaderSession();
+    });
+
+    reloadBtn.addEventListener("click", () => {
+      loadProjects().catch(e => {
+        message.textContent = e.message;
+      });
+    });
+
+    project.addEventListener("change", () => {
+      loadBoard();
+    });
+
+    document.querySelector("#filter-task-status").addEventListener("change", () => {
+      renderTasksTable(currentWorkItems);
+    });
+
+    document.querySelector("#filter-cap-type").addEventListener("change", () => {
+      renderCapabilities(currentCapabilities, currentEvaluations);
+    });
+
+    drawerClose.addEventListener("click", closeTaskDrawer);
+    drawerOverlay.addEventListener("click", (e) => {
+      if (e.target === drawerOverlay) closeTaskDrawer();
+    });
+    window.addEventListener("keydown", (e) => {
+      if (e.key === "Escape" && drawerOverlay.classList.contains("open")) {
+        closeTaskDrawer();
+      }
+    });
+
+    const btnPromote = document.querySelector("#btn-promote-candidate");
+    if (btnPromote) {
+      btnPromote.addEventListener("click", () => {
+        alert("Operación denegada: la sesión actual carece de autoridad verificable de integración. La promoción requiere dictamen de auditoría independiente externa conforme a GOV-REV-001.");
+      });
+    }
+
+    // Initial load
+    loadProjects().catch(e => {
+      message.textContent = "Autenticación requerida para consultar el núcleo local.";
+    });
     :root{font-family:system-ui,-apple-system,sans-serif;color-scheme:dark;background:#10151c;color:#e9eef6}
     body{margin:0;padding:26px;max-width:1200px;margin-inline:auto}
     header{display:flex;align-items:center;justify-content:space-between;gap:20px}
