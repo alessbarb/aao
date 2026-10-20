@@ -1,0 +1,1 @@
+{"argv":["-m","ruff","check","--no-cache","src","tests"],"candidate_sha":"677f83d2a96e976d9665abdd49f9ec8d6b327bf0","check":"ruff","exit_code":0,"sandbox":"bwrap: read-only candidate, unshared network, no home or credentials","stderr_tail":"","stdout_tail":"All checks passed!\n"}
