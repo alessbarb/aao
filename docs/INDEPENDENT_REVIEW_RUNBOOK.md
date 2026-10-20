@@ -152,16 +152,17 @@ for migration in \
   db/postgres/006_unified_execution_identity.sql \
   db/postgres/007_fence_leases_across_project_state_changes.sql \
   db/postgres/008_content_addressed_evidence.sql \
-  db/postgres/009_prevent_evidence_truncation.sql; do
+  db/postgres/009_prevent_evidence_truncation.sql \
+  db/postgres/010_capability_registry.sql; do
   apply_migration "$migration"
 done
 docker exec "$PG_CONTAINER" psql -U aao_auditor -d aao_test -v ON_ERROR_STOP=1 \
   -c "SELECT version FROM schema_migrations ORDER BY applied_at DESC LIMIT 1"
 ```
 
-Expected terminal schema version: `009_prevent_evidence_truncation`. The
+Expected terminal schema version: `010_capability_registry`. The
 synthetic digest is test data, not an operational credential. Do not alter
-migrations 001–009. If any migration fails or the terminal version differs,
+migrations 001–010. If any migration fails or the terminal version differs,
 stop and record the failure; do not improvise a repair in the candidate.
 
 ## 4. Reproduce automated engineering checks

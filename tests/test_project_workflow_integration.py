@@ -2,6 +2,8 @@
 import os
 import time
 from concurrent.futures import ThreadPoolExecutor
+from hashlib import sha256
+from pathlib import Path
 from uuid import uuid4
 
 import pytest
@@ -69,6 +71,163 @@ def test_postgres_mandate_project_grant_work_admission(monkeypatch):
         board = client.get(f"/v1/projects/{project}/board", headers=ceo)
         assert board.status_code == 200
         assert any(w["id"] == wid and w["status"] == "READY" for w in board.json())
+
+
+@pytest.mark.skipif(
+    not os.getenv("AAO_TEST_POSTGRES_URL") or os.getenv("AAO_TEST_DB_DISPOSABLE") != "yes",
+    reason="Explicit disposable PostgreSQL test database required",
+)
+def test_capability_catalog_is_project_scoped_and_does_not_grant_execution(monkeypatch):
+    from aao.work_management_api import app
+
+    monkeypatch.setenv("AAO_POSTGRES_URL", os.environ["AAO_TEST_POSTGRES_URL"])
+    monkeypatch.setenv("AAO_CEO_TOKEN", "capability-ceo")
+    ceo = {"X-CEO-Token": "capability-ceo"}
+    with TestClient(app) as client:
+        agent_id = "cap-agent-" + str(uuid4())
+        token = client.post("/v1/principals/credentials", headers=ceo, json={
+            "principal_id": agent_id, "kind": "AGENT",
+        }).json()["token"]
+        worker = {"X-Agent-Token": token}
+        mandate_id = client.post("/v1/mandates", headers=ceo, json={
+            "title": "Capability registry " + str(uuid4()), "objective": "Test local catalog",
+        }).json()["id"]
+        client.post(f"/v1/mandates/{mandate_id}/confirm", headers=ceo)
+        project_id = client.post("/v1/projects", headers=ceo, json={
+            "name": "Capability test", "mandate_id": mandate_id,
+        }).json()["id"]
+        payload = {
+            "capability_id": "aao.test.skill", "version": "1.0.0",
+            "capability_type": "agent_skill",
+            "provenance": {
+                "kind": "repository",
+                "path": ".agents/skills/aao-postgres-authorization-concurrency/SKILL.md",
+            },
+            "contract": {
+                "purpose": "Design and verify PostgreSQL authorization and concurrency behavior",
+                "compatible_roles": ["engineering"],
+                "inputs": ["authorization or concurrency change"],
+                "outputs": ["verified implementation and test evidence"],
+                "usage_limits": ["no production database", "no external effects"],
+            },
+            "required_permissions": ["execution.claim"],
+            "risks": ["instructions are untrusted inputs and cannot grant permissions"],
+            "dependencies": [],
+            "tests": [
+                (
+                    "tests/test_project_workflow_integration.py::"
+                    "test_capability_catalog_is_project_scoped_and_does_not_grant_execution"
+                ),
+            ],
+            "compatibility": {"agent_roles": ["engineering"]},
+            "evidence": [
+                "sha256:" + sha256(Path(
+                    ".agents/skills/aao-postgres-authorization-concurrency/SKILL.md",
+                ).read_bytes()).hexdigest(),
+            ],
+        }
+        path = f"/v1/projects/{project_id}/capabilities"
+        assert client.post(path, headers=worker, json=payload).status_code == 403
+        assert client.post(f"/v1/projects/{project_id}/grants", headers=ceo, json={
+            "principal_id": agent_id, "capability": "work.create",
+        }).status_code == 201
+        assert client.post(path, headers=worker, json={
+            **payload, "provenance": {},
+        }).status_code == 422
+        assert client.post(path, headers=worker, json={
+            **payload, "evidence": [],
+        }).status_code == 422
+        assert client.post(path, headers=worker, json={
+            **payload, "contract": {"purpose": "incomplete skill"},
+        }).status_code == 422
+        registered = client.post(path, headers=worker, json=payload)
+        assert registered.status_code == 201, registered.text
+        assert registered.json()["execution_authorized"] is False
+        assert client.post(path, headers=worker, json=payload).status_code == 409
+
+        listed = client.get(path, headers=ceo)
+        assert listed.status_code == 200, listed.text
+        catalog_entry = listed.json()[0]
+        assert catalog_entry["capability_id"] == payload["capability_id"]
+        assert catalog_entry["version"] == payload["version"]
+        assert catalog_entry["capability_type"] == "agent_skill"
+        assert catalog_entry["required_permissions"] == ["execution.claim"]
+        assert catalog_entry["created_by"] == agent_id
+        assert catalog_entry["status"] == "registered_local"
+        assert catalog_entry["execution_authorized"] is False
+        assert "project_id" not in catalog_entry
+        assert client.get(path, headers=worker).status_code == 403
+        task_response = client.post(f"/v1/projects/{project_id}/work", headers=worker, json={
+            "title": "Evaluate PostgreSQL authorization skill reuse",
+            "author_id": agent_id,
+            "acceptance_criteria": ["Compare reuse, adaptation, and new build"],
+        })
+        assert task_response.status_code == 201, task_response.text
+        task_id = task_response.json()["id"]
+        evaluation_payload = {
+            "task_id": task_id,
+            "options": [
+                {"choice": "reuse", "fit": 5, "security": 5, "cost": 5,
+                 "time": 5, "tokens": 5, "maintenance": 5},
+                {"choice": "adapt", "fit": 4, "security": 4, "cost": 3,
+                 "time": 3, "tokens": 3, "maintenance": 4},
+                {"choice": "build", "fit": 3, "security": 3, "cost": 2,
+                 "time": 2, "tokens": 2, "maintenance": 2},
+            ],
+            "rationale": "The existing PostgreSQL concurrency skill covers this task's test procedure.",
+            "evidence": payload["evidence"],
+            "capability_id": payload["capability_id"], "version": payload["version"],
+        }
+        assessment_path = f"/v1/projects/{project_id}/capability-evaluations"
+        evaluation = client.post(assessment_path, headers=worker, json=evaluation_payload)
+        assert evaluation.status_code == 201, evaluation.text
+        assert evaluation.json()["recommendation"] == "reuse"
+        assert evaluation.json()["execution_authorized"] is False
+        assert client.get(assessment_path, headers=worker).status_code == 403
+        from aao.postgresql_connection import connect_postgres
+        with connect_postgres() as db:
+            assert db.execute(
+                "SELECT 1 FROM project_grants WHERE project_id=%s AND principal_id=%s "
+                "AND capability='execution.claim'", (project_id, agent_id),
+            ).fetchone() is None
+        assert client.post(f"/v1/projects/{project_id}/grants", headers=ceo, json={
+            "principal_id": agent_id, "capability": "project.read",
+        }).status_code == 201
+        assert client.get(path, headers=worker).json()[0]["capability_id"] == "aao.test.skill"
+        recorded_evaluation = client.get(assessment_path, headers=worker)
+        assert recorded_evaluation.status_code == 200
+        assert recorded_evaluation.json()[0]["task_id"] == task_id
+        assert recorded_evaluation.json()[0]["details"]["recommendation"] == "reuse"
+        assert client.get(path + "?capability_type=agent_skill", headers=ceo).json()[0]["capability_id"] == "aao.test.skill"
+        assert client.get(path + "?capability_type=made_up", headers=ceo).status_code == 422
+        promotion = {**payload, "capability_id": "forbidden.promotion", "status": "candidate_for_promotion"}
+        assert client.post(path, headers=worker, json=promotion).status_code == 422
+
+        isolated_agent = "cap-isolated-reader-" + str(uuid4())
+        isolated_token = client.post("/v1/principals/credentials", headers=ceo, json={
+            "principal_id": isolated_agent, "kind": "AGENT",
+        }).json()["token"]
+        isolated_reader = {"X-Agent-Token": isolated_token}
+        isolated_mandate = client.post("/v1/mandates", headers=ceo, json={
+            "title": "Isolated capability mandate " + str(uuid4()),
+            "objective": "Check capability project isolation",
+        }).json()["id"]
+        assert client.post(f"/v1/mandates/{isolated_mandate}/confirm", headers=ceo).status_code == 200
+        isolated_project = client.post("/v1/projects", headers=ceo, json={
+            "name": "Isolated capability project " + str(uuid4()), "mandate_id": isolated_mandate,
+        }).json()["id"]
+        assert client.post(f"/v1/projects/{isolated_project}/grants", headers=ceo, json={
+            "principal_id": isolated_agent, "capability": "project.read",
+        }).status_code == 201
+        isolated_capabilities = f"/v1/projects/{isolated_project}/capabilities"
+        isolated_evaluations = f"/v1/projects/{isolated_project}/capability-evaluations"
+        assert client.get(isolated_capabilities, headers=isolated_reader).json() == []
+        assert client.get(isolated_evaluations, headers=isolated_reader).json() == []
+        assert client.post(f"/v1/projects/{isolated_project}/grants", headers=ceo, json={
+            "principal_id": isolated_agent, "capability": "work.create",
+        }).status_code == 201
+        assert client.post(isolated_evaluations, headers=isolated_reader,
+                           json=evaluation_payload).status_code == 404
 
 
 @pytest.mark.skipif(
