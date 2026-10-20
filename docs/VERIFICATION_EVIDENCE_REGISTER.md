@@ -1022,3 +1022,91 @@ coverage, independent review, or M2 acceptance.
   revision `31e7397` has not been added to PR #2 and needs a new exact package
   pin for any future formal review. Neither review nor M2-A acceptance is
   established by this entry.
+
+## CEO mandate persistence and local runtime recovery — 2026-10-19
+
+- At source revision `f929827885048f0373121358c68238b0ad1effeb`, the local
+  loopback API returned HTTP 200 for `/health` and `/ready`. Using the
+  configured development CEO authorization only through `GET /v1/mandates`,
+  the confirmed mandate was verified as
+  `65563e55-eb01-4cd6-a5cc-778acc55d2af`. Its stored objective matched the
+  canonical AAO Self Development objective. Confirmation event
+  `db96571d-c9f5-49c1-acac-02377ec26bec` and project-created event
+  `b92790c1-e3ab-424e-b3db-014deebdc114` were present. The active development
+  project is `9d17d6c1-d644-424a-a425-fe7e084c3d91`. The event IDs and
+  development-only scope are also recorded in
+  `docs/CEO_MANDATE_AAO_SELF_DEVELOPMENT_20261019.md`.
+- The existing service on port 8001 had been started before the current source
+  file update. Its OpenAPI lacked `/v1/principals/me`; its board route failed
+  because the local development database lacked the `candidate_sha` column.
+  The database target was verified as `aao_dev`; the migration ledger showed
+  migrations through 010 only. No test or production database was targeted.
+- The ordered, additive migrations `011_sha_bound_reviews_and_veto` and
+  `012_patch_proposals` were absent and their schema artifacts were absent.
+  They were applied to the existing local development database using the
+  documented forward-migration files and each ledger entry was verified.
+  This was schema migration, not a bypass of API authorization for business
+  operations. The old local server was stopped and the current checkout was
+  restarted on loopback `127.0.0.1:8001`; no access logging was enabled.
+- After restart, `/health` and `/ready` both returned 200, OpenAPI included
+  `/v1/principals/me`, and the existing AGENT credential authenticated through
+  that route without exposing token material. Its authorized project list,
+  project board and local capability read all returned 200. The board showed
+  three persisted tasks; the task `96fcff4e-c45f-48c0-9814-0242aaf8c08b` had
+  execution `180fef3f-a0d2-4c7b-9517-50b13b5819a7` in `SUCCEEDED` state. The
+  task remains `IN_REVIEW` with no review record or patch proposal. Another
+  task remains `IN_PROGRESS` with an `UNCERTAIN` execution. The registry
+  exposes `aao.repository-checker@1.0.0` as `registered_local` and explicitly
+  `execution_authorized: false`.
+- This is local development API/database evidence, not a browser-session
+  capture, independent audit, PR review, integration authorization or MVP
+  acceptance. No code tests were run during the operational recovery itself;
+  the separate validation below records the subsequent test run.
+  Live PR #10 remains OPEN/DRAFT at `523a5986d4ae22b466aaabe59821dc7acecfaef5`
+  and PR #11 remains OPEN/DRAFT at
+  `f929827885048f0373121358c68238b0ad1effeb`; their existing CI results remain
+  associated with those exact heads. Neither PR was modified or merged.
+- At the same source revision, the first full local test run failed with
+  **9 failed, 143 passed** because the explicitly disposable `aao_test`
+  database had migrations 001–009 but not 010–012. No application defect was
+  inferred from those schema errors. The missing, reviewed forward migrations
+  `010_capability_registry`, `011_sha_bound_reviews_and_veto`, and
+  `012_patch_proposals` were applied in order only after confirming the
+  database name `aao_test` and `AAO_TEST_DB_DISPOSABLE=yes`; all three ledger
+  entries and expected tables were then verified. Re-running the full suite
+  produced **152 passed, 0 failed, 0 skipped, 0 warnings** in 22.33 seconds.
+- `python -m compileall -q src tests`, `python -m ruff check src tests`,
+  `python -m pip check`, and `git diff --check` passed after the migration
+  repair. These are local results against source revision
+  `f929827885048f0373121358c68238b0ad1effeb`; no newer CI result is claimed.
+- Live PR #10 and #11 checks were queried. Both reported their existing `test`
+  jobs as passing; those runs remain attached to #10 head
+  `523a5986d4ae22b466aaabe59821dc7acecfaef5` and #11 head
+  `f929827885048f0373121358c68238b0ad1effeb`, respectively. Both PRs remain
+  OPEN/DRAFT and neither has an independent GOV-REV-001 dictamen or promotion
+  authorization. No merge was performed.
+- `docs/RUNTIME_CONSUMER_CONTRACT.md` publishes the current runtime routes,
+  authorization boundaries, status semantics, and integration proposals for
+  Control Center, audit, conformity/PR, and capability consumers. It changes
+  no frontend, auditor engine, permissions, or API behavior. It is an
+  implementer-authored integration contract, not independent approval.
+- The local suite establishes code/test compatibility with migrations 001–012
+  on the disposable database. It does not establish an independent audit,
+  authorization to merge, or completion of the authentic agent-produced
+  patch-to-audited-PR cycle.
+- At code revision `e0cb26f9d7f377b9d0df20b3ee0797da56343040`, the runtime adds
+  `GET /v1/principals/me/grants`. The route authenticates an individual AGENT,
+  rechecks the principal in the read transaction, and returns only that
+  principal's own project grants with database-derived active/expiry status.
+  It is an inventory endpoint, not a grant issuance mechanism; it does not
+  modify the existing grant policy or expose other principals' grants. The
+  integration test verifies anonymous denial, principal isolation, and denial
+  after credential revocation. The full local suite against disposable
+  `aao_test` with migrations 001–012 completed with **153 passed, 0 failed,
+  0 skipped, 0 warnings** in 22.72 seconds. `compileall`, Ruff, `pip check`,
+  and `git diff --check` passed. The local API also returned the existing
+  AGENT's own grants through this route; `code.propose` was absent, so no
+  proposal authority is claimed. These local checks are not CI or independent
+  audit evidence. PR #11 was still at `c3d1df912912974deef5fb1684738f226e62167f`
+  when recorded, so the new runtime revision requires fresh CI and applicable
+  audit before any promotion.

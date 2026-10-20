@@ -3,7 +3,6 @@ import hashlib
 import json
 import shutil
 import subprocess
-from pathlib import Path
 
 import pytest
 
@@ -33,6 +32,19 @@ def successful_checks(repository):
     return {name: {"conclusion": "success", "head_sha": sha} for name in ("tests", "lint")}
 
 
+@pytest.fixture
+def candidate_repo(tmp_path):
+    repository = tmp_path / "candidate"
+    repository.mkdir()
+    subprocess.run(["git", "init", "-q", str(repository)], check=True)
+    subprocess.run(["git", "-C", str(repository), "config", "user.name", "candidate-test"], check=True)
+    subprocess.run(["git", "-C", str(repository), "config", "user.email", "candidate@example.invalid"], check=True)
+    (repository / "candidate.txt").write_text("candidate", encoding="utf-8")
+    subprocess.run(["git", "-C", str(repository), "add", "candidate.txt"], check=True)
+    subprocess.run(["git", "-C", str(repository), "commit", "-qm", "candidate"], check=True)
+    return repository
+
+
 def sign(report, private, report_path, signature_path):
     report_path.write_bytes(canonical(report))
     payload = report_path.with_suffix(".payload")
@@ -55,57 +67,57 @@ def make_report(repository, policy_digest, auditor="audit-principal", evidence_p
             "evidence_files": {digest: str(evidence_path)}}
 
 
-def test_signed_independent_audit_and_required_checks_allow_conformity(tmp_path, trust_bundle):
+def test_signed_independent_audit_and_required_checks_allow_conformity(tmp_path, trust_bundle, candidate_repo):
     private, policy, policy_digest = trust_bundle
     report_path, signature_path = tmp_path / "audit.json", tmp_path / "audit.sig"
-    report = make_report(Path(__file__).resolve().parents[1], policy_digest, evidence_path=tmp_path / "evidence.json")
+    report = make_report(candidate_repo, policy_digest, evidence_path=tmp_path / "evidence.json")
     sign(report, private, report_path, signature_path)
-    result = evaluate(Path(__file__).resolve().parents[1], policy, report_path, signature_path,
-                     successful_checks(Path(__file__).resolve().parents[1]), "implementer")
+    result = evaluate(candidate_repo, policy, report_path, signature_path,
+                     successful_checks(candidate_repo), "implementer")
     assert result.conformant
     assert not result.reasons
 
 
-def test_implementer_cannot_self_approve(tmp_path, trust_bundle):
+def test_implementer_cannot_self_approve(tmp_path, trust_bundle, candidate_repo):
     private, policy, digest = trust_bundle
     report_path, signature_path = tmp_path / "audit.json", tmp_path / "audit.sig"
-    sign(make_report(Path(__file__).resolve().parents[1], digest, evidence_path=tmp_path / "evidence.json"), private, report_path, signature_path)
-    result = evaluate(Path(__file__).resolve().parents[1], policy, report_path, signature_path,
-                      successful_checks(Path(__file__).resolve().parents[1]), "audit-principal")
+    sign(make_report(candidate_repo, digest, evidence_path=tmp_path / "evidence.json"), private, report_path, signature_path)
+    result = evaluate(candidate_repo, policy, report_path, signature_path,
+                      successful_checks(candidate_repo), "audit-principal")
     assert not result.conformant
     assert "implementer cannot audit their own change" in result.reasons
 
 
-def test_stale_or_tampered_sha_and_missing_check_fail_closed(tmp_path, trust_bundle):
+def test_stale_or_tampered_sha_and_missing_check_fail_closed(tmp_path, trust_bundle, candidate_repo):
     private, policy, digest = trust_bundle
     report_path, signature_path = tmp_path / "audit.json", tmp_path / "audit.sig"
-    report = make_report(Path(__file__).resolve().parents[1], digest, evidence_path=tmp_path / "evidence.json")
+    report = make_report(candidate_repo, digest, evidence_path=tmp_path / "evidence.json")
     report["candidate_sha"] = "0" * 40
     sign(report, private, report_path, signature_path)
-    result = evaluate(Path(__file__).resolve().parents[1], policy, report_path, signature_path,
+    result = evaluate(candidate_repo, policy, report_path, signature_path,
                       {"tests": {"conclusion": "success", "head_sha": "0" * 40}}, "implementer")
     assert not result.conformant
     assert "audit report targets a different candidate SHA" in result.reasons
     assert "required check not successful: lint" in result.reasons
 
 
-def test_report_modification_after_signing_is_rejected(tmp_path, trust_bundle):
+def test_report_modification_after_signing_is_rejected(tmp_path, trust_bundle, candidate_repo):
     private, policy, digest = trust_bundle
     report_path, signature_path = tmp_path / "audit.json", tmp_path / "audit.sig"
-    report = make_report(Path(__file__).resolve().parents[1], digest, evidence_path=tmp_path / "evidence.json")
+    report = make_report(candidate_repo, digest, evidence_path=tmp_path / "evidence.json")
     sign(report, private, report_path, signature_path)
     report["veto"] = True
     report_path.write_bytes(canonical(report))
-    result = evaluate(Path(__file__).resolve().parents[1], policy, report_path, signature_path,
-                      successful_checks(Path(__file__).resolve().parents[1]), "implementer")
+    result = evaluate(candidate_repo, policy, report_path, signature_path,
+                      successful_checks(candidate_repo), "implementer")
     assert not result.conformant
     assert "audit report signature is invalid" in result.reasons
 
 
-def test_absent_auditor_blocks(tmp_path, trust_bundle):
+def test_absent_auditor_blocks(tmp_path, trust_bundle, candidate_repo):
     _, policy, _ = trust_bundle
-    result = evaluate(Path(__file__).resolve().parents[1], policy, None, None,
-                      successful_checks(Path(__file__).resolve().parents[1]), "implementer")
+    result = evaluate(candidate_repo, policy, None, None,
+                      successful_checks(candidate_repo), "implementer")
     assert not result.conformant
     assert "signed audit report is absent" in result.reasons
 
@@ -144,3 +156,19 @@ def test_github_duplicate_checks_require_all_runs_to_pass_same_sha():
     result = aggregate_github_check_runs(sha, runs)
     assert result["test"] == {"head_sha": sha, "conclusion": "failure"}
     assert result["lint"] == {"head_sha": "mismatch", "conclusion": "failure"}
+
+
+@pytest.mark.parametrize("change", ["tracked", "untracked"])
+def test_dirty_candidate_checkout_blocks_conformity(tmp_path, trust_bundle, candidate_repo, change):
+    private, policy, digest = trust_bundle
+    report_path, signature_path = tmp_path / "audit.json", tmp_path / "audit.sig"
+    report = make_report(candidate_repo, digest, evidence_path=tmp_path / "evidence.json")
+    sign(report, private, report_path, signature_path)
+    if change == "tracked":
+        (candidate_repo / "candidate.txt").write_text("modified", encoding="utf-8")
+    else:
+        (candidate_repo / "untracked.txt").write_text("untracked", encoding="utf-8")
+    result = evaluate(candidate_repo, policy, report_path, signature_path,
+                      successful_checks(candidate_repo), "implementer")
+    assert not result.conformant
+    assert "candidate checkout is dirty; audit must target the exact committed tree" in result.reasons

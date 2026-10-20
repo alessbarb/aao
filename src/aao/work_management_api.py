@@ -3,11 +3,14 @@
 This is a separate development service, not a transparent migration of the
 SQLite API. No agent execution or external side effects are enabled.
 """
+import hashlib
 import json
 import os
 import secrets
 from contextlib import contextmanager
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
+from typing import Annotated
 from uuid import uuid4
 
 from aao.environment_settings import load_local_env
@@ -16,7 +19,7 @@ load_local_env()
 
 from fastapi import Depends, FastAPI, Header, HTTPException
 from fastapi.responses import FileResponse, JSONResponse, Response
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator, model_validator
 
 from aao.capability_contracts import missing_contract_fields
 from aao.capability_evaluation import recommend
@@ -95,8 +98,14 @@ class WorkRequest(BaseModel):
 
 
 class ReviewRequest(BaseModel):
-    decision: str = Field(pattern="^(APPROVE|REJECT)$")
+    decision: str = Field(pattern="^(APPROVE|REJECT|VETO)$")
+    candidate_sha: str = Field(pattern=r"^[0-9a-f]{40}$")
     evidence: list[str] = Field(min_length=1)
+
+
+class PatchProposalRequest(BaseModel):
+    base_sha: str = Field(pattern=r"^[0-9a-f]{40}$")
+    patch: str = Field(min_length=1, max_length=65_536)
 
 
 class PrincipalCredentialRequest(BaseModel):
@@ -106,7 +115,26 @@ class PrincipalCredentialRequest(BaseModel):
 
 class GrantRequest(BaseModel):
     principal_id: str = Field(min_length=1)
-    capability: str = Field(pattern=r"^(?:work\.(?:create|admit|review|progress)|project\.read|execution\.claim|execution\.reconcile|effect\.(?:propose|reconcile)|evidence\.submit)$")
+    capability: str = Field(pattern=r"^(?:work\.(?:create|admit|review|progress)|project\.read|execution\.claim|execution\.reconcile|effect\.(?:propose|reconcile)|evidence\.submit|code\.propose)$")
+    expires_at: datetime | None = None
+
+    @field_validator("expires_at")
+    @classmethod
+    def future_timezone_aware_expiry(cls, value: datetime | None) -> datetime | None:
+        if value is not None and (value.tzinfo is None or value.utcoffset() is None):
+            raise ValueError("Grant expiry must include a timezone")
+        if value is not None and value <= datetime.now(UTC):
+            raise ValueError("Grant expiry must be in the future")
+        return value
+
+    @model_validator(mode="after")
+    def bounded_code_proposal_grant(self):
+        if self.capability == "code.propose":
+            if self.expires_at is None:
+                raise ValueError("code.propose grants require an explicit expiry")
+            if self.expires_at > datetime.now(UTC) + timedelta(hours=24):
+                raise ValueError("code.propose grants may not exceed 24 hours")
+        return self
 
 
 class CapabilityRequest(BaseModel):
@@ -143,6 +171,12 @@ class CapabilityEvaluationRequest(BaseModel):
     version: str | None = Field(default=None, max_length=64)
 
 
+class RepositoryCheckRequest(BaseModel):
+    capability_id: str = Field(min_length=1, max_length=128, pattern=r"^[a-zA-Z0-9._-]+$")
+    version: str = Field(min_length=1, max_length=64)
+    check_id: str = Field(pattern=r"^core-unit$")
+
+
 app = FastAPI(title="AAO PostgreSQL development core", version="0.2.0")
 _CEO_PRINCIPAL = object()
 
@@ -175,6 +209,27 @@ def health():
     return {"service": "postgres-dev", "autonomous_execution": False}
 
 
+@app.get("/ready")
+def readiness():
+    """Read-only readiness probe with a sanitized PostgreSQL connection result."""
+    try:
+        import psycopg
+    except ImportError:
+        return JSONResponse(
+            status_code=503,
+            content={"status": "not_ready", "database": "unavailable"},
+        )
+    try:
+        with tx() as db:
+            db.execute("SELECT 1")
+    except (psycopg.Error, RuntimeError):
+        return JSONResponse(
+            status_code=503,
+            content={"status": "not_ready", "database": "unavailable"},
+        )
+    return {"status": "ready", "database": "available"}
+
+
 @app.post("/v1/principals/credentials", status_code=201)
 def issue_principal_credential(
     payload: PrincipalCredentialRequest, _: str = Depends(require_ceo)
@@ -197,6 +252,84 @@ def issue_principal_credential(
         audit(db, str(uuid4()), "principal.credential.issued",
               {"principal_id": payload.principal_id, "kind": payload.kind})
     return {"principal_id": payload.principal_id, "kind": payload.kind, "token": token}
+
+
+@app.get("/v1/principals/me")
+def current_principal(principal: Annotated[AuthenticatedPrincipal, Depends(require_worker)]):
+    """Return the authenticated agent identity without disclosing credential material."""
+    with tx() as db:
+        row = db.execute(
+            "SELECT kind,enabled FROM principal_credentials "
+            "WHERE principal_id=%s AND token_digest=%s FOR SHARE",
+            (principal, principal.token_digest),
+        ).fetchone()
+        if not row or row[0] != "AGENT" or not row[1]:
+            raise HTTPException(403, "Individual agent credential invalid or revoked")
+    return {"principal_id": str(principal), "kind": "AGENT", "enabled": True}
+
+
+@app.get("/v1/principals/me/grants")
+def current_principal_grants(
+    principal: Annotated[AuthenticatedPrincipal, Depends(require_worker)],
+):
+    """List only the authenticated agent's project grants; this grants no authority."""
+    with tx() as db:
+        credential = db.execute(
+            "SELECT kind,enabled FROM principal_credentials "
+            "WHERE principal_id=%s AND token_digest=%s FOR SHARE",
+            (principal, principal.token_digest),
+        ).fetchone()
+        if not credential or credential[0] != "AGENT" or not credential[1]:
+            raise HTTPException(403, "Individual agent credential invalid or revoked")
+        rows = db.execute(
+            "SELECT project_id,capability,expires_at,"
+            "(expires_at IS NULL OR expires_at>clock_timestamp()) AS active "
+            "FROM project_grants WHERE principal_id=%s "
+            "ORDER BY project_id,capability FOR SHARE",
+            (principal,),
+        ).fetchall()
+    return [
+        {
+            "principal_id": str(principal),
+            "project_id": str(row[0]),
+            "capability": row[1],
+            "expires_at": row[2].isoformat() if row[2] else None,
+            "active": row[3],
+        }
+        for row in rows
+    ]
+
+
+@app.get("/v1/auditors/me/grants")
+def current_auditor_grants(
+    principal: Annotated[AuthenticatedPrincipal, Depends(require_reviewer)],
+):
+    """List only the authenticated auditor's project grants; no authority is granted."""
+    with tx() as db:
+        credential = db.execute(
+            "SELECT kind,enabled FROM principal_credentials "
+            "WHERE principal_id=%s AND token_digest=%s FOR SHARE",
+            (principal, principal.token_digest),
+        ).fetchone()
+        if not credential or credential[0] != "AUDITOR" or not credential[1]:
+            raise HTTPException(403, "Individual auditor credential invalid or revoked")
+        rows = db.execute(
+            "SELECT project_id,capability,expires_at,"
+            "(expires_at IS NULL OR expires_at>clock_timestamp()) AS active "
+            "FROM project_grants WHERE principal_id=%s "
+            "ORDER BY project_id,capability FOR SHARE",
+            (principal,),
+        ).fetchall()
+    return [
+        {
+            "principal_id": str(principal),
+            "project_id": str(row[0]),
+            "capability": row[1],
+            "expires_at": row[2].isoformat() if row[2] else None,
+            "active": row[3],
+        }
+        for row in rows
+    ]
 
 
 @app.post("/v1/principals/{principal_id}/revoke")
@@ -242,6 +375,42 @@ def create_mandate(payload: MandateRequest, _: str = Depends(require_ceo)):
                    (mid, payload.title, payload.objective))
         audit(db, mid, "mandate.drafted", {"title": payload.title})
     return {"id": mid, "status": "DRAFT"}
+
+
+@app.get("/v1/mandates")
+def list_mandates(_: str = Depends(require_ceo)):
+    """CEO-only mandate and lifecycle-event inventory for safe local bootstrap."""
+    with tx() as db:
+        rows = db.execute(
+            "SELECT m.id,m.title,m.objective,m.status,p.id,p.name,p.state, "
+            "COALESCE(json_agg(json_build_object('id',e.id,'subject_id',e.subject_id, "
+            "'kind',e.kind,'created_at',e.created_at) ORDER BY e.created_at) "
+            "FILTER (WHERE e.id IS NOT NULL), '[]'::json) "
+            "FROM mandates m LEFT JOIN projects p ON p.mandate_id=m.id "
+            "LEFT JOIN events e ON e.subject_id=m.id OR e.subject_id=p.id "
+            "GROUP BY m.id,p.id ORDER BY m.created_at,m.id"
+        ).fetchall()
+    return [
+        {
+            "id": str(row[0]),
+            "title": row[1],
+            "objective": row[2],
+            "status": row[3],
+            "project": None if row[4] is None else {
+                "id": str(row[4]), "name": row[5], "state": row[6],
+            },
+            "events": [
+                {
+                    "id": str(event["id"]),
+                    "subject_id": str(event["subject_id"]),
+                    "kind": event["kind"],
+                    "created_at": str(event["created_at"]),
+                }
+                for event in row[7]
+            ],
+        }
+        for row in rows
+    ]
 
 
 @app.post("/v1/mandates/{mandate_id}/confirm")
@@ -349,6 +518,31 @@ def projects(principal: str = Depends(read_principal)):
         return [{"id": r[0], "name": r[1], "state": r[2]} for r in rows]
 
 
+@app.get("/v1/projects/{project_id}/grants")
+def project_grants(project_id: str, _: str = Depends(require_ceo)):
+    """CEO-only inventory of project-scoped grants; never returns credential material."""
+    with tx() as db:
+        if not db.execute("SELECT 1 FROM projects WHERE id=%s", (project_id,)).fetchone():
+            raise HTTPException(404, "Project not found")
+        rows = db.execute(
+            "SELECT g.principal_id,c.kind,c.enabled,g.capability,g.expires_at "
+            "FROM project_grants g JOIN principal_credentials c "
+            "ON c.principal_id=g.principal_id WHERE g.project_id=%s "
+            "ORDER BY g.principal_id,g.capability",
+            (project_id,),
+        ).fetchall()
+    return [
+        {
+            "principal_id": row[0],
+            "kind": row[1],
+            "credential_enabled": row[2],
+            "capability": row[3],
+            "expires_at": row[4].isoformat() if row[4] else None,
+        }
+        for row in rows
+    ]
+
+
 @app.post("/v1/projects/{project_id}/grants")
 def grant(project_id: str, payload: GrantRequest, _: str = Depends(require_ceo)):
     with tx() as db:
@@ -372,19 +566,23 @@ def grant(project_id: str, payload: GrantRequest, _: str = Depends(require_ceo))
                 422, f"Capability requires a {required_kind} principal",
             )
         inserted = db.execute(
-            "INSERT INTO project_grants(principal_id,project_id,capability) VALUES (%s,%s,%s) "
+            "INSERT INTO project_grants(principal_id,project_id,capability,expires_at) "
+            "VALUES (%s,%s,%s,%s) "
             "ON CONFLICT DO NOTHING RETURNING project_id",
-            (payload.principal_id, project_id, payload.capability),
+            (payload.principal_id, project_id, payload.capability, payload.expires_at),
         ).fetchone()
         if inserted:
             audit(db, project_id, "grant.created",
-                  {"principal_id": payload.principal_id, "capability": payload.capability})
+                  {"principal_id": payload.principal_id, "capability": payload.capability,
+                   "expires_at": payload.expires_at.isoformat() if payload.expires_at else None,
+                   "authority": "ceo", "scope": {"project_id": project_id}})
     return JSONResponse(
         status_code=201 if inserted else 200,
         content={
             "project_id": project_id,
             "capability": payload.capability,
             "created": bool(inserted),
+            "expires_at": payload.expires_at.isoformat() if payload.expires_at else None,
         },
     )
 
@@ -462,12 +660,62 @@ def board(project_id: str, principal: str = Depends(read_principal)):
         if principal is not _CEO_PRINCIPAL:
             require_grant(db, principal, project_id, "project.read")
         rows = db.execute(
-            "SELECT id,title,status,acceptance_criteria,evidence FROM work_items "
-            "WHERE project_id=%s ORDER BY id", (project_id,),
+            "SELECT w.id,w.title,w.status,w.acceptance_criteria,w.evidence,"
+            "COALESCE((SELECT json_agg(json_build_object('id',q.id,'status',q.status,"
+            "'worker_id',q.worker_id,'attempts',q.attempts,'created_at',q.created_at,"
+            "'result',q.result_json) ORDER BY q.created_at,q.id) FROM execution_queue q "
+            "WHERE q.work_id=w.id),'[]'::json) "
+            "FROM work_items w "
+            "WHERE w.project_id=%s ORDER BY w.id", (project_id,),
         ).fetchall()
+        review_rows = db.execute(
+            "SELECT id,work_id,reviewer_id,decision,candidate_sha,evidence,created_at "
+            "FROM reviews WHERE work_id IN (SELECT id FROM work_items WHERE project_id=%s) "
+            "ORDER BY created_at,id", (project_id,),
+        ).fetchall()
+        reviews_by_work: dict[str, list[dict]] = {}
+        for review_row in review_rows:
+            reviews_by_work.setdefault(str(review_row[1]), []).append({
+                "id": str(review_row[0]), "reviewer_id": review_row[2],
+                "decision": review_row[3], "candidate_sha": review_row[4],
+                "evidence": review_row[5], "created_at": review_row[6].isoformat(),
+                "sha_bound": review_row[4] is not None,
+            })
+        patch_rows = db.execute(
+            "SELECT p.id,p.work_id,p.proposer_id,p.base_sha,p.patch_sha256,p.changed_paths,p.status,p.created_at "
+            "FROM patch_proposals p WHERE p.project_id=%s ORDER BY p.created_at,p.id",
+            (project_id,),
+        ).fetchall()
+        validation_rows = db.execute(
+            "SELECT v.proposal_id,v.id,v.validator_id,v.candidate_tree,v.created_at "
+            "FROM patch_proposal_validations v JOIN patch_proposals p ON p.id=v.proposal_id "
+            "WHERE p.project_id=%s ORDER BY v.created_at,v.id",
+            (project_id,),
+        ).fetchall()
+        validations_by_proposal: dict[str, list[dict]] = {}
+        for validation_row in validation_rows:
+            validations_by_proposal.setdefault(str(validation_row[0]), []).append({
+                "id": str(validation_row[1]), "validator_id": validation_row[2],
+                "candidate_tree": validation_row[3],
+                "created_at": validation_row[4].isoformat(),
+            })
+        patches_by_work: dict[str, list[dict]] = {}
+        for patch_row in patch_rows:
+            proposal_id = str(patch_row[0])
+            patches_by_work.setdefault(str(patch_row[1]), []).append({
+                "id": proposal_id, "proposer_id": patch_row[2],
+                "base_sha": patch_row[3], "patch_sha256": patch_row[4],
+                "changed_paths": patch_row[5], "status": patch_row[6],
+                "created_at": patch_row[7].isoformat(),
+                "applied": False,
+                "validations": validations_by_proposal.get(proposal_id, []),
+            })
         return [
             {"id": r[0], "title": r[1], "status": r[2],
-             "acceptance_criteria": r[3], "evidence": r[4]} for r in rows
+             "acceptance_criteria": r[3], "evidence": r[4],
+             "executions": r[5], "reviews": reviews_by_work.get(str(r[0]), []),
+             "patch_proposals": patches_by_work.get(str(r[0]), [])}
+            for r in rows
         ]
 
 
@@ -685,10 +933,226 @@ def progress(work_id: str, principal: str = Depends(require_worker)):
     return {"id": work_id, "status": next_state}
 
 
+@app.post("/v1/work/{work_id}/patch-proposals", status_code=201)
+def propose_patch(
+    work_id: str, payload: PatchProposalRequest,
+    principal: str = Depends(require_worker),
+):
+    """Persist a bounded proposal; validation and application are separate operations."""
+    from aao.patch_proposals import PatchProposalError, inspect_patch
+
+    with tx() as db:
+        work = db.execute(
+            "SELECT project_id,status,author_id FROM work_items WHERE id=%s",
+            (work_id,),
+        ).fetchone()
+        if not work:
+            raise HTTPException(404, "Work not found")
+        project_id, status, author_id = work
+        require_grant(db, principal, project_id, "code.propose")
+        if status != "IN_PROGRESS" or author_id != principal:
+            raise HTTPException(409, "Only the assigned agent may propose a patch for in-progress work")
+        active = db.execute(
+            "SELECT state FROM projects WHERE id=%s", (project_id,),
+        ).fetchone()
+        if not active or active[0] != "ACTIVE":
+            raise HTTPException(409, "Project is not active")
+
+    try:
+        proposal = inspect_patch(payload.patch)
+    except PatchProposalError as exc:
+        raise HTTPException(422, str(exc)) from exc
+
+    proposal_id = str(uuid4())
+    with tx() as db:
+        locked = db.execute(
+            "SELECT project_id,status,author_id FROM work_items WHERE id=%s FOR UPDATE",
+            (work_id,),
+        ).fetchone()
+        if not locked:
+            raise HTTPException(404, "Work not found")
+        current_project, current_status, current_author = locked
+        require_grant(db, principal, current_project, "code.propose")
+        current_active = db.execute(
+            "SELECT state FROM projects WHERE id=%s FOR SHARE", (current_project,),
+        ).fetchone()
+        if (current_project != project_id or current_status != "IN_PROGRESS"
+                or current_author != principal or not current_active
+                or current_active[0] != "ACTIVE"):
+            raise HTTPException(409, "Work authorization or state changed during patch validation")
+        inserted = db.execute(
+            "INSERT INTO patch_proposals(id,work_id,project_id,proposer_id,base_sha,"
+            "patch_sha256,patch_bytes,changed_paths) "
+            "VALUES (%s,%s,%s,%s,%s,%s,%s,%s::jsonb) "
+            "ON CONFLICT (work_id,base_sha,patch_sha256) DO NOTHING RETURNING id",
+            (proposal_id, work_id, project_id, principal, payload.base_sha,
+             proposal["patch_sha256"], payload.patch.encode("utf-8"),
+             json.dumps(proposal["changed_paths"])),
+        ).fetchone()
+        if not inserted:
+            raise HTTPException(409, "Identical patch proposal already exists")
+        audit(db, work_id, "work.patch_proposed", {
+            "proposal_id": proposal_id, "proposer": principal,
+            "base_sha": payload.base_sha,
+            "patch_sha256": proposal["patch_sha256"],
+            "changed_paths": proposal["changed_paths"],
+        })
+    return {
+        "proposal_id": proposal_id, "work_id": work_id,
+        "status": "PROPOSED", "base_sha": payload.base_sha, **proposal,
+        "validated_in_disposable_clone": False,
+        "applied_to_canonical_checkout": False,
+    }
+
+
+@app.post("/v1/work/{work_id}/patch-proposals/{proposal_id}/validate", status_code=201)
+def validate_patch_proposal(
+    work_id: str, proposal_id: str,
+    principal: str = Depends(require_worker),
+):
+    """Apply a stored patch only in a disposable clone and record its tree hash."""
+    from aao.patch_proposals import PatchProposalError, validate_patch
+
+    with tx() as db:
+        row = db.execute(
+            "SELECT p.project_id,p.base_sha,p.patch_sha256,p.patch_bytes,p.changed_paths "
+            "FROM patch_proposals p WHERE p.id=%s AND p.work_id=%s",
+            (proposal_id, work_id),
+        ).fetchone()
+        if not row:
+            raise HTTPException(404, "Patch proposal not found")
+        project_id, base_sha, expected_digest, patch_bytes, changed_paths = row
+        require_grant(db, principal, project_id, "code.propose")
+        work = db.execute(
+            "SELECT status,author_id FROM work_items WHERE id=%s AND project_id=%s",
+            (work_id, project_id),
+        ).fetchone()
+        active = db.execute("SELECT state FROM projects WHERE id=%s", (project_id,)).fetchone()
+        if not work or work[0] != "IN_PROGRESS" or work[1] != principal:
+            raise HTTPException(409, "Only the assigned agent may validate a patch for in-progress work")
+        if not active or active[0] != "ACTIVE":
+            raise HTTPException(409, "Project is not active")
+
+    if hashlib.sha256(patch_bytes).hexdigest() != expected_digest:
+        raise HTTPException(409, "Stored patch integrity check failed")
+    repository = os.getenv("AAO_SELF_DEV_REPOSITORY")
+    if not repository:
+        raise HTTPException(503, "Self-development repository is not configured")
+    try:
+        validation = validate_patch(repository, base_sha, patch_bytes.decode("utf-8"))
+    except (PatchProposalError, UnicodeDecodeError) as exc:
+        raise HTTPException(422, "Stored patch failed isolated validation") from exc
+    if validation["patch_sha256"] != expected_digest or validation["changed_paths"] != changed_paths:
+        raise HTTPException(409, "Stored patch metadata differs from isolated validation")
+
+    with tx() as db:
+        locked = db.execute(
+            "SELECT p.project_id,p.base_sha,p.patch_sha256,w.status,w.author_id "
+            "FROM patch_proposals p JOIN work_items w ON w.id=p.work_id "
+            "WHERE p.id=%s AND p.work_id=%s FOR UPDATE OF w",
+            (proposal_id, work_id),
+        ).fetchone()
+        if not locked:
+            raise HTTPException(404, "Patch proposal not found")
+        current_project, current_base, current_digest, current_status, current_author = locked
+        require_grant(db, principal, current_project, "code.propose")
+        if (current_project != project_id or current_base != base_sha
+                or current_digest != expected_digest or current_status != "IN_PROGRESS"
+                or current_author != principal):
+            raise HTTPException(409, "Patch authorization or state changed during validation")
+        active = db.execute(
+            "SELECT state FROM projects WHERE id=%s FOR SHARE", (current_project,),
+        ).fetchone()
+        if not active or active[0] != "ACTIVE":
+            raise HTTPException(409, "Project is not active")
+        validation_id = str(uuid4())
+        inserted = db.execute(
+            "INSERT INTO patch_proposal_validations(id,proposal_id,validator_id,base_sha,patch_sha256,candidate_tree) "
+            "VALUES (%s,%s,%s,%s,%s,%s) ON CONFLICT (proposal_id,candidate_tree) DO NOTHING RETURNING id",
+            (validation_id, proposal_id, principal, base_sha, expected_digest,
+             validation["candidate_tree"]),
+        ).fetchone()
+        if not inserted:
+            raise HTTPException(409, "Identical patch validation already exists")
+        audit(db, work_id, "work.patch_validated", {
+            "proposal_id": proposal_id, "validation_id": validation_id,
+            "validator": principal, "base_sha": base_sha,
+            "patch_sha256": expected_digest,
+            "candidate_tree": validation["candidate_tree"],
+        })
+    return {
+        "validation_id": validation_id, "proposal_id": proposal_id,
+        "base_sha": base_sha, "patch_sha256": expected_digest,
+        "changed_paths": changed_paths, "candidate_tree": validation["candidate_tree"],
+        "validated_in_disposable_clone": True,
+        "applied_to_canonical_checkout": False,
+    }
+
+
+@app.get("/v1/work/{work_id}/patch-proposals/{proposal_id}")
+def read_patch_proposal(
+    work_id: str, proposal_id: str,
+    principal: str = Depends(require_reviewer),
+):
+    """Expose the exact stored diff to a project auditor only while work is in review."""
+    with tx() as db:
+        row = db.execute(
+            "SELECT p.project_id,p.proposer_id,p.base_sha,p.patch_sha256,p.patch_bytes,"
+            "p.changed_paths,p.created_at,w.status,w.author_id "
+            "FROM patch_proposals p JOIN work_items w ON w.id=p.work_id "
+            "WHERE p.id=%s AND p.work_id=%s FOR SHARE OF w",
+            (proposal_id, work_id),
+        ).fetchone()
+        if not row:
+            raise HTTPException(404, "Patch proposal not found")
+        project_id, proposer_id, base_sha, expected_digest, patch_bytes, paths, created_at, status, author_id = row
+        require_grant(db, principal, project_id, "work.review")
+        active = db.execute(
+            "SELECT state FROM projects WHERE id=%s FOR SHARE", (project_id,),
+        ).fetchone()
+        if not active or active[0] != "ACTIVE" or status != "IN_REVIEW":
+            raise HTTPException(409, "Patch proposal is available only for active work in review")
+        if principal == proposer_id or principal == author_id:
+            raise HTTPException(403, "Patch author cannot act as its auditor")
+        if db.execute(
+            "SELECT 1 FROM execution_journal WHERE kind='claimed' "
+            "AND details->>'worker_id'=%s AND execution_id IN "
+            "(SELECT id FROM execution_queue WHERE work_id=%s) LIMIT 1",
+            (principal, work_id),
+        ).fetchone():
+            raise HTTPException(403, "Execution worker cannot inspect its own work as auditor")
+        validations = db.execute(
+            "SELECT id,validator_id,candidate_tree,created_at FROM patch_proposal_validations "
+            "WHERE proposal_id=%s ORDER BY created_at,id",
+            (proposal_id,),
+        ).fetchall()
+        if hashlib.sha256(patch_bytes).hexdigest() != expected_digest:
+            raise HTTPException(409, "Stored patch integrity check failed")
+        try:
+            patch = patch_bytes.decode("utf-8")
+        except UnicodeDecodeError as exc:
+            raise HTTPException(409, "Stored patch is not valid UTF-8") from exc
+    return {
+        "proposal_id": proposal_id, "work_id": work_id,
+        "proposer_id": proposer_id, "base_sha": base_sha,
+        "patch_sha256": expected_digest, "changed_paths": paths,
+        "patch": patch, "created_at": created_at.isoformat(),
+        "validations": [
+            {
+                "id": str(validation[0]), "validator_id": validation[1],
+                "candidate_tree": validation[2],
+                "created_at": validation[3].isoformat(),
+            }
+            for validation in validations
+        ],
+        "applied": False,
+    }
+
+
 @app.post("/v1/work/{work_id}/reviews", status_code=201)
 def review(work_id: str, payload: ReviewRequest, principal: str = Depends(require_reviewer)):
-    if not all(item.strip() for item in payload.evidence):
-        raise HTTPException(422, "Blank evidence reference")
+    from aao.evidence_registry import EvidenceDenied, verify_evidence_references
+
     with tx() as db:
         work = db.execute("SELECT project_id,status,author_id FROM work_items WHERE id=%s FOR UPDATE", (work_id,)).fetchone()
         if not work:
@@ -700,6 +1164,24 @@ def review(work_id: str, payload: ReviewRequest, principal: str = Depends(requir
             raise HTTPException(409, "Work not reviewable")
         if principal == author:
             raise HTTPException(403, "Author cannot review own work")
+        try:
+            verified_evidence = verify_evidence_references(
+                db, project_id, payload.evidence,
+            )
+        except EvidenceDenied as exc:
+            raise HTTPException(409, str(exc)) from exc
+        candidate_execution = db.execute(
+            "SELECT id,status FROM execution_queue WHERE work_id=%s "
+            "AND result_json->>'candidate_sha'=%s FOR SHARE",
+            (work_id, payload.candidate_sha),
+        ).fetchall()
+        if not candidate_execution:
+            raise HTTPException(409, "Candidate SHA has no linked execution")
+        if db.execute(
+            "SELECT 1 FROM reviews WHERE work_id=%s AND decision='VETO' LIMIT 1",
+            (work_id,),
+        ).fetchone() and payload.decision == "APPROVE":
+            raise HTTPException(409, "Active veto blocks approval; CEO disposition required")
         executions = db.execute(
             "SELECT id,status FROM execution_queue WHERE work_id=%s FOR UPDATE",
             (work_id,),
@@ -727,11 +1209,26 @@ def review(work_id: str, payload: ReviewRequest, principal: str = Depends(requir
         if not review_decision.allowed:
             raise HTTPException(409, review_decision.reason)
         rid = str(uuid4())
-        db.execute("INSERT INTO reviews(id,work_id,reviewer_id,decision,evidence) VALUES (%s,%s,%s,%s,%s::jsonb)", (rid, work_id, principal, payload.decision, json.dumps(payload.evidence)))
-        next_state = "VERIFIED" if payload.decision == "APPROVE" else "IN_PROGRESS"
-        db.execute("UPDATE work_items SET status=%s,evidence=%s::jsonb WHERE id=%s", (next_state, json.dumps(payload.evidence), work_id))
-        audit(db, work_id, "work.reviewed", {"review_id": rid, "decision": payload.decision, "reviewer": principal})
-    return {"review_id": rid, "status": next_state}
+        db.execute(
+            "INSERT INTO reviews(id,work_id,reviewer_id,decision,evidence,candidate_sha) "
+            "VALUES (%s,%s,%s,%s,%s::jsonb,%s)",
+            (rid, work_id, principal, payload.decision,
+             json.dumps(payload.evidence), payload.candidate_sha),
+        )
+        next_state = {
+            "APPROVE": "VERIFIED", "REJECT": "IN_PROGRESS", "VETO": "IN_REVIEW",
+        }[payload.decision]
+        if payload.decision != "VETO":
+            db.execute(
+                "UPDATE work_items SET status=%s,evidence=%s::jsonb WHERE id=%s",
+                (next_state, json.dumps(payload.evidence), work_id),
+            )
+        audit(db, work_id, "work.reviewed", {
+            "review_id": rid, "decision": payload.decision, "reviewer": principal,
+            "candidate_sha": payload.candidate_sha,
+            "verified_evidence": verified_evidence,
+        })
+    return {"review_id": rid, "status": next_state, "candidate_sha": payload.candidate_sha}
 
 @app.post("/v1/work/{work_id}/stage-inert", status_code=202)
 def stage_inert(work_id: str, principal: str = Depends(require_worker)):
@@ -766,3 +1263,70 @@ def stage_inert(work_id: str, principal: str = Depends(require_worker)):
         )
         audit(db, execution_id, "execution.staged", {"work_id": work_id})
     return {"execution_id": execution_id, "status": "QUEUED"}
+
+
+@app.post("/v1/work/{work_id}/stage-repository-check", status_code=202)
+def stage_repository_check(
+    work_id: str, payload: RepositoryCheckRequest,
+    principal: str = Depends(require_worker),
+):
+    """Stage only the fixed repository-check tool selected from this project's registry."""
+    if os.getenv("AAO_SANDBOX_QUEUE_ENABLED") != "true":
+        raise HTTPException(503, "Sandbox queue disabled")
+    job = {
+        "type": "aao.repository-check.v1", "check_id": payload.check_id,
+        "capability_id": payload.capability_id, "version": payload.version,
+    }
+    with tx() as db:
+        work = db.execute(
+            "SELECT project_id,status FROM work_items WHERE id=%s FOR UPDATE",
+            (work_id,),
+        ).fetchone()
+        if not work:
+            raise HTTPException(404, "Work not found")
+        project_id, status = work
+        project = db.execute(
+            "SELECT state FROM projects WHERE id=%s FOR SHARE", (project_id,),
+        ).fetchone()
+        if not project or project[0] != "ACTIVE" or status != "READY":
+            raise HTTPException(409, "Work not ready in active project")
+        require_grant(db, principal, project_id, "work.admit")
+        require_grant(db, principal, project_id, "execution.claim")
+        capability = db.execute(
+            "SELECT capability_type,status,contract->>'entrypoint' "
+            "FROM capability_versions WHERE project_id=%s AND capability_id=%s "
+            "AND version=%s FOR SHARE",
+            (project_id, payload.capability_id, payload.version),
+        ).fetchone()
+        if (not capability or capability[0] != "cli_script"
+                or capability[1] != "registered_local"
+                or capability[2] != "aao.sandboxed_repository_checks:core-unit"):
+            raise HTTPException(409, "Selected repository-check capability is unavailable")
+        evaluation = db.execute(
+            "SELECT 1 FROM events WHERE subject_id=%s AND kind='capability.evaluated' "
+            "AND details->>'capability_id'=%s AND details->>'version'=%s "
+            "AND details->>'recommendation' IN ('reuse','adapt') LIMIT 1",
+            (work_id, payload.capability_id, payload.version),
+        ).fetchone()
+        if not evaluation:
+            raise HTTPException(409, "Capability must be selected for this task before staging")
+        existing = db.execute(
+            "SELECT id,status,input_json FROM execution_queue WHERE work_id=%s",
+            (work_id,),
+        ).fetchone()
+        if existing:
+            if existing[2] != job:
+                raise HTTPException(409, "A different execution is already recorded")
+            return {"execution_id": str(existing[0]), "status": existing[1]}
+        execution_id = str(uuid4())
+        db.execute(
+            "INSERT INTO execution_queue(id,work_id,project_id,status,input_json) "
+            "VALUES (%s,%s,%s,'QUEUED',%s::jsonb)",
+            (execution_id, work_id, project_id, json.dumps(job)),
+        )
+        audit(db, execution_id, "execution.staged", {
+            "work_id": work_id, "capability_id": payload.capability_id,
+            "version": payload.version, "check_id": payload.check_id,
+        })
+    return {"execution_id": execution_id, "status": "QUEUED",
+            "capability_id": payload.capability_id, "version": payload.version}

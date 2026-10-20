@@ -28,6 +28,35 @@ def test_transactional_development_credentials_fail_closed_in_production(monkeyp
         authenticate_in_transaction(object(), "not-a-real-token", kind="AUDITOR")
 
 
+def test_project_grant_inventory_rejects_non_ceo_before_database_access(monkeypatch):
+    from fastapi.testclient import TestClient
+
+    from aao.work_management_api import app
+
+    monkeypatch.setenv("AAO_ENV", "development")
+    monkeypatch.setenv("AAO_CEO_TOKEN", "expected-ceo-token")
+    with TestClient(app) as client:
+        response = client.get(
+            "/v1/projects/example/grants",
+            headers={"X-CEO-Token": "not-the-ceo"},
+        )
+    assert response.status_code == 403
+
+
+def test_mandate_inventory_rejects_non_ceo_before_database_access(monkeypatch):
+    from fastapi.testclient import TestClient
+
+    from aao.work_management_api import app
+
+    monkeypatch.setenv("AAO_ENV", "development")
+    monkeypatch.setenv("AAO_CEO_TOKEN", "expected-ceo-token")
+    with TestClient(app) as client:
+        response = client.get(
+            "/v1/mandates", headers={"X-CEO-Token": "not-the-ceo"},
+        )
+    assert response.status_code == 403
+
+
 @pytest.mark.parametrize("environment", [None, "", "production", "prodution"])
 @pytest.mark.parametrize("transactional", [False, True])
 def test_individual_credentials_require_explicit_known_dev_environment(
@@ -54,12 +83,30 @@ def test_individual_credentials_require_explicit_known_dev_environment(
 
 
 def test_grant_contract_accepts_execution_capabilities_only_as_exact_values():
+    from datetime import UTC, datetime, timedelta
+
     from pydantic import ValidationError
 
     from aao.work_management_api import GrantRequest
 
     grant = GrantRequest(principal_id="agent-1", capability="execution.claim")
     assert grant.capability == "execution.claim"
+    expiry = datetime.now(UTC) + timedelta(hours=4)
+    assert GrantRequest(
+        principal_id="agent-1", capability="execution.claim", expires_at=expiry,
+    ).expires_at == expiry
+    with pytest.raises(ValidationError, match="timezone"):
+        GrantRequest(
+            principal_id="agent-1",
+            capability="execution.claim",
+            expires_at=datetime.now(),
+        )
+    with pytest.raises(ValidationError, match="future"):
+        GrantRequest(
+            principal_id="agent-1",
+            capability="execution.claim",
+            expires_at=datetime.now(UTC) - timedelta(seconds=1),
+        )
     assert GrantRequest(
         principal_id="auditor-1", capability="execution.reconcile"
     ).capability == "execution.reconcile"

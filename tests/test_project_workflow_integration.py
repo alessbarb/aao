@@ -282,6 +282,7 @@ def test_grant_creation_requires_active_principal_with_matching_kind(monkeypatch
         assert duplicate.status_code == 200, duplicate.text
         assert duplicate.json() == {
             "project_id": project, "capability": "work.create", "created": False,
+            "expires_at": None,
         }
         with connect_postgres() as db:
             event_count = db.execute(
@@ -323,6 +324,7 @@ def test_postgres_review_is_separate_from_author_and_required_for_done(monkeypat
         p = client.post("/v1/projects", headers=ceo, json={"name": "Audit smoke", "mandate_id": m}).json()["id"]
         for who, cap in ((agent_id, "work.create"), (agent_id, "work.admit"),
                          (agent_id, "work.progress"), (agent_id, "execution.claim"),
+                         (agent_id, "evidence.submit"),
                          (auditor_id, "work.review")):
             assert client.post(f"/v1/projects/{p}/grants", headers=ceo, json={"principal_id": who, "capability": cap}).status_code == 201
         w = client.post(f"/v1/projects/{p}/work", headers=worker, json={"title": "Review", "author_id": "spoofed", "acceptance_criteria": ["Reviewed"]}).json()["id"]
@@ -336,21 +338,29 @@ def test_postgres_review_is_separate_from_author_and_required_for_done(monkeypat
         assert client.post(f"/v1/work/{w}/progress", headers=worker).json()["status"] == "IN_PROGRESS"
         assert client.post(f"/v1/work/{w}/progress", headers=worker).json()["status"] == "IN_REVIEW"
         assert client.post(f"/v1/work/{w}/reviews", headers=auditor, json={
-            "decision": "APPROVE", "evidence": ["sha256:review-evidence"],
+            "decision": "APPROVE", "candidate_sha": "a" * 40,
+            "evidence": ["sha256:" + "a" * 64],
         }).status_code == 409
         rejected_while_running = client.post(f"/v1/work/{w}/reviews", headers=auditor, json={
-            "decision": "REJECT", "evidence": ["execution still running"],
+            "decision": "REJECT", "candidate_sha": "a" * 40,
+            "evidence": ["sha256:" + "a" * 64],
         })
-        assert rejected_while_running.status_code == 201, rejected_while_running.text
-        assert rejected_while_running.json()["status"] == "IN_PROGRESS"
-        complete(execution_id, lease["token"], agent_id, {"ok": True},
+        assert rejected_while_running.status_code == 409
+        candidate_sha = "a" * 40
+        complete(execution_id, lease["token"], agent_id,
+                 {"ok": True, "candidate_sha": candidate_sha},
                  agent_credential=worker["X-Agent-Token"])
-        assert client.post(f"/v1/work/{w}/progress", headers=worker).json()["status"] == "IN_REVIEW"
+        from aao.evidence_registry import register_evidence
+        evidence_ref = register_evidence(
+            p, b"independent review fixture", agent_id=agent_id,
+            agent_credential=worker["X-Agent-Token"], media_type="text/plain",
+        )
         assert client.post(f"/v1/work/{w}/progress", headers=worker).status_code == 409
-        assert client.post(f"/v1/work/{w}/reviews", headers=worker, json={"decision": "APPROVE", "evidence": ["test"]}).status_code == 403
-        assert client.post(f"/v1/work/{w}/reviews", headers=auditor, json={"decision": "APPROVE", "evidence": [""]}).status_code == 422
+        assert client.post(f"/v1/work/{w}/reviews", headers=worker, json={"decision": "APPROVE", "candidate_sha": candidate_sha, "evidence": [evidence_ref]}).status_code == 403
+        assert client.post(f"/v1/work/{w}/reviews", headers=auditor, json={"decision": "APPROVE", "candidate_sha": candidate_sha, "evidence": [""]}).status_code == 409
         approval = client.post(f"/v1/work/{w}/reviews", headers=auditor, json={
-            "decision": "APPROVE", "evidence": ["sha256:review-evidence"],
+            "decision": "APPROVE", "candidate_sha": candidate_sha,
+            "evidence": [evidence_ref],
         })
         assert approval.status_code == 409, approval.text
         from aao.postgresql_connection import connect_postgres
@@ -365,15 +375,35 @@ def test_postgres_review_is_separate_from_author_and_required_for_done(monkeypat
         assert any(item["id"] == w and item["status"] == "IN_REVIEW"
                    for item in board.json())
         rejected = client.post(f"/v1/work/{w}/reviews", headers=auditor, json={
-            "decision": "REJECT", "evidence": ["review requires stronger evidence"],
+            "decision": "REJECT", "candidate_sha": candidate_sha,
+            "evidence": [evidence_ref],
         })
         assert rejected.status_code == 201, rejected.text
         assert rejected.json()["status"] == "IN_PROGRESS"
         assert client.post(f"/v1/work/{w}/progress", headers=worker).json()["status"] == "IN_REVIEW"
         retry_approval = client.post(f"/v1/work/{w}/reviews", headers=auditor, json={
-            "decision": "APPROVE", "evidence": ["still-unverified"],
+            "decision": "APPROVE", "candidate_sha": candidate_sha,
+            "evidence": [evidence_ref],
         })
         assert retry_approval.status_code == 409, retry_approval.text
+        veto = client.post(f"/v1/work/{w}/reviews", headers=auditor, json={
+            "decision": "VETO", "candidate_sha": candidate_sha,
+            "evidence": [evidence_ref],
+        })
+        assert veto.status_code == 201, veto.text
+        assert veto.json()["status"] == "IN_REVIEW"
+        assert client.post(f"/v1/work/{w}/reviews", headers=auditor, json={
+            "decision": "APPROVE", "candidate_sha": candidate_sha,
+            "evidence": [evidence_ref],
+        }).status_code == 409
+        veto_board = client.get(f"/v1/projects/{p}/board", headers=ceo)
+        veto_task = next(item for item in veto_board.json() if item["id"] == w)
+        assert veto_task["status"] == "IN_REVIEW"
+        assert any(item["decision"] == "VETO" and item["candidate_sha"] == candidate_sha
+                   for item in veto_task["reviews"])
+        from psycopg.errors import RaiseException
+        with pytest.raises(RaiseException, match="review records are append-only"), connect_postgres() as db:
+            db.execute("DELETE FROM reviews WHERE id=%s", (veto.json()["review_id"],))
         with connect_postgres() as db:
             db.execute(
                 "UPDATE work_items SET status='VERIFIED' WHERE id=%s", (w,),
@@ -455,6 +485,123 @@ def test_project_reads_are_scoped_to_granted_worker(monkeypatch):
 
 @pytest.mark.skipif(
     not os.getenv("AAO_TEST_POSTGRES_URL") or os.getenv("AAO_TEST_DB_DISPOSABLE") != "yes",
+    reason="Explicit disposable PostgreSQL test database required",
+)
+def test_agent_can_inspect_only_its_own_project_grants(monkeypatch):
+    from datetime import UTC, datetime, timedelta
+
+    from aao.work_management_api import app
+
+    monkeypatch.setenv("AAO_POSTGRES_URL", os.environ["AAO_TEST_POSTGRES_URL"])
+    monkeypatch.setenv("AAO_CEO_TOKEN", "grant-inventory-ceo")
+    ceo = {"X-CEO-Token": "grant-inventory-ceo"}
+    with TestClient(app) as client:
+        mandate = client.post("/v1/mandates", headers=ceo, json={
+            "title": "Grant inventory " + str(uuid4()),
+            "objective": "Test self-scoped grant discovery",
+        }).json()["id"]
+        assert client.post(f"/v1/mandates/{mandate}/confirm", headers=ceo).status_code == 200
+        project = client.post("/v1/projects", headers=ceo, json={
+            "name": "Grant inventory", "mandate_id": mandate,
+        }).json()["id"]
+        agent_id = "grant-agent-" + str(uuid4())
+        agent_token = client.post("/v1/principals/credentials", headers=ceo, json={
+            "principal_id": agent_id, "kind": "AGENT",
+        }).json()["token"]
+        other_id = "other-agent-" + str(uuid4())
+        client.post("/v1/principals/credentials", headers=ceo, json={
+            "principal_id": other_id, "kind": "AGENT",
+        })
+        expiry = (datetime.now(UTC) + timedelta(hours=1)).isoformat()
+        for principal_id, capability in (
+            (agent_id, "project.read"), (agent_id, "code.propose"),
+            (other_id, "work.create"),
+        ):
+            grant = client.post(f"/v1/projects/{project}/grants", headers=ceo, json={
+                "principal_id": principal_id, "capability": capability,
+                "expires_at": expiry,
+            })
+            assert grant.status_code == 201, grant.text
+
+        assert client.get("/v1/principals/me/grants").status_code == 403
+        response = client.get(
+            "/v1/principals/me/grants", headers={"X-Agent-Token": agent_token},
+        )
+        assert response.status_code == 200, response.text
+        grants = response.json()
+        assert {row["capability"] for row in grants} == {"project.read", "code.propose"}
+        assert {row["project_id"] for row in grants} == {project}
+        assert {row["principal_id"] for row in grants} == {agent_id}
+        assert all(row["active"] for row in grants)
+        assert all(row["expires_at"] for row in grants)
+        assert client.post(f"/v1/principals/{agent_id}/revoke", headers=ceo).status_code == 200
+        assert client.get(
+            "/v1/principals/me/grants", headers={"X-Agent-Token": agent_token},
+        ).status_code == 403
+
+
+@pytest.mark.skipif(
+    not os.getenv("AAO_TEST_POSTGRES_URL") or os.getenv("AAO_TEST_DB_DISPOSABLE") != "yes",
+    reason="Explicit disposable PostgreSQL test database required",
+)
+def test_auditor_can_inspect_only_its_own_review_grants(monkeypatch):
+    monkeypatch.setenv("AAO_POSTGRES_URL", os.environ["AAO_TEST_POSTGRES_URL"])
+    monkeypatch.setenv("AAO_CEO_TOKEN", "auditor-grant-inventory-ceo")
+    from aao.work_management_api import app
+
+    ceo = {"X-CEO-Token": "auditor-grant-inventory-ceo"}
+    with TestClient(app) as client:
+        mandate = client.post("/v1/mandates", headers=ceo, json={
+            "title": "Auditor grant inventory " + str(uuid4()),
+            "objective": "Test self-scoped auditor grant discovery",
+        }).json()["id"]
+        assert client.post(f"/v1/mandates/{mandate}/confirm", headers=ceo).status_code == 200
+        project = client.post("/v1/projects", headers=ceo, json={
+            "name": "Auditor grant inventory", "mandate_id": mandate,
+        }).json()["id"]
+
+        auditor_id = "grant-auditor-" + str(uuid4())
+        auditor_token = client.post("/v1/principals/credentials", headers=ceo, json={
+            "principal_id": auditor_id, "kind": "AUDITOR",
+        }).json()["token"]
+        other_id = "other-auditor-" + str(uuid4())
+        client.post("/v1/principals/credentials", headers=ceo, json={
+            "principal_id": other_id, "kind": "AUDITOR",
+        })
+        agent_id = "grant-agent-" + str(uuid4())
+        client.post("/v1/principals/credentials", headers=ceo, json={
+            "principal_id": agent_id, "kind": "AGENT",
+        })
+        for principal_id, capability in (
+            (auditor_id, "work.review"), (auditor_id, "execution.reconcile"),
+            (other_id, "work.review"), (agent_id, "project.read"),
+        ):
+            response = client.post(f"/v1/projects/{project}/grants", headers=ceo, json={
+                "principal_id": principal_id, "capability": capability,
+            })
+            assert response.status_code == 201, response.text
+
+        assert client.get("/v1/auditors/me/grants").status_code == 403
+        assert client.get(
+            "/v1/auditors/me/grants", headers={"X-Agent-Token": auditor_token},
+        ).status_code == 403
+        response = client.get(
+            "/v1/auditors/me/grants", headers={"X-Auditor-Token": auditor_token},
+        )
+        assert response.status_code == 200, response.text
+        grants = response.json()
+        assert {row["capability"] for row in grants} == {"work.review", "execution.reconcile"}
+        assert {row["project_id"] for row in grants} == {project}
+        assert {row["principal_id"] for row in grants} == {auditor_id}
+        assert all(row["active"] for row in grants)
+        assert client.post(f"/v1/principals/{auditor_id}/revoke", headers=ceo).status_code == 200
+        assert client.get(
+            "/v1/auditors/me/grants", headers={"X-Auditor-Token": auditor_token},
+        ).status_code == 403
+
+
+@pytest.mark.skipif(
+    not os.getenv("AAO_TEST_POSTGRES_URL") or os.getenv("AAO_TEST_DB_DISPOSABLE") != "yes",
     reason="Explicit disposable PostgreSQL database required",
 )
 def test_grant_revocation_serializes_after_authorized_transaction(monkeypatch):
@@ -519,6 +666,8 @@ def test_grant_revocation_serializes_after_authorized_transaction(monkeypatch):
 )
 def test_grant_expiring_while_lock_waiting_is_denied(monkeypatch):
     """A grant is checked against wall-clock time after waiting for its row lock."""
+    from datetime import UTC, datetime, timedelta
+
     from fastapi import HTTPException
 
     from aao.postgresql_connection import connect_postgres
@@ -538,14 +687,14 @@ def test_grant_expiring_while_lock_waiting_is_denied(monkeypatch):
         project = client.post("/v1/projects", headers=ceo, json={
             "name": f"Grant expiry {uuid4()}", "mandate_id": mandate,
         }).json()["id"]
-        assert client.post(f"/v1/projects/{project}/grants", headers=ceo, json={
-            "principal_id": agent_id, "capability": "work.create",
-        }).status_code == 201
-        with connect_postgres() as setup:
-            setup.execute(
-                "UPDATE project_grants SET expires_at=clock_timestamp()+interval '1 second' "
-                "WHERE project_id=%s AND principal_id=%s AND capability='work.create'", (project, agent_id),
-            )
+        expiry = datetime.now(UTC) + timedelta(seconds=1)
+        grant_response = client.post(f"/v1/projects/{project}/grants", headers=ceo, json={
+            "principal_id": agent_id,
+            "capability": "work.create",
+            "expires_at": expiry.isoformat(),
+        })
+        assert grant_response.status_code == 201
+        assert grant_response.json()["expires_at"] == expiry.isoformat()
 
         def check_grant():
             try:
@@ -582,3 +731,91 @@ def test_grant_expiring_while_lock_waiting_is_denied(monkeypatch):
             assert waiting, "grant check did not wait for the held row lock"
             time.sleep(1.1)
         assert check.result(timeout=5) == "denied"
+
+
+@pytest.mark.skipif(
+    not os.getenv("AAO_TEST_POSTGRES_URL") or os.getenv("AAO_TEST_DB_DISPOSABLE") != "yes",
+    reason="Explicit disposable PostgreSQL database required",
+)
+def test_registered_repository_check_requires_task_selection_before_queue_claim(monkeypatch):
+    from aao.execution_queue import claim
+    from aao.work_management_api import app
+
+    monkeypatch.setenv("AAO_POSTGRES_URL", os.environ["AAO_TEST_POSTGRES_URL"])
+    monkeypatch.setenv("AAO_CEO_TOKEN", "capability-check-ceo")
+    monkeypatch.setenv("AAO_SANDBOX_QUEUE_ENABLED", "true")
+    ceo = {"X-CEO-Token": "capability-check-ceo"}
+    with TestClient(app) as client:
+        identity = "check-agent-" + str(uuid4())
+        issued = client.post("/v1/principals/credentials", headers=ceo, json={
+            "principal_id": identity, "kind": "AGENT",
+        })
+        assert issued.status_code == 201, issued.text
+        agent = {"X-Agent-Token": issued.json()["token"]}
+        mandate = client.post("/v1/mandates", headers=ceo, json={
+            "title": "Repository check " + str(uuid4()), "objective": "Test bounded repo check",
+        }).json()["id"]
+        assert client.post(f"/v1/mandates/{mandate}/confirm", headers=ceo).status_code == 200
+        project = client.post("/v1/projects", headers=ceo, json={
+            "name": "Repository check", "mandate_id": mandate,
+        }).json()["id"]
+        for capability in ("work.create", "work.admit", "execution.claim", "project.read"):
+            assert client.post(f"/v1/projects/{project}/grants", headers=ceo, json={
+                "principal_id": identity, "capability": capability,
+            }).status_code == 201
+        work = client.post(f"/v1/projects/{project}/work", headers=agent, json={
+            "title": "Run registered core checks", "author_id": identity,
+            "acceptance_criteria": ["Exact fixed check is executed in sandbox"],
+        }).json()["id"]
+        registered = client.post(f"/v1/projects/{project}/capabilities", headers=agent, json={
+            "capability_id": "aao.repository-check", "version": "1.0.0",
+            "capability_type": "cli_script", "provenance": {"kind": "repository"},
+            "contract": {
+                "purpose": "Run fixed allow-listed core tests",
+                "entrypoint": "aao.sandboxed_repository_checks:core-unit",
+                "inputs": ["fixed core-unit check id"],
+                "outputs": ["test result and exact candidate SHA"],
+                "platform": "Linux with bubblewrap",
+            },
+            "required_permissions": ["execution.claim"], "risks": ["local test code runs"],
+            "dependencies": [], "tests": ["tests/test_sandboxed_repository_checks.py"],
+            "compatibility": {}, "evidence": ["repo source"],
+        })
+        assert registered.status_code == 201, registered.text
+        evaluation = client.post(
+            f"/v1/projects/{project}/capability-evaluations", headers=agent,
+            json={
+                "task_id": work,
+                "options": [
+                    {"choice": choice, "fit": fit, "security": fit, "cost": fit,
+                     "time": fit, "tokens": fit, "maintenance": fit}
+                    for choice, fit in (("reuse", 5), ("adapt", 3), ("build", 1))
+                ],
+                "rationale": "Reuse the checked-in fixed sandbox instead of building a new tool.",
+                "evidence": ["tests/test_sandboxed_repository_checks.py"],
+                "capability_id": "aao.repository-check", "version": "1.0.0",
+            },
+        )
+        assert evaluation.status_code == 201, evaluation.text
+        assert evaluation.json()["recommendation"] == "reuse"
+        assert client.post(f"/v1/work/{work}/admit", headers=agent).status_code == 200
+        request = {"capability_id": "aao.repository-check", "version": "1.0.0",
+                   "check_id": "core-unit"}
+        not_selected = client.post(
+            f"/v1/work/{work}/stage-repository-check", headers=agent,
+            json={**request, "capability_id": "other"},
+        )
+        assert not_selected.status_code == 409
+        staged = client.post(
+            f"/v1/work/{work}/stage-repository-check", headers=agent, json=request,
+        )
+        assert staged.status_code == 202, staged.text
+        lease = claim(identity, agent_credential=issued.json()["token"], project_id=project)
+        assert lease["input"] == {
+            "type": "aao.repository-check.v1", "check_id": "core-unit",
+            "capability_id": "aao.repository-check", "version": "1.0.0",
+        }
+        board = client.get(f"/v1/projects/{project}/board", headers=agent)
+        execution = board.json()[0]["executions"][0]
+        assert execution["id"] == staged.json()["execution_id"]
+        assert execution["status"] == "RUNNING"

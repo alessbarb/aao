@@ -26,7 +26,7 @@
   <aside class="safety-note" role="note">Gate técnico activo: nuevas aprobaciones y finalización están bloqueadas hasta verificar la independencia del auditor y las referencias de evidencia. El tablero muestra estados almacenados; no certifica su validez.</aside>
   <div id="message" role="status"></div>
   <section id="board" class="board" aria-label="Kanban"></section>
-  <section class="capabilities"><h2>Capacidades del proyecto</h2><p>Metadatos registrados; el catálogo no concede autorización de ejecución.</p><div id="capabilities" class="capability-list"></div><h3>Evaluaciones vinculadas a tareas</h3><div id="capability-evaluations" class="capability-list"></div></section>
+  <section class="capabilities"><h2>Capacidades del proyecto</h2><p>El registro no concede permiso. El uso requiere un grant de ejecución y queda ligado a tarea y resultado.</p><div id="capabilities" class="capability-list"></div><h3>Evaluaciones vinculadas a tareas</h3><div id="capability-evaluations" class="capability-list"></div></section>
   <script>
     const states=["INBOX","READY","IN_PROGRESS","IN_REVIEW","VERIFIED","DONE"];
     const labels={INBOX:"Entrada",READY:"Preparado",IN_PROGRESS:"En curso",IN_REVIEW:"Revisión",VERIFIED:"Verificado",DONE:"Completado"};
@@ -73,7 +73,8 @@
             node("div","Riesgos y límites: "+(capability.risks.join(", ")||"no declarados"),"meta"),
             node("div","Pruebas y evidencia: "+[...capability.tests,...capability.evidence].join(", "),"meta"),
             node("div",assessedBy.length?"Evaluada en tareas: "+assessedBy.map(item=>item.task_title).join(", "):"Sin evaluaciones vinculadas a tareas." ,"meta"),
-            node("div","Ejecución autorizada: no","meta"));
+            node("div","Ejecución autorizada: no","meta"),
+            node("div","Registro sin permiso de ejecución implícito","meta"));
           capabilities.append(card)
         }
         evaluations.replaceChildren();
@@ -97,10 +98,58 @@
           for(const task of tasks){const card=node("article","","card");
             card.append(node("strong",task.title),node("div",task.id.slice(0,8),"meta"));
             const criteria=Array.isArray(task.acceptance_criteria)?task.acceptance_criteria.length:0;
-            card.append(node("div",criteria+" criterios de aceptación","meta"));col.append(card)}
+            card.append(node("div",criteria+" criterios de aceptación","meta"));
+            const executions=Array.isArray(task.executions)?task.executions:[];
+            if(!executions.length)card.append(node("div","Sin ejecuciones registradas","meta"));
+            for(const execution of executions){
+              const result=execution.result||{};
+              const evidence=node("details",undefined,"meta");
+              evidence.append(node("summary","Ejecución "+execution.id+" · "+execution.status));
+              if(result.capability_id)evidence.append(node("div","Capacidad: "+result.capability_id+" · "+result.capability_version,"meta"));
+              if(result.check_id)evidence.append(node("div","Verificación: "+result.check_id+" · "+(result.conclusion||"sin dictamen"),"meta"));
+              if(result.candidate_sha)evidence.append(node("div","SHA candidato: "+result.candidate_sha,"meta"));
+              if(result.exit_code!==undefined)evidence.append(node("div","Código de salida: "+result.exit_code,"meta"));
+              if(result.stdout)evidence.append(node("pre",result.stdout));
+              if(result.stderr)evidence.append(node("pre",result.stderr));
+              card.append(evidence);
+            }
+            const reviews=Array.isArray(task.reviews)?task.reviews:[];
+            if(!reviews.length)card.append(node("div","Sin dictamen de auditor registrado","meta"));
+            for(const review of reviews){
+              const disposition=review.decision==="VETO"?"VETO ACTIVO":
+                review.decision==="APPROVE"?"Aprobación registrada":
+                review.decision==="REJECT"?"Rechazo registrado":"Dictamen histórico";
+              const audit=node("details",undefined,"meta");
+              audit.append(node("summary",disposition+" · "+(review.sha_bound?"SHA "+review.candidate_sha:"sin SHA verificable")));
+              audit.append(node("div","Revisor: "+review.reviewer_id,"meta"),
+                node("div","Referencias verificables: "+(review.evidence||[]).join(", "),"meta"),
+                node("div",review.created_at,"meta"));
+              card.append(audit);
+            }
+            const proposals=Array.isArray(task.patch_proposals)?task.patch_proposals:[];
+            if(!proposals.length)card.append(node("div","Sin propuestas de parche registradas","meta"));
+            for(const proposal of proposals){
+              const details=node("details",undefined,"meta");
+              details.append(node("summary","Parche "+proposal.status+" · no aplicado"));
+              details.append(node("div","Agente proponente: "+proposal.proposer_id,"meta"),
+                node("div","SHA base: "+proposal.base_sha,"meta"),
+                node("div","Digest del parche: "+proposal.patch_sha256,"meta"),
+                node("div","Rutas: "+proposal.changed_paths.join(", "),"meta"),
+                node("div",proposal.created_at,"meta"));
+              const validations=Array.isArray(proposal.validations)?proposal.validations:[];
+              if(!validations.length)details.append(node("div","Validación aislada pendiente","meta"));
+              for(const validation of validations){
+                details.append(node("div","Validado por "+validation.validator_id+" · árbol candidato "+validation.candidate_tree,"meta"),
+                  node("div",validation.created_at,"meta"));
+              }
+              details.append(node("div","Aplicación al repositorio: no disponible","meta"));
+              card.append(details);
+            }
+            col.append(card)}
           board.append(col)
         }
-        message.textContent="Mostrando "+work.length+" tareas · sin ejecución autónoma";
+        const executionCount=work.reduce((count,task)=>count+(Array.isArray(task.executions)?task.executions.length:0),0);
+        message.textContent="Mostrando "+work.length+" tareas · "+executionCount+" ejecuciones registradas";
       }catch(e){message.replaceChildren(node("p","No se pudo cargar el Kanban: "+e.message,"error"))}
     }
     document.querySelector("#reload").addEventListener("click",()=>loadProjects().catch(e=>message.textContent=e.message));
