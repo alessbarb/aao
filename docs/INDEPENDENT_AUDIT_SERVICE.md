@@ -124,8 +124,12 @@ channel outside the repository.
 
 ## Activation runbook (for the infrastructure owner, not the developer)
 
-Run by an operator who is not the implementer. The developer account must not
-have sudo on the auditor host (or use a separate host/VM).
+Run by an operator who is not the implementer. No implementer account may have
+`sudo`, `docker` group membership or any other root-equivalent access on the
+auditor host (or use a separate host/VM). Correction (2026-10-20): the earlier
+"no sudo" wording was insufficient, because the `docker` group is root-equivalent.
+Manifest-based audits additionally need the root-owned trust anchor described in
+`docs/AUDIT_MANIFEST_CONTRACT.md`.
 
 ```bash
 # 1. Dedicated account and private state outside every checkout and sandbox mount.

@@ -72,8 +72,16 @@ def _git(repository: Path, *args: str) -> str:
 
 def load_policy(path: Path) -> tuple[dict[str, Any], str]:
     try:
-        policy = json.loads(path.read_text(encoding="utf-8"))
-        if policy.get("version") != POLICY_VERSION:
+        data = path.read_bytes()
+    except OSError as error:
+        raise AuditError(f"trusted policy is invalid: {error}") from error
+    return parse_policy(data)
+
+
+def parse_policy(data: bytes) -> tuple[dict[str, Any], str]:
+    try:
+        policy = json.loads(data)
+        if not isinstance(policy, dict) or policy.get("version") != POLICY_VERSION:
             raise ValueError("unsupported policy version")
         for key, kind in (("auditor_id", str), ("auditor_os_user", str), ("developer_os_users", list),
                           ("required_checks", list), ("auditors", dict), ("audit_checks", dict),
@@ -88,7 +96,7 @@ def load_policy(path: Path) -> tuple[dict[str, Any], str]:
             raise ValueError("audit_checks must map names to non-empty argv lists")
         if policy["auditor_id"] not in policy["auditors"]:
             raise ValueError("auditor_id must be a trusted auditor in the policy")
-    except (OSError, ValueError, TypeError) as error:
+    except (ValueError, TypeError) as error:
         raise AuditError(f"trusted policy is invalid: {error}") from error
     return policy, _sha(_canonical(policy))
 
@@ -277,6 +285,7 @@ def audit_candidate(
     *, source: str, candidate_sha: str, base_sha: str, policy_path: Path, output: Path, ledger: Path,
     key_path: Path | None, implementer_ids: list[str], ci_checks: dict[str, Any] | None = None,
     veto_reason: str | None = None, current_head: Callable[[], str] | None = None,
+    current_base: Callable[[], str] | None = None,
     runner: Callable[[Path, list[str]], tuple[int, str, str]] = run_sandboxed,
 ) -> dict[str, Any]:
     policy, policy_digest = load_policy(policy_path)
@@ -341,6 +350,8 @@ def audit_candidate(
     }
     if current_head is not None and current_head() != candidate_sha:
         raise AuditError("candidate head moved before the verdict was recorded")
+    if current_base is not None and current_base() != base_sha:
+        raise AuditError("pull request base moved before the verdict was recorded")
     report_bytes = _canonical(report)
     (output / "report.json").write_bytes(report_bytes)
     if verdict != "provisional" and key_path is not None and not custody:
@@ -355,11 +366,20 @@ def audit_candidate(
 
 def promotion_decision(
     repository: Path, policy_path: Path, report_path: Path | None, signature_path: Path | None,
-    check_results: dict[str, Any], implementer_id: str, ledger: Path,
+    check_results: dict[str, Any], implementer_id: str, ledger: Path, *, current_base_sha: str,
 ) -> GateResult:
-    """Existing signed-report gate plus ledger: veto is sticky and only the latest decision counts."""
+    """Existing signed-report gate plus ledger, current base and reviewed auditor revision."""
     result = evaluate(repository, policy_path, report_path, signature_path, check_results, implementer_id)
     reasons = list(result.reasons)
+    try:
+        policy, _ = load_policy(policy_path)
+        report = json.loads(report_path.read_text(encoding="utf-8")) if report_path else {}
+        if report.get("base_sha") != current_base_sha:
+            reasons.append("audit report targets a different base than the current pull request base")
+        if report.get("auditor_revision") not in policy["trusted_auditor_revisions"]:
+            reasons.append("audit report was produced by an auditor revision the policy does not trust")
+    except (OSError, ValueError, AuditError):
+        reasons.append("audit report or policy is unreadable")
     try:
         entries = [e for e in _ledger_entries(ledger) if e.get("candidate_sha") == result.candidate_sha]
         if any(e.get("veto") for e in entries):
@@ -399,8 +419,9 @@ def main() -> int:
     try:
         if args.command == "gate":
             _, checks = fetch_github_pr_checks(slug, number)
+            base = _gh_json(f"repos/{slug}/pulls/{number}")["base"]["sha"]
             result = promotion_decision(args.repository, args.policy, args.report, args.signature, checks,
-                                        args.implementer, args.ledger)
+                                        args.implementer, args.ledger, current_base_sha=base)
             print(json.dumps({"conformant": result.conformant, "candidate_sha": result.candidate_sha,
                               "reasons": result.reasons}, sort_keys=True))
             return 0 if result.conformant else 1
@@ -418,6 +439,7 @@ def main() -> int:
             policy_path=args.policy, output=args.output, ledger=args.ledger, key_path=args.key,
             implementer_ids=implementers, ci_checks=ci, veto_reason=args.veto,
             current_head=lambda: _gh_json(f"repos/{slug}/pulls/{number}")["head"]["sha"],
+            current_base=lambda: _gh_json(f"repos/{slug}/pulls/{number}")["base"]["sha"],
         )
     except (AuditError, OSError, ValueError, KeyError, subprocess.SubprocessError) as error:
         print(json.dumps({"error": str(error)}))
