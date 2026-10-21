@@ -44,6 +44,7 @@ TEST PASS  role account with usable password -> fail closed
 TEST PASS  world-writable file in managed tree -> fail closed
 TEST PASS  symlink in managed tree -> fail closed
 TEST PASS  private key mode 644 -> fail closed
+TEST PASS  file owned by another user in managed tree -> fail closed
 == T8f induced failure while publishing a key leaves no temp file
 TEST PASS  publish fails
 TEST PASS  no temp key file left after failure
@@ -59,12 +60,21 @@ TEST PASS  as implementer: rejected (wrong account, key unavailable)
 Signature Verified Successfully
 TEST PASS  signature verifies with published trust key
 TEST PASS  signature fails with the other auditor's key
+== T11b purge fails closed when the archive cannot be written
+TEST PASS  purge with unwritable archive dir fails
+uid=1006(aao-auditor) gid=1007(aao-auditor) groups=1007(aao-auditor)
+uid=1003(aao-pm) gid=1004(aao-pm) groups=1004(aao-pm)
+TEST PASS  accounts preserved after failed purge
+TEST PASS  keys preserved after failed purge
+TEST PASS  trust registry preserved after failed purge
+TEST PASS  sudoers preserved after failed purge
 == T11 revert is non-destructive
 TEST PASS  revert
 TEST PASS  sudoers removed
 TEST PASS  accounts locked
 TEST PASS  keys kept
 TEST PASS  CEO untouched
+TEST PASS  after --revert, --apply refuses (locked agent shells); documented path is --purge then --apply
 == T12 purge restores the pre-install state
 TEST PASS  purge
 TEST PASS  passwd/group/sudoers/dirs identical to initial state

@@ -89,12 +89,20 @@ fi
 # ---------- purge ----------
 if [[ "$MODE" == --purge ]]; then
   if [[ -f "$SUDOERS" ]] && ! grep -qxF "$MARKER" "$SUDOERS"; then die "$SUDOERS is not managed by this script"; fi
-  archive="/root/aao-identity-archive-$(date +%Y%m%dT%H%M%S).tar.gz"
+  archive="${AAO_ARCHIVE_DIR:-/root}/aao-identity-archive-$(date +%Y%m%dT%H%M%S).tar.gz"
   paths=()
   for p in /var/lib/aao-auditor /var/lib/aao-auditor-alt /var/lib/aao-supervisor /srv/aao "$SUDOERS"; do [[ -e "$p" ]] && paths+=("$p"); done
   for u in "${ALL_USERS[@]}"; do [[ -d "/home/$u" ]] && paths+=("/home/$u"); done
+  # Nothing is deleted unless the archive exists, is private and lists every
+  # managed path. Any failure stops here with all accounts and data intact.
   if (( ${#paths[@]} )); then
-    tar -czf "$archive" "${paths[@]}" && chmod 0600 "$archive" && echo "+ archived to $archive"
+    tar -czf "$archive" "${paths[@]}" || die "archive failed; nothing was removed"
+    chmod 0600 "$archive" || die "cannot protect $archive; nothing was removed"
+    listing=$(tar -tzf "$archive") || die "archive $archive is unreadable; nothing was removed"
+    for p in "${paths[@]}"; do
+      grep -qx "${p#/}/\{0,1\}" <<<"$listing" || die "archive lacks $p; nothing was removed"
+    done
+    echo "+ archived and verified $archive"
   fi
   rm -f "$SUDOERS"
   for u in "${ALL_USERS[@]}"; do id "$u" >/dev/null 2>&1 && { userdel -r "$u" 2>/dev/null || userdel "$u"; echo "+ removed $u"; }; done
@@ -159,6 +167,7 @@ for d in /var/lib/aao-auditor /var/lib/aao-auditor-alt /var/lib/aao-supervisor /
   [[ -d "$d" ]] || continue
   while IFS= read -r -d '' f; do
     [[ -L "$f" ]] && die "symlink inside managed tree: $f"
+    [[ "$(stat -c '%U' "$f")" == "$(stat -c '%U' "$(dirname "$f")")" ]] || die "$f is not owned by the owner of its directory"
     [[ -n $(getfacl -s -p "$f" 2>/dev/null) ]] && die "extended ACL on $f"
     m=$(stat -c '%a' "$f")
     (( ( 0$m & 06002 ) == 0 )) || die "$f has setuid/setgid or is world-writable ($m)"
@@ -254,5 +263,6 @@ Next steps (manual, one time):
      TCP at 127.0.0.1:54329 and never use the docker socket.
   4. Run scripts/verify_identity_separation.sh as every role and attach the output to the F2 evidence.
   Rollback:  sudo scripts/identity_separation.sh --revert   (lock, keep data)
-             sudo scripts/identity_separation.sh --purge    (archive, then remove everything)
+             sudo scripts/identity_separation.sh --purge    (archive + verify, then remove everything)
+  After --revert, re-installing requires --purge first (--apply refuses locked accounts).
 EOF

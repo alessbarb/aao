@@ -10,7 +10,7 @@ apt-get update -qq >/dev/null && apt-get install -y -qq openssl sudo acl python3
 useradd -m alessbarb && chmod 750 /home/alessbarb && usermod -aG sudo alessbarb
 mkdir -p /home/alessbarb/.config/gh && echo token > /home/alessbarb/.config/gh/hosts.yml && chown -R alessbarb: /home/alessbarb && chmod 600 /home/alessbarb/.config/gh/hosts.yml
 groupadd docker && touch /var/run/docker.sock && chown root:docker /var/run/docker.sock && chmod 660 /var/run/docker.sock
-snap() { { getent passwd | sort; getent group | sort; ls -la /etc/sudoers.d; ls -d /var/lib/aao-* /srv/aao /home/aao-* 2>/dev/null; } > "$1"; }
+snap() { { getent passwd | sort; getent group | sort; ls -1A /etc/sudoers.d; ls -d /var/lib/aao-* /srv/aao /home/aao-* 2>/dev/null; } > "$1"; }
 snap /tmp/state_before
 
 echo "== T1 preflight rejects unexpected privileged group"
@@ -96,7 +96,7 @@ mv /usr/bin/getfacl.bak /usr/bin/getfacl
 echo 'aao-pm:Secret123' | chpasswd
 t "role account with usable password -> fail closed" bash -c "! bash $S/identity_separation.sh --apply >/tmp/o 2>&1 && grep -q 'expected locked' /tmp/o"
 usermod -L aao-pm
-touch /var/lib/aao-auditor/ledger/x && chmod 0666 /var/lib/aao-auditor/ledger/x
+touch /var/lib/aao-auditor/ledger/x && chown aao-auditor /var/lib/aao-auditor/ledger/x && chmod 0666 /var/lib/aao-auditor/ledger/x
 t "world-writable file in managed tree -> fail closed" bash -c "! bash $S/identity_separation.sh --apply >/tmp/o 2>&1 && grep -q 'world-writable' /tmp/o"
 rm /var/lib/aao-auditor/ledger/x
 ln -s /etc/shadow /srv/aao/trust/evil
@@ -105,6 +105,10 @@ rm /srv/aao/trust/evil
 chmod 0644 /var/lib/aao-auditor/keys/auditor-ed25519.pem
 t "private key mode 644 -> fail closed" bash -c "! bash $S/identity_separation.sh --apply >/tmp/o 2>&1 && grep -q 'mode 600' /tmp/o"
 chmod 0600 /var/lib/aao-auditor/keys/auditor-ed25519.pem
+
+touch /var/lib/aao-auditor/ledger/y
+t "file owned by another user in managed tree -> fail closed" bash -c "! bash $S/identity_separation.sh --apply >/tmp/o 2>&1 && grep -q 'not owned by the owner of its directory' /tmp/o"
+rm /var/lib/aao-auditor/ledger/y
 
 echo "== T8f induced failure while publishing a key leaves no temp file"
 rm /srv/aao/trust/keys/aao-auditor-ed25519.pub
@@ -143,12 +147,21 @@ runuser -u aao-auditor -- openssl pkeyutl -sign -inkey /var/lib/aao-auditor/keys
 t "signature verifies with published trust key" openssl pkeyutl -verify -pubin -inkey /srv/aao/trust/keys/aao-auditor-ed25519.pub -rawin -in /tmp/r.json -sigfile /tmp/r.sig
 t "signature fails with the other auditor's key" bash -c "! openssl pkeyutl -verify -pubin -inkey /srv/aao/trust/keys/aao-auditor-alt-ed25519.pub -rawin -in /tmp/r.json -sigfile /tmp/r.sig >/dev/null 2>&1"
 
+echo "== T11b purge fails closed when the archive cannot be written"
+t "purge with unwritable archive dir fails" bash -c "! AAO_ARCHIVE_DIR=/nonexistent bash $S/identity_separation.sh --purge >/tmp/pf 2>&1 && grep -q 'nothing was removed' /tmp/pf"
+t "accounts preserved after failed purge" bash -c "id aao-auditor && id aao-pm" 
+t "keys preserved after failed purge" test -f /var/lib/aao-auditor/keys/auditor-ed25519.pem
+t "trust registry preserved after failed purge" test -d /srv/aao/trust/keys
+t "sudoers preserved after failed purge" test -f /etc/sudoers.d/aao-launch
+
 echo "== T11 revert is non-destructive"
 t "revert" bash -c "bash $S/identity_separation.sh --revert >/tmp/rv 2>&1"
 t "sudoers removed" test ! -e /etc/sudoers.d/aao-launch
 t "accounts locked" bash -c "passwd -S aao-pm | grep -q ' L '"
 t "keys kept" test -f /var/lib/aao-auditor/keys/auditor-ed25519.pem
 t "CEO untouched" bash -c "id -nG alessbarb | grep -qw sudo"
+
+t "after --revert, --apply refuses (locked agent shells); documented path is --purge then --apply" bash -c "! bash $S/identity_separation.sh --apply >/tmp/ra 2>&1"
 
 echo "== T12 purge restores the pre-install state"
 t "purge" bash -c "bash $S/identity_separation.sh --purge >/tmp/pg 2>&1"
