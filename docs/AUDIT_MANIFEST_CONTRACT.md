@@ -72,7 +72,8 @@ A veto without custody **does** block, through its pending-veto marker (below).
 
 **Pending vetoes (F4-02).** Every `--veto` run, with or without custody, first
 writes a pending-veto marker to `<ledger_path>.pending-vetoes/`, **before any
-analysis**, so no gate can run while the veto is unseen. The directory
+analysis**, so the analysis window is covered. There is no mutual exclusion
+between the gate and the start of an audit run. The directory
 has the same custody as the ledger: auditor uid, `0700`, markers `0600`, file
 name bound to the marker digest. If the marker cannot be written, the run fails.
 The gate denies any candidate with a marker that no verified ledger entry
@@ -82,12 +83,15 @@ custody-valid run resolves markers: a recorded veto (which still blocks), or
 an explicit `--resolve-pending-vetoes` run. An ordinary later approval does
 not lift a pending veto. Fake markers can only cause a denial of service,
 which is the safe direction.
-**Limitation (custody, B; same class as ledger tail truncation):** the
-auditor uid that owns the markers, or root, can delete them. The auditor uid is
-the vetoing party, so deleting its own marker amounts to withdrawing its veto,
-and root compromises every control. While every role shares one uid (before
-P1), custody already makes every run `provisional`, so nothing can be approved.
-F4-01 extends the independent anchor to cover the marker set.
+**Open finding A-2 (Codex review of #30, held as class A):** any process
+running as the auditor uid, or root, can delete markers. If that uid is shared
+by more than one actor, a party other than the vetoing one can remove a veto,
+and the gate reads a missing marker as no veto. File permissions alone cannot
+close this. It is closed by (1) P1, which makes the auditor uid exclusive to
+the auditor service, and (2) F4-01, under which a different role (the
+supervisor) records the marker set and the ledger head, and the gate denies if
+a recorded marker disappears. Until both hold, this revision is **not** a
+candidate for `trusted_auditor_revisions`.
 
 ## 4. Gate (`python -m aao.manifest_audit gate --manifest M --report R --signature S [--promoted-sha P]`)
 
