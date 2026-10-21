@@ -13,6 +13,7 @@
 1. El **supervisor** (uid `aao-supervisor`, sin escritura en el ledger) lee el ledger, verifica firmas y cadena, y escribe el hash terminal verificado en el archivo de ancla de `aao-trust`. Lo hace con una operación delegada, porque el supervisor no escribe en `aao-trust` directamente. Lo emite como evento firmado con secuencia, y el latido incluye `ledger_head`.
 2. El **integrador** exige que el hash terminal del ledger que lee sea **exactamente** el último `ledger_head` del latido firmado vigente. Ya no basta con que esté contenido en la cadena. Si alguien trunca, el terminal deja de coincidir y no se integra. Si alguien añade una entrada todavía no anclada, la integración espera al siguiente latido.
 3. Ningún rol puede escribir a la vez el ledger y el ancla.
+4. **Cubre también las marcas de veto pendiente (hallazgo A-2 de #30):** el supervisor registra el conjunto de digests de las marcas de cada candidato. El gate y el integrador deniegan si una marca registrada desaparece sin una resolución firmada. Así se cierra el borrado de marcas por otro proceso del uid del auditor. Requiere P1, para que el uid del auditor sea exclusivo.
 
 **Pruebas de aceptación:**
 - truncar la cola tras un veto anclado → el integrador rechaza;
@@ -71,7 +72,7 @@ Ver `docs/proposals/P2_GITHUB_IDENTITIES_AND_PERMISSIONS.md`. Las pruebas A-01 a
 
 ## Orden recomendado
 
-1. F4-02: el gate está en la PR #30, pendiente de la revisión de segunda línea; falta F4-02b, el integrador.
+1. F4-02: el gate está en la PR #30. A-1 está resuelto. A-2 sigue abierto hasta F4-01 y P1. Falta F4-02b, el integrador.
 2. F4-01 (custodia del ancla).
 3. Pruebas de P2 en el repo de ensayo, tras la decisión del CEO.
 4. Requisitos del §12.2 tras P1 y P5.
