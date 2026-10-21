@@ -45,6 +45,10 @@ Pruebas complementarias:
 - veto registrado con custodia que referencia la marca → la marca se convierte en veto registrado y sigue bloqueado;
 - aprobación posterior que referencia y resuelve la marca → se integra, solo si el resto de comprobaciones pasa.
 
+## F4-02b: el integrador de F3a también debe consultar las marcas de veto pendiente
+
+La PR #30 cierra F4-02 en el gate de manifiestos. El integrador de F3a (#26) lee los vetos del ledger de gobierno, pero **no** las marcas de veto pendiente. Antes de activarlo, el integrador debe tratar como bloqueante cualquier marca sin resolver del candidato, con la misma prueba negativa y validación por mutación.
+
 ## F4-03: P2 (identidades y permisos de GitHub)
 
 Ver `docs/proposals/P2_GITHUB_IDENTITIES_AND_PERMISSIONS.md`. Las pruebas A-01 a A-14 son las que llevan RA-02, RA-03 y RA-09 a PASS.
@@ -67,7 +71,7 @@ Ver `docs/proposals/P2_GITHUB_IDENTITIES_AND_PERMISSIONS.md`. Las pruebas A-01 a
 
 ## Orden recomendado
 
-1. F4-02 (fail-closed del veto), porque es un riesgo de integración indebida.
+1. F4-02: el gate está en la PR #30, pendiente de la revisión de segunda línea; falta F4-02b, el integrador.
 2. F4-01 (custodia del ancla).
 3. Pruebas de P2 en el repo de ensayo, tras la decisión del CEO.
 4. Requisitos del §12.2 tras P1 y P5.
