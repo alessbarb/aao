@@ -36,14 +36,17 @@ Git versions.
 
 Fixed path `/etc/aao-audit/trust-anchor.json`, `aao.audit-trust-anchor.v1`:
 `policy_path`, `policy_sha256` (canonical JSON digest), `auditor_uid`,
-`auditor_public_key` (PEM), `ledger_path`. There is no CLI option or
-environment variable that overrides it.
+`auditor_public_key` (PEM), `ledger_path`, `ledger_anchor_path`,
+`attribution_path`. There is no CLI option or environment variable that
+overrides it.
 
 | Object | Required custody (checked with `O_NOFOLLOW` + `fstat`) |
 | --- | --- |
 | Anchor | regular file, owner uid 0, no group/other write; every parent directory is non-symlink, owned by root or the auditor, and not group/other writable (root-owned sticky directories allowed) |
 | Policy | owned by `auditor_uid`, same rules; digest must equal the anchor pin |
-| Ledger and its directory | owned by `auditor_uid`, no group/other write; created `0600` |
+| Ledger and its directory | owned by `auditor_uid`, no group/other write; created `0600`. Format: F3a `governance_ledger`, every entry signed by the anchored auditor key (`audit-verdict` / `veto`) |
+| Ledger anchor (`ledger_anchor_path`) | owned like the trust anchor; holds a terminal hash that must still be part of the verified chain (`0`×64 = genesis) |
+| Attribution (`attribution_path`) | owned like the trust anchor; `aao.implementer-attribution.v1`, `candidates: {sha: [identity…]}` written by the merge authority from authenticated push events (RA-02). Absent, unknown or empty → `provisional` |
 | Evidence | owned by `auditor_uid`, `0444`, re-hashed at gate time |
 | Signing key | owned by `auditor_uid`, no group/other bits, public key equal to the anchor's |
 
@@ -128,3 +131,27 @@ host/VM.
 - **H-03 (ledger depends on ACLs):** the gate now verifies ledger ownership and
   mode. The hash chain stays unkeyed; resistance to a root or owner writer is
   not claimed.
+
+## 8. Disposition of the Codex second-line review of the auditor (SL-01..SL-06, 2026-10-21)
+
+- **SL-01 (caller-controlled trust in the legacy path):** the legacy
+  `independent_audit.audit_candidate` can no longer approve or sign, and
+  `promotion_decision` always denies (`LEGACY_RETIRED`). Promotion goes only
+  through this manifest path and the F3a integrator.
+- **SL-02 (implementer identity not authenticated):** recusal uses only the
+  anchored attribution file. `producer` and Git author e-mails are recorded as
+  `declared_implementers` and can only make the decision stricter. Without
+  resolved attribution the verdict is `provisional`. In the real environment
+  this stays provisional until RA-02 (GitHub attribution) closes.
+- **SL-03 (unkeyed ledger):** the ledger is now an F3a `governance_ledger`
+  with a signature on every entry; the gate verifies all signatures and that
+  the external anchor hash is still in the chain. Rewriting or reordering
+  entries, forging entries or truncating below the anchor is rejected.
+  **Limitation (custody, B):** an account that can write the ledger file (the
+  auditor uid or root) can still truncate entries appended after the last
+  external anchor. Closing it needs the anchor to be advanced by a different
+  role (supervisor/custodian) after each entry.
+- **SL-04, SL-05 (sandbox and custody evidence):** limitations; the host
+  evidence comes from P1 and the F2 verifier.
+- **SL-06 (tamper tests):** added rewrite-with-recomputed-chain, forged-key and
+  truncation-below-anchor tests; each validated by mutation.

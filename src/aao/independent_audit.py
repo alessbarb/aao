@@ -16,7 +16,6 @@ records a ``provisional`` verdict and does not sign, which the gate rejects.
 from __future__ import annotations
 
 import argparse
-import base64
 import fcntl
 import json
 import os
@@ -281,6 +280,10 @@ def _append_ledger(ledger: Path, report: dict[str, Any], report_sha256: str) -> 
         handle.write(json.dumps({**body, "entry_sha256": _sha(_canonical(body))}, sort_keys=True) + "\n")
 
 
+LEGACY_RETIRED = ("legacy audit path retired: caller-supplied policy/key/ledger cannot approve or promote; "
+                  "use manifest_audit with the fixed trust anchor and the F3a integrator")
+
+
 def audit_candidate(
     *, source: str, candidate_sha: str, base_sha: str, policy_path: Path, output: Path, ledger: Path,
     key_path: Path | None, implementer_ids: list[str], ci_checks: dict[str, Any] | None = None,
@@ -327,12 +330,10 @@ def audit_candidate(
     if policy["auditor_id"] in implementer_ids or not implementer_ids:
         blocking.append("auditor-is-implementer-or-implementer-unknown")
     custody = custody_problems(policy, key_path)
-    if veto_reason:
-        verdict = "veto"
-    elif custody:
-        verdict = "provisional"
-    else:
-        verdict = "reject" if blocking else "approve"
+    # SL-01: this legacy path takes policy, key and ledger from its caller, so it can never approve or sign.
+    # Promotion goes only through manifest_audit (fixed trust anchor) and the F3a integrator.
+    custody.append(LEGACY_RETIRED)
+    verdict = "veto" if veto_reason else "reject" if blocking else "provisional"
     report = {
         "schema": "aao.audit-report.v1", "candidate_sha": candidate_sha, "base_sha": base_sha,
         "policy_version": POLICY_VERSION, "policy_sha256": policy_digest, "auditor_id": policy["auditor_id"],
@@ -354,12 +355,6 @@ def audit_candidate(
         raise AuditError("pull request base moved before the verdict was recorded")
     report_bytes = _canonical(report)
     (output / "report.json").write_bytes(report_bytes)
-    if verdict != "provisional" and key_path is not None and not custody:
-        signature = subprocess.run(
-            ["openssl", "pkeyutl", "-sign", "-inkey", str(key_path), "-rawin", "-in", str(output / "report.json")],
-            check=True, capture_output=True,
-        ).stdout
-        (output / "report.sig").write_text(base64.b64encode(signature).decode("ascii"), encoding="ascii")
     _append_ledger(ledger, report, _sha(report_bytes))
     return report
 
@@ -368,9 +363,9 @@ def promotion_decision(
     repository: Path, policy_path: Path, report_path: Path | None, signature_path: Path | None,
     check_results: dict[str, Any], implementer_id: str, ledger: Path, *, current_base_sha: str,
 ) -> GateResult:
-    """Existing signed-report gate plus ledger, current base and reviewed auditor revision."""
+    """Retired (SL-01): always denies. Kept so old callers fail closed instead of breaking silently."""
     result = evaluate(repository, policy_path, report_path, signature_path, check_results, implementer_id)
-    reasons = list(result.reasons)
+    reasons = [LEGACY_RETIRED, *result.reasons]
     try:
         policy, _ = load_policy(policy_path)
         report = json.loads(report_path.read_text(encoding="utf-8")) if report_path else {}
