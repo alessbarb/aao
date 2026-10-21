@@ -957,6 +957,86 @@ def test_authorization_rejects_open_critical_finding_or_empty_expediente(tmp_pat
     assert "expediente digest missing" in validate(doc, signature, state)
 
 
+def test_authorization_rejects_critical_finding_not_resolved(tmp_path):
+    private, _, doc, state, _signature = _auth_fixture(tmp_path)
+    for disposition in ("ACCEPTED", "OPEN", "CLOSED"):
+        doc["findings"] = [{"severity": "cRiTiCaL", "disposition": disposition}]
+        signature = sign(doc, str(private))
+        assert "open critical finding" in validate(doc, signature, state)
+    doc["findings"] = [{"severity": "critical", "disposition": "RESOLVED"}]
+    signature = sign(doc, str(private))
+    assert "open critical finding" not in validate(doc, signature, state)
+
+
+def test_integrator_fails_closed_when_changed_paths_unavailable(tmp_path):
+    from aao import integrator
+    _private, _, doc, state, signature = _auth_fixture(tmp_path)
+    assert "changed paths unavailable" in validate(doc, signature, {**state, "changed_paths": None})
+    assert "changed paths unavailable" in validate(doc, signature, {key: val for key, val in state.items() if key != "changed_paths"})
+    promote_root = tmp_path / "promote"
+    promote_root.mkdir()
+    promote, repo, _bare, _base, _head, _tree, auth, sources, auth_signature = _git_fixture(promote_root)
+    original_run = integrator.subprocess.run
+    def fail_diff(args, **kwargs):
+        if "diff" in args:
+            raise subprocess.CalledProcessError(2, args, stderr="bad revision")
+        return original_run(args, **kwargs)
+    integrator.subprocess.run = fail_diff
+    try:
+        with pytest.raises(ValueError, match="changed paths unavailable"):
+            promote(repo, "origin", auth, auth_signature, sources, identity_provider=_integrator_identity(),
+                    now=lambda: __import__("datetime").datetime(2026,1,1,1,tzinfo=__import__("datetime").timezone.utc))
+    finally:
+        integrator.subprocess.run = original_run
+
+
+def test_integrator_rejects_rename_of_protected_path(tmp_path):
+    promote, repo, _bare, base, _head, _tree, auth, sources, _signature = _git_fixture(tmp_path)
+    (repo / "docs").mkdir()
+    (repo / "docs/CONSTITUTION.md").write_text("protected\n")
+    git(repo, "add", "docs/CONSTITUTION.md"); git(repo, "commit", "-m", "add protected file")
+    # Make that state the remote base, then create a real rename candidate.
+    git(repo, "push", "origin", "HEAD:refs/heads/main")
+    base = git(repo, "rev-parse", "HEAD")
+    git(repo, "mv", "docs/CONSTITUTION.md", "docs/old.md")
+    git(repo, "commit", "-m", "rename protected file")
+    head = git(repo, "rev-parse", "HEAD")
+    tree = git(repo, "merge-tree", "--write-tree", base, head).splitlines()[0]
+    git(repo, "push", "--force", "origin", f"{head}:refs/heads/candidate")
+    git(repo, "reset", "--hard", base)
+    auth.update(candidate_sha=head, base_sha=base, expected_parents=[base, head], merge_result_tree_sha=tree)
+    auth["protected_paths_sha256"] = hashlib.sha256(canonical([{"path":"docs/CONSTITUTION.md", "minimum_risk_class":"R3"}])).hexdigest()
+    registry = json.loads(sources.trust_registry.read_text())
+    registry["protected_paths"] = {"docs/CONSTITUTION.md":"R3"}
+    registry["ci_candidate_sha"] = head
+    sources.trust_registry.write_text(json.dumps(registry))
+    with pytest.raises(ValueError, match="protected path risk class insufficient"):
+        promote(repo, "origin", auth, sign(auth, registry["test_auditor_private_key"]), sources,
+                identity_provider=_integrator_identity(),
+                now=lambda: __import__("datetime").datetime(2026,1,1,1,tzinfo=__import__("datetime").timezone.utc))
+
+
+def test_integrator_ls_remote_matches_exact_ref(tmp_path, monkeypatch):
+    from aao import integrator
+    promote, repo, bare, _base, _head, _tree, auth, sources, signature = _git_fixture(tmp_path)
+    # Return the prefix-colliding ref first, as a remote may do; selection must match full ref.
+    git(repo, "push", "origin", f"{auth['candidate_sha']}:refs/heads/main-old")
+    original_run = integrator.subprocess.run
+    def with_prefix_ref(args, **kwargs):
+        result = original_run(args, **kwargs)
+        if args[:3] == ["git", "ls-remote", str(bare)] and result.stdout:
+            lines = result.stdout.splitlines()
+            main_old = next((line for line in lines if line.endswith("refs/heads/main-old")), None)
+            if main_old:
+                result.stdout = "\n".join([main_old, *[line for line in lines if line != main_old]]) + "\n"
+        return result
+    monkeypatch.setattr(integrator.subprocess, "run", with_prefix_ref)
+    commit = promote(repo, "origin", auth, signature, sources,
+                     identity_provider=_integrator_identity(),
+                     now=lambda: __import__("datetime").datetime(2026,1,1,1,tzinfo=__import__("datetime").timezone.utc))
+    assert _remote_main(bare) == commit
+
+
 def test_integrator_freezes_when_published_parents_differ(tmp_path):
     promote, repo, bare, _base, _head, tree, auth, sources, signature = _git_fixture(tmp_path)
     assert git(repo, "show", "-s", "--format=%T", auth["candidate_sha"]) == tree
@@ -1057,7 +1137,7 @@ def test_integrator_blocks_when_remote_main_moves_without_local_ref_change(tmp_p
     assert git(repo, "rev-parse", "refs/heads/main") == base
 
     _assert_integrator_rejects_without_main_change(
-        promote, repo, bare, auth, signature, sources, "target ref or base mismatch"
+        promote, repo, bare, auth, signature, sources, "changed paths unavailable"
     )
 
 

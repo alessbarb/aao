@@ -94,10 +94,10 @@ def promote(repo: Path, remote: str, auth: dict[str, Any], signature: str,
     if identity != registry["integrator_identity"]:
         raise RuntimeError("integrator identity mismatch")
     remote_url = _git(repo, "remote", "get-url", remote)
-    remote_refs = dict(line.split()[:2][::-1] for line in subprocess.run(
-        ["git", "ls-remote", remote_url, ref],
-        check=True, capture_output=True, text=True).stdout.splitlines())
-    base = remote_refs.get(ref)
+    remote_refs = subprocess.run(["git", "ls-remote", remote_url, ref],
+                                 check=True, capture_output=True, text=True).stdout.splitlines()
+    base = next((parts[0] for line in remote_refs
+                 if len(parts := line.split()) == 2 and parts[1] == ref), None)
     head_ref = auth.get("candidate_ref") or "refs/heads/candidate"
     candidates = subprocess.run(["git", "ls-remote", remote_url, head_ref], check=True,
                                 capture_output=True, text=True).stdout.splitlines()
@@ -105,13 +105,23 @@ def promote(repo: Path, remote: str, auth: dict[str, Any], signature: str,
     # Candidate is identified by signed SHA; require that object to be present locally and reachable remotely.
     if not base or not head:
         raise ValueError("remote base or candidate unavailable")
-    subprocess.run(["git", "-C", str(repo), "cat-file", "-e", f"{head}^{{commit}}"],
-                   check=True, capture_output=True)
+    try:
+        subprocess.run(["git", "-C", str(repo), "cat-file", "-e", f"{head}^{{commit}}"],
+                       check=True, capture_output=True)
+    except (subprocess.CalledProcessError, OSError) as error:
+        raise ValueError("changed paths unavailable: local head commit missing") from error
     version = _git(repo, "--version").removeprefix("git version ")
     has_base = subprocess.run(["git", "-C", str(repo), "cat-file", "-e", f"{base}^{{commit}}"],
                               check=False, capture_output=True).returncode == 0
-    changed_paths = subprocess.run(["git", "-C", str(repo), "diff", "--name-only", f"{base}...{head}"],
-                                  check=True, capture_output=True, text=True).stdout.splitlines() if has_base else []
+    if not has_base:
+        raise ValueError("changed paths unavailable: local base commit missing")
+    try:
+        changed_paths = subprocess.run(
+            ["git", "-C", str(repo), "diff", "--no-renames", "--name-only", f"{base}...{head}"],
+            check=True, capture_output=True, text=True,
+        ).stdout.splitlines()
+    except (subprocess.CalledProcessError, OSError) as error:
+        raise ValueError(f"changed paths unavailable: {error}") from error
     state = {**registry, "repo": registry.get("repo"), "pr_number": registry.get("pr_number"),
         "pr_head": head, "target_ref": ref, "target_sha": base,
         "merge_tree_sha": auth["merge_result_tree_sha"], "now": current_time.isoformat(),
@@ -135,7 +145,12 @@ def promote(repo: Path, remote: str, auth: dict[str, Any], signature: str,
     if before_push:
         before_push()
     # Re-read the remote immediately before the conditional push.
-    latest = subprocess.run(["git", "ls-remote", remote_url, ref], check=True, capture_output=True, text=True).stdout.split()[0]
+    latest_lines = subprocess.run(["git", "ls-remote", remote_url, ref], check=True,
+                                  capture_output=True, text=True).stdout.splitlines()
+    latest = next((parts[0] for line in latest_lines
+                   if len(parts := line.split()) == 2 and parts[1] == ref), None)
+    if latest is None:
+        raise RuntimeError("remote base ref unavailable")
     if latest != base:
         raise RuntimeError("remote base moved")
     if after_recheck:
@@ -151,7 +166,8 @@ def promote(repo: Path, remote: str, auth: dict[str, Any], signature: str,
             after_push()
         listing = subprocess.run(["git", "ls-remote", remote_url, ref], check=True,
                                  capture_output=True, text=True).stdout.splitlines()
-        observed["sha"] = listing[0].split()[0] if listing else None
+        observed["sha"] = next((parts[0] for line in listing
+                                 if len(parts := line.split()) == 2 and parts[1] == ref), None)
         if observed["sha"] is None:
             raise RuntimeError("published remote ref is missing")
         _git(repo, "cat-file", "-e", f"{observed['sha']}^{{commit}}")

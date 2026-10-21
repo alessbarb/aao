@@ -178,7 +178,7 @@ def validate(document: dict[str, Any], signature: str, state: dict[str, Any]) ->
     findings = document.get("findings")
     if not isinstance(findings, list) or any(not isinstance(f, dict) or not isinstance(f.get("severity"), str) for f in findings):
         reasons.append("invalid findings")
-    elif any(f.get("severity", "").upper() == "CRITICAL" and f.get("disposition") not in {"CLOSED", "RESOLVED", "ACCEPTED"} for f in findings):
+    elif any(f.get("severity", "").upper() == "CRITICAL" and f.get("disposition") != "RESOLVED" for f in findings):
         reasons.append("open critical finding")
     if not isinstance(document.get("expediente_sha256"), str) or not document["expediente_sha256"]:
         reasons.append("expediente digest missing")
@@ -228,7 +228,11 @@ def validate(document: dict[str, Any], signature: str, state: dict[str, Any]) ->
     if canonical_paths is None or hashlib.sha256(canonical_paths).hexdigest() != document.get("protected_paths_sha256"):
         reasons.append("protected paths digest mismatch")
     order = {"R1": 1, "R2": 2, "R3": 3}
-    for path in state.get("changed_paths", []):
+    changed_paths = state.get("changed_paths")
+    if not isinstance(changed_paths, list) or any(not isinstance(path, str) for path in changed_paths):
+        reasons.append("changed paths unavailable")
+        changed_paths = []
+    for path in changed_paths:
         for rule, minimum in (protected or {}).items():
             if (path == rule or (rule.endswith("/") and path.startswith(rule))) and order.get(
                 document.get("risk_class"), 0

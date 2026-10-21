@@ -84,7 +84,7 @@ def inspect(
         ).stdout.split()
         if parents:
             paths = subprocess.run(
-                ["git", "-C", str(repository), "diff-tree", "-r", "--no-commit-id", "--name-only",
+                ["git", "-C", str(repository), "diff-tree", "-r", "--no-renames", "--no-commit-id", "--name-only",
                  parents[0], sha], check=True, capture_output=True, text=True,
             ).stdout.splitlines()
         else:
