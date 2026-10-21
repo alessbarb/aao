@@ -63,6 +63,8 @@ def inspect(
     ledger_authorizations = {
         row["commit"]: row for row in rows
         if row.get("type") == "authorization" and isinstance(row.get("commit"), str)
+        and isinstance(trusted_keys.get(row.get("key_id")), dict)
+        and trusted_keys[row["key_id"]].get("can_authorize") is True
     }
     authorized = set(ledger_authorizations)
     commits = subprocess.run(
@@ -93,7 +95,7 @@ def inspect(
         changed_rules = [(path, level) for path in paths for rule, level in protected.items()
                          if path == rule or (rule.endswith("/") and path.startswith(rule))]
         ledger_row = ledger_authorizations.get(sha)
-        attestation = (authorized_classes or {}).get(sha) or (ledger_row or {}).get("risk_class")
+        attestation = (ledger_row or {}).get("risk_class")
         insufficient = any(order.get(attestation, 0) < order.get(level, 4) for _, level in changed_rules)
         mismatch = bool(ledger_row and integrator_identity is not None and
                         (push_attributions or {}).get(sha) != integrator_identity)

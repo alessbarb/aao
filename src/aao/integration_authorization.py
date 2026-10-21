@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import hashlib
 import json
 import subprocess
 from datetime import datetime, timedelta
@@ -172,6 +173,15 @@ def validate(document: dict[str, Any], signature: str, state: dict[str, Any]) ->
         reasons.append("auditor model matches author model")
     if document.get("auditor_code_revision") not in state.get("trusted_auditor_revisions", []):
         reasons.append("auditor revision untrusted")
+    if document.get("git_version") != state.get("git_version"):
+        reasons.append("git version mismatch")
+    findings = document.get("findings")
+    if not isinstance(findings, list) or any(not isinstance(f, dict) or not isinstance(f.get("severity"), str) for f in findings):
+        reasons.append("invalid findings")
+    elif any(f.get("severity", "").upper() == "CRITICAL" and f.get("disposition") not in {"CLOSED", "RESOLVED", "ACCEPTED"} for f in findings):
+        reasons.append("open critical finding")
+    if not isinstance(document.get("expediente_sha256"), str) or not document["expediente_sha256"]:
+        reasons.append("expediente digest missing")
     enabled = state.get("enabled_risk_classes")
     if not isinstance(enabled, (list, tuple, set)) or document.get("risk_class") not in enabled:
         reasons.append("auditor not enabled for risk class")
@@ -213,8 +223,18 @@ def validate(document: dict[str, Any], signature: str, state: dict[str, Any]) ->
         reasons.append("actor attribution inconclusive")
     if state.get("ci_candidate_sha") != document.get("candidate_sha"):
         reasons.append("CI evidence is for another candidate")
-    if state.get("protected_paths_match") is not True:
+    protected = state.get("protected_paths")
+    canonical_paths = canonical([{"path": p, "minimum_risk_class": protected[p]} for p in sorted(protected)]) if isinstance(protected, dict) else None
+    if canonical_paths is None or hashlib.sha256(canonical_paths).hexdigest() != document.get("protected_paths_sha256"):
         reasons.append("protected paths digest mismatch")
+    order = {"R1": 1, "R2": 2, "R3": 3}
+    for path in state.get("changed_paths", []):
+        for rule, minimum in (protected or {}).items():
+            if (path == rule or (rule.endswith("/") and path.startswith(rule))) and order.get(
+                document.get("risk_class"), 0
+            ) < order.get(minimum, 4):
+                reasons.append("protected path risk class insufficient")
+                break
     try:
         if now < issued:
             reasons.append("authorization issued in the future")

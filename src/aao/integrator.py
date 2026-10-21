@@ -35,7 +35,10 @@ def _heartbeat(path: Path, registry: dict[str, Any], now: datetime) -> bool:
         return False
     expiry = datetime.fromisoformat(event["expires_at"])
     issued = datetime.fromisoformat(event["issued_at"])
-    if now >= expiry or (now - issued).total_seconds() > registry["heartbeat_max_age_seconds"]:
+    sequence_path = path.with_suffix(path.suffix + ".sequence")
+    prior = int(sequence_path.read_text()) if sequence_path.exists() else 0
+    if (event.get("sequence", 0) <= prior or now >= expiry or issued > now.replace(microsecond=0) + __import__("datetime").timedelta(seconds=60)
+            or (now - issued).total_seconds() > min(3600, registry.get("heartbeat_max_age_seconds", 3600))):
         return False
     signature = base64.b64decode(event["signature"], validate=True)
     signed = {k: v for k, v in event.items() if k != "signature"}
@@ -43,9 +46,12 @@ def _heartbeat(path: Path, registry: dict[str, Any], now: datetime) -> bool:
     with tempfile.TemporaryDirectory() as directory:
         sig, msg = Path(directory) / "sig", Path(directory) / "msg"
         sig.write_bytes(signature); msg.write_bytes(canonical(signed))
-        return subprocess.run(["openssl", "pkeyutl", "-verify", "-pubin", "-inkey",
+        valid = subprocess.run(["openssl", "pkeyutl", "-verify", "-pubin", "-inkey",
             registry["supervisor_public_key"], "-sigfile", str(sig), "-in", str(msg), "-rawin"],
             check=False, capture_output=True).returncode == 0
+    if valid:
+        sequence_path.write_text(str(event["sequence"]))
+    return valid
 
 
 def promote(repo: Path, remote: str, auth: dict[str, Any], signature: str,
@@ -76,8 +82,10 @@ def promote(repo: Path, remote: str, auth: dict[str, Any], signature: str,
         raise ValueError("clock must return timezone-aware datetime")
     heartbeat_ok = _heartbeat(trust_sources.heartbeat, registry, current_time)
     ra = registry["ra_status"]
+    ra01 = ra.get("RA-01") == "PASS"
     ra02 = ra.get("RA-02") == "PASS"
     ra03 = ra.get("RA-03") == "PASS"
+    ra07 = ra.get("RA-07") == "PASS"
     ra09 = ra.get("RA-09") == "PASS"
     ref = auth["target_ref"]
     if ref not in registry["target_refs"]:
@@ -90,19 +98,28 @@ def promote(repo: Path, remote: str, auth: dict[str, Any], signature: str,
         ["git", "ls-remote", remote_url, ref],
         check=True, capture_output=True, text=True).stdout.splitlines())
     base = remote_refs.get(ref)
-    head = auth["candidate_sha"]
+    head_ref = auth.get("candidate_ref") or "refs/heads/candidate"
+    candidates = subprocess.run(["git", "ls-remote", remote_url, head_ref], check=True,
+                                capture_output=True, text=True).stdout.splitlines()
+    head = next((line.split()[0] for line in candidates if len(line.split()) == 2 and line.split()[1] == head_ref), None)
     # Candidate is identified by signed SHA; require that object to be present locally and reachable remotely.
-    if not base or _git(repo, "cat-file", "-e", f"{head}^{{commit}}") is None:
+    if not base or not head:
         raise ValueError("remote base or candidate unavailable")
+    subprocess.run(["git", "-C", str(repo), "cat-file", "-e", f"{head}^{{commit}}"],
+                   check=True, capture_output=True)
     version = _git(repo, "--version").removeprefix("git version ")
-    state = {**registry, "repo": auth["repo"], "pr_number": auth["pr_number"],
+    has_base = subprocess.run(["git", "-C", str(repo), "cat-file", "-e", f"{base}^{{commit}}"],
+                              check=False, capture_output=True).returncode == 0
+    changed_paths = subprocess.run(["git", "-C", str(repo), "diff", "--name-only", f"{base}...{head}"],
+                                  check=True, capture_output=True, text=True).stdout.splitlines() if has_base else []
+    state = {**registry, "repo": registry.get("repo"), "pr_number": registry.get("pr_number"),
         "pr_head": head, "target_ref": ref, "target_sha": base,
         "merge_tree_sha": auth["merge_result_tree_sha"], "now": current_time.isoformat(),
         "heartbeat_valid": heartbeat_ok, "ra03_pass": ra03, "ra09_pass": ra09,
         "ra02_pass": ra02, "ledger": {"veto": bool(active_vetoes(rows, ledger_keys))},
-        "git_version": version}
+        "git_version": version, "changed_paths": changed_paths}
     reasons = validate(auth, signature, state)
-    if not ra02 or not ra03 or not ra09:
+    if not all((ra01, ra02, ra03, ra07, ra09)):
         reasons.append("required RA status pending")
     if reasons:
         raise ValueError("authorization rejected: " + "; ".join(reasons))

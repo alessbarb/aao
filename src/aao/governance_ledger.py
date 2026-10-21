@@ -55,7 +55,7 @@ def append(path: Path, payload: dict[str, Any], key_id: str, private_key: str,
         if not isinstance(authority, dict) or not authority.get("can_revoke"):
             raise ValueError("revocation signer is not an enabled authority")
         target = payload.get("target")
-        if not target or not any(r.get("type") == "veto" and r.get("id") == target for r in rows):
+        if not target or not any(r.get("type") == "veto" and r.get("hash") == target for r in rows):
             raise ValueError("revocation must reference an exact existing veto")
     if payload.get("type") == "incident" and not _authority(trusted_keys.get(key_id), "can_record_incidents"):
         raise ValueError("incident signer is not an enabled authority")
@@ -110,10 +110,12 @@ def verify(
         if e.get("type") == "revocation":
             if not isinstance(key_entry, dict) or not key_entry.get("can_revoke"):
                 raise ValueError("revocation signer is not an enabled authority")
-            if not e.get("target") or not any(r.get("type") == "veto" and r.get("id") == e["target"] for r in rows):
+            if not e.get("target") or not any(r.get("type") == "veto" and r.get("hash") == e["target"] for r in rows):
                 raise ValueError("revocation must reference an exact existing veto")
         if e.get("type") == "incident" and not _authority(key_entry, "can_record_incidents"):
             raise ValueError("incident signer is not an enabled authority")
+        if e.get("type") == "authorization" and not _authority(key_entry, "can_authorize"):
+            raise ValueError("authorization signer is not an enabled authority")
         if e.get("type") == "incident-resolution":
             incident = next((r for r in rows if r.get("type") == "incident" and
                              r.get("id") == e.get("target")), None)
@@ -131,7 +133,7 @@ def verify(
 def active_vetoes(rows: list[dict[str, Any]], trusted_keys: dict[str, Any]) -> list[dict[str, Any]]:
     if not trusted_keys:
         raise ValueError("non-empty trusted key registry is required")
-    veto_ids = {r.get("id") for r in rows if r.get("type") == "veto"}
+    veto_hashes = {r.get("hash") for r in rows if r.get("type") == "veto"}
     revoked = set()
     for row in rows:
         if row.get("type") != "revocation":
@@ -143,11 +145,11 @@ def active_vetoes(rows: list[dict[str, Any]], trusted_keys: dict[str, Any]) -> l
             or not _verify(row, key)
             or not isinstance(key_entry, dict)
             or not key_entry.get("can_revoke")
-            or row.get("target") not in veto_ids
+            or row.get("target") not in veto_hashes
         ):
             continue
         revoked.add(row["target"])
-    return [r for r in rows if r.get("type") == "veto" and r.get("id") not in revoked]
+    return [r for r in rows if r.get("type") == "veto" and r.get("hash") not in revoked]
 
 
 def _authority(entry: Any, capability: str) -> bool:

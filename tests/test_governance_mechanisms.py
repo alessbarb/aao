@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import base64
+import hashlib
 import json
 import os
 import subprocess
@@ -43,7 +44,7 @@ def test_authorization_fail_closed_and_signature(tmp_path):
         assurance_level="A",
         policy_id="p",
         policy_sha256="policy",
-        protected_paths_sha256="paths",
+        protected_paths_sha256=hashlib.sha256(canonical([])).hexdigest(),
         expected_parents=["b", "c"],
         git_version="2.43.0",
         auditor_id="audit",
@@ -74,7 +75,7 @@ def test_authorization_fail_closed_and_signature(tmp_path):
         now="2026-01-01T01:00:00+00:00",
         heartbeat_valid=True,
         enabled_risk_classes=["R2"], policy_id="p", attribution_resolved=True,
-        ci_candidate_sha="c", protected_paths_match=True,
+        ci_candidate_sha="c", protected_paths={}, changed_paths=[], git_version="2.43.0",
         auditor_models={"audit": "auditor-model"}, author_models={"author": "author-model"},
         ra03_pass=True,
         ra09_pass=True,
@@ -152,7 +153,7 @@ def supervisor_inspect(repo, authorized, sequence, private, tmp_path, **kwargs):
                    capture_output=True)
     ledger = tmp_path / "supervisor-ledger.jsonl"
     ledger.unlink(missing_ok=True)
-    ledger_keys = {"supervisor": str(public)}
+    ledger_keys = {"supervisor": {"public_key": str(public), "can_authorize": True}}
     for sha in authorized:
         if not ledger.exists() or not any(json.loads(line).get("commit") == sha
                                           for line in ledger.read_text().splitlines()):
@@ -238,7 +239,7 @@ def test_authorization_head_move_and_wrong_parent_are_rejected(tmp_path):
         "assurance_level": "A",
         "policy_id": "p",
         "policy_sha256": "policy",
-        "protected_paths_sha256": "paths",
+        "protected_paths_sha256": hashlib.sha256(canonical([])).hexdigest(),
         "expected_parents": ["base", "candidate"],
         "git_version": "2.43.0",
         "auditor_id": "audit",
@@ -270,7 +271,7 @@ def test_authorization_head_move_and_wrong_parent_are_rejected(tmp_path):
         "now": "2026-01-01T01:00:00+00:00",
         "heartbeat_valid": True,
         "enabled_risk_classes": ["R2"], "policy_id": "p", "attribution_resolved": True,
-        "ci_candidate_sha": "candidate", "protected_paths_match": True,
+        "ci_candidate_sha": "candidate", "protected_paths": {}, "changed_paths": [], "git_version": "2.43.0",
         "auditor_models": {"audit": "auditor-model"}, "author_models": {"author": "author-model"},
         "ra03_pass": True,
         "ra09_pass": True,
@@ -309,7 +310,7 @@ def _auth_fixture(tmp_path):
         "assurance_level": "A",
         "policy_id": "policy",
         "policy_sha256": "hash",
-        "protected_paths_sha256": "paths",
+        "protected_paths_sha256": hashlib.sha256(canonical([])).hexdigest(),
         "expected_parents": ["base", "candidate"],
         "git_version": "2.43.0",
         "auditor_id": "auditor",
@@ -346,7 +347,7 @@ def _auth_fixture(tmp_path):
         "policy_id": "policy",
         "attribution_resolved": True,
         "ci_candidate_sha": "candidate",
-        "protected_paths_match": True,
+        "protected_paths": {}, "changed_paths": [], "git_version": "2.43.0",
         "auditor_models": {"auditor": "model-audit"},
         "author_models": {"author": "model-author"},
         "ra03_pass": True,
@@ -356,7 +357,7 @@ def _auth_fixture(tmp_path):
     return private, public, doc, state, sign(doc, str(private))
 
 
-@pytest.mark.parametrize("field", ["enabled_risk_classes", "policy_id", "attribution_resolved", "ci_candidate_sha", "protected_paths_match"])
+@pytest.mark.parametrize("field", ["enabled_risk_classes", "policy_id", "attribution_resolved", "ci_candidate_sha", "protected_paths"])
 def test_authorization_rejects_missing_snapshot_fields(tmp_path, field):
     _, _, d, s, sig = _auth_fixture(tmp_path)
     broken = dict(s)
@@ -588,9 +589,9 @@ def test_supervisor_signs_events_and_heartbeat_for_notifier(tmp_path):
     private, public = keypair(tmp_path)
     ledger = tmp_path / "ledger.jsonl"
     append(ledger, {"type": "authorization", "commit": git(repo, "rev-parse", "HEAD")},
-           "k", str(private), {"k": str(public)})
+           "k", str(private), {"k": {"public_key": str(public), "can_authorize": True}})
     events = inspect(repo, set(), 0, str(private), key_id="k", state_path=tmp_path / "seq.json",
-                     ledger_path=ledger, trusted_keys={"k": str(public)}, now="2026-01-01T00:00:00+00:00")
+                     ledger_path=ledger, trusted_keys={"k": {"public_key": str(public), "can_authorize": True}}, now="2026-01-01T00:00:00+00:00")
     heartbeat = signed_heartbeat(2, "2026-01-01T00:00:00+00:00", str(private), key_id="k",
                                  expires_at="2026-01-01T00:05:00+00:00")
     sink = FileSink(tmp_path / "sink.jsonl")
@@ -623,9 +624,9 @@ def test_supervisor_detects_protected_change_in_real_merge_using_minimum_class(t
     private, public = keypair(tmp_path)
     ledger = tmp_path / "merge-ledger"
     append(ledger, {"type": "authorization", "commit": merge, "risk_class": "R1"},
-           "k", str(private), {"k": str(public)})
+           "k", str(private), {"k": {"public_key": str(public), "can_authorize": True}})
     events = inspect(work, {merge}, 0, str(private), key_id="k", state_path=tmp_path / "merge-seq",
-                     ledger_path=ledger, trusted_keys={"k": str(public)},
+                     ledger_path=ledger, trusted_keys={"k": {"public_key": str(public), "can_authorize": True}},
                      protected_path_registry={".github/workflows/": "R2"},
                      now="2026-01-01T00:00:00+00:00")
     assert any(e["commit"] == merge and e["protected_path_unauthorized"] for e in events)
@@ -713,7 +714,7 @@ def _git_fixture(tmp_path):
     d = {"repo":"r", "pr_number":1, "candidate_sha":head, "base_sha":base,
          "target_ref":"refs/heads/main", "merge_method":"merge-commit", "merge_result_tree_sha":tree,
          "risk_class":"R2", "assurance_level":"A", "policy_id":"p", "policy_sha256":"h",
-         "protected_paths_sha256":"paths", "expected_parents":[base,head], "git_version":"2.43.0",
+         "protected_paths_sha256":hashlib.sha256(canonical([])).hexdigest(), "expected_parents":[base,head], "git_version":"2.43.0",
          "auditor_id":"a", "auditor_key_id":"k", "auditor_code_revision":"rev",
          "attribution":[{"sha":head,"principal":"author","source":"ledger","evidence_sha256":"a"}],
          "checks_executed":[{"name":"unit","cmd":"pytest","result":"PASS","evidence_sha256":"e"}],
@@ -724,7 +725,7 @@ def _git_fixture(tmp_path):
          "merge_tree_sha":tree, "policy_sha256":"h", "trusted_keys":{"k":str(public)},
          "trusted_auditors":{"a":["k"]}, "trusted_auditor_revisions":["rev"], "required_checks_by_risk_class":{"R2":["unit"]},
          "enabled_risk_classes":["R2"], "policy_id":"p", "attribution_resolved":True,
-         "ci_candidate_sha":head, "protected_paths_match":True, "auditor_models":{"a":"auditor-model"},
+         "ci_candidate_sha":head, "protected_paths":{}, "changed_paths":[], "git_version":git(r,"--version").removeprefix("git version "), "auditor_models":{"a":"auditor-model"},
          "author_models":{"author":"author-model"}, "ra03_pass":True, "ra09_pass":True}
     resolver_dir = tmp_path / "resolver"
     resolver_dir.mkdir()
@@ -735,8 +736,8 @@ def _git_fixture(tmp_path):
     anchor.write_text(verify(ledger, {"k":str(public)})[-1]["hash"] if ledger.exists() and ledger.stat().st_size else "0"*64)
     hb=signed_heartbeat(1,"2026-01-01T00:00:00+00:00",str(private),key_id="supervisor",expires_at="2026-01-01T02:00:00+00:00")
     heartbeat.write_text(json.dumps(hb))
-    registry={**state,"ledger_keys":{"k":{"public_key":str(public),"can_record_incidents":True}},"supervisor_key_id":"supervisor","supervisor_public_key":str(public),"heartbeat_max_age_seconds":7200,
-              "target_refs":["refs/heads/main"],"integrator_identity":"integrator","protected_paths":{},"ra_status":{"RA-02":"PASS","RA-03":"PASS","RA-09":"PASS"}}
+    registry={**state,"repo":"r","pr_number":1,"ledger_keys":{"k":{"public_key":str(public),"can_record_incidents":True}},"supervisor_key_id":"supervisor","supervisor_public_key":str(public),"heartbeat_max_age_seconds":3600,
+              "target_refs":["refs/heads/main"],"integrator_identity":"integrator","protected_paths":{},"ra_status":{"RA-01":"PASS","RA-02":"PASS","RA-03":"PASS","RA-07":"PASS","RA-09":"PASS"}}
     registry["integrator_key_id"] = "k"
     registry["incident_resolvers"] = ["resolver"]
     registry["ledger_keys"]["resolver"] = {"public_key": str(resolver_public), "can_resolve_incidents": True}
