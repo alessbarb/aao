@@ -45,14 +45,48 @@ for u in aao-pm aao-impl-codex aao-impl-claude aao-impl-ag aao-auditor aao-audit
 done
 
 echo "== T7 verifier catches an ACL grant (no false PASS)"
-setfacl -m u:aao-impl-codex:x /var/lib/aao-auditor && setfacl -m u:aao-impl-codex:rx /var/lib/aao-auditor/keys
-t "ACL leak detected" bash -c "! runuser -u aao-impl-codex -- bash $S/verify_identity_separation.sh >/tmp/v 2>&1 && grep -q 'FAIL     enter aao-auditor keys dir' /tmp/v"
-setfacl -b /var/lib/aao-auditor/keys /var/lib/aao-auditor
+setfacl -m u:aao-impl-codex:x /var/lib/aao-auditor
+t "ACL leak detected" bash -c "! runuser -u aao-impl-codex -- bash $S/verify_identity_separation.sh >/tmp/v 2>&1 && grep -q 'FAIL     enter /var/lib/aao-auditor' /tmp/v"
+setfacl -b /var/lib/aao-auditor
 
 echo "== T8 verifier: missing target is NOT RUN, not PASS"
 mv /srv/aao/trust /srv/aao/trust.bak
 t "missing target -> NOT RUN" bash -c "! runuser -u aao-pm -- bash $S/verify_identity_separation.sh >/tmp/v 2>&1 && grep -q 'NOT RUN  write trust registry' /tmp/v"
 mv /srv/aao/trust.bak /srv/aao/trust
+
+echo "== T8b verifier: a hidden or missing managed path is never PASS"
+mv /var/lib/aao-auditor/keys /var/lib/aao-auditor/keys.bak
+t "missing keys dir seen by supervisor -> NOT RUN" bash -c "! runuser -u aao-supervisor -- bash $S/verify_identity_separation.sh >/tmp/v 2>&1 && grep -q 'NOT RUN  enter aao-auditor keys dir' /tmp/v"
+mv /var/lib/aao-auditor/keys.bak /var/lib/aao-auditor/keys
+t "verifier has no ancestor inference" bash -c "! grep -qi ancestor $S/verify_identity_separation.sh"
+
+echo "== T8c layout asserted as root"
+lay_ok=1
+while read -r p o g m; do [ "$(stat -c '%U %G %a' $p)" = "$o $g ${m#0}" ] || { echo "layout mismatch $p"; lay_ok=0; }; done <<'L'
+/var/lib/aao-auditor aao-auditor aao-ledger-read 0750
+/var/lib/aao-auditor/keys aao-auditor aao-auditor 0700
+/var/lib/aao-auditor/ledger aao-auditor aao-ledger-read 0750
+/var/lib/aao-auditor-alt aao-auditor-alt aao-ledger-read 0750
+/var/lib/aao-auditor-alt/keys aao-auditor-alt aao-auditor-alt 0700
+/var/lib/aao-supervisor/events aao-supervisor aao-events 0750
+/srv/aao/trust/keys aao-trust aao-trust 0755
+/srv/aao/frozen/aao-auditor aao-trust aao-trust 0755
+L
+t "layout matches" test $lay_ok = 1
+t "private key mode 600 owned by auditor" test "$(stat -c '%U %a' /var/lib/aao-auditor/keys/auditor-ed25519.pem)" = "aao-auditor 600"
+
+echo "== T8d preflight rejects non-conforming existing state"
+chmod 0755 /var/lib/aao-auditor/keys
+t "wrong mode on existing dir -> fail closed" bash -c "! bash $S/identity_separation.sh --apply >/tmp/o 2>&1 && grep -q 'keys is' /tmp/o"
+chmod 0700 /var/lib/aao-auditor/keys
+setfacl -m u:aao-pm:rx /srv/aao/frozen
+t "extended ACL on existing dir -> fail closed" bash -c "! bash $S/identity_separation.sh --apply >/tmp/o 2>&1 && grep -q 'extended ACL' /tmp/o"
+setfacl -b /srv/aao/frozen
+cp /srv/aao/trust/keys/aao-auditor-ed25519.pub /tmp/pub.bak && cp /srv/aao/trust/keys/aao-auditor-alt-ed25519.pub /srv/aao/trust/keys/aao-auditor-ed25519.pub
+t "public key not matching private key -> fail closed" bash -c "! bash $S/identity_separation.sh --apply >/tmp/o 2>&1 && grep -q 'does not match' /tmp/o"
+cp /tmp/pub.bak /srv/aao/trust/keys/aao-auditor-ed25519.pub
+t "clean state applies again" bash -c "bash $S/identity_separation.sh --apply >/tmp/o 2>&1"
+t "no temp key files left" bash -c "! ls -A /srv/aao/trust/keys | grep -q '^\\.pub'"
 
 echo "== T9 auditor-auditor isolation"
 t "alt cannot enter primary keys" bash -c "! runuser -u aao-auditor-alt -- test -x /var/lib/aao-auditor/keys"

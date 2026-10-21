@@ -21,32 +21,15 @@ fail() { echo "FAIL     $1"; fails=$((fails + 1)); }
 notrun() { echo "NOT RUN  $1"; fails=$((fails + 1)); }
 
 # denied <r|w|x> <path> <description>
+# The target must be visible; anything hidden is NOT RUN (never PASS). The
+# layout itself (existence, owner, mode) is asserted separately as root by
+# scripts/test_identity_separation_container.sh and by the host P1 evidence.
 denied() {
-  local mode=$1 path=$2 desc=$3 up
-  if [[ ! -e "$path" ]]; then
-    # Not visible: either it does not exist, or an ancestor blocks traversal.
-    # Only the second case is an access denial; the first is NOT RUN.
-    up=$(dirname "$path")
-    while [[ ! -e "$up" && "$up" != / ]]; do up=$(dirname "$up"); done
-    if [[ -d "$up" && ! -x "$up" ]] && is_managed_path "$path"; then
-      pass "$desc (denied at $up)"
-    else
-      notrun "$desc (missing $path)"
-    fi
-    return
-  fi
+  local mode=$1 path=$2 desc=$3
+  [[ -e "$path" ]] || { notrun "$desc (not visible: $path)"; return; }
   if test "-$mode" "$path"; then fail "$desc"; else pass "$desc"; fi
 }
-
-# Paths created by identity_separation.sh. When one of them is hidden behind
-# an ancestor we cannot traverse, that counts as denial. Any other hidden
-# path is NOT RUN.
-is_managed_path() {
-  case "$1" in
-    /var/lib/aao-auditor/*|/var/lib/aao-auditor-alt/*|/var/lib/aao-supervisor/*|/home/aao-*) return 0 ;;
-    *) return 1 ;;
-  esac
-}
+in_group() { id -nG | tr ' ' '\n' | grep -qx "$1"; }
 
 echo "# identity: $(id)"
 
@@ -60,7 +43,7 @@ else
 fi
 priv=0
 for g in sudo admin wheel docker adm lxd libvirt "$CEO_USER"; do
-  if id -nG | tr ' ' '\n' | grep -qx "$g"; then fail "member of privileged group $g"; priv=1; fi
+  if in_group "$g"; then fail "member of privileged group $g"; priv=1; fi
 done
 (( priv )) || pass "no privileged group membership"
 
@@ -74,16 +57,22 @@ for c in /srv/aao/frozen/*/; do denied w "${c%/}" "write ${c%/}"; done
 
 for a in aao-auditor aao-auditor-alt; do
   [[ "$me" == "$a" ]] && continue
-  denied x "/var/lib/$a/keys"                         "enter $a keys dir"
-  denied w "/var/lib/$a/ledger"                       "write $a ledger"
-  # Only the supervisor and the integrator may read ledgers.
-  if [[ "$me" != aao-supervisor && "$me" != aao-integrator ]]; then
-    denied r "/var/lib/$a/ledger"                     "read $a ledger"
+  if in_group aao-ledger-read; then
+    # Supervisor and integrator may read ledgers, never keys or write.
+    denied x "/var/lib/$a/keys"   "enter $a keys dir"
+    denied w "/var/lib/$a/ledger" "write $a ledger"
+  else
+    # Everyone else must not even traverse the auditor's directory.
+    denied x "/var/lib/$a"        "enter /var/lib/$a"
   fi
 done
 
 if [[ "$me" != aao-supervisor ]]; then
-  denied w /var/lib/aao-supervisor/events "write supervisor events"
+  if in_group aao-events; then
+    denied w /var/lib/aao-supervisor/events "write supervisor events"
+  else
+    denied x /var/lib/aao-supervisor "enter /var/lib/aao-supervisor"
+  fi
 fi
 
 # Ptrace of other users' processes must be restricted.

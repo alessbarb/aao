@@ -7,17 +7,13 @@ FAIL     member of privileged group alessbarb
 FAIL     docker socket
 FAIL     enter CEO home
 FAIL     list CEO home
-NOT RUN  write trust registry (missing /srv/aao/trust)
-NOT RUN  write trust keys (missing /srv/aao/trust/keys)
-NOT RUN  write frozen checkouts (missing /srv/aao/frozen)
-NOT RUN  write /srv/aao/frozen/* (missing /srv/aao/frozen/*)
-NOT RUN  enter aao-auditor keys dir (missing /var/lib/aao-auditor/keys)
-NOT RUN  write aao-auditor ledger (missing /var/lib/aao-auditor/ledger)
-NOT RUN  read aao-auditor ledger (missing /var/lib/aao-auditor/ledger)
-NOT RUN  enter aao-auditor-alt keys dir (missing /var/lib/aao-auditor-alt/keys)
-NOT RUN  write aao-auditor-alt ledger (missing /var/lib/aao-auditor-alt/ledger)
-NOT RUN  read aao-auditor-alt ledger (missing /var/lib/aao-auditor-alt/ledger)
-NOT RUN  write supervisor events (missing /var/lib/aao-supervisor/events)
+NOT RUN  write trust registry (not visible: /srv/aao/trust)
+NOT RUN  write trust keys (not visible: /srv/aao/trust/keys)
+NOT RUN  write frozen checkouts (not visible: /srv/aao/frozen)
+NOT RUN  write /srv/aao/frozen/* (not visible: /srv/aao/frozen/*)
+NOT RUN  enter /var/lib/aao-auditor (not visible: /var/lib/aao-auditor)
+NOT RUN  enter /var/lib/aao-auditor-alt (not visible: /var/lib/aao-auditor-alt)
+NOT RUN  enter /var/lib/aao-supervisor (not visible: /var/lib/aao-supervisor)
 PASS     ptrace_scope=1
 NOT RUN  role homes (none exist)
-# 19 check(s) FAILED for alessbarb
+# 15 check(s) FAILED for alessbarb

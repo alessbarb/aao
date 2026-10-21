@@ -45,6 +45,23 @@ expected_shell() {
   echo /usr/sbin/nologin
 }
 
+# Managed directory layout: path owner group mode.
+layout() {
+  local a c
+  for a in "${AUDITORS[@]}"; do
+    echo "/var/lib/$a $a aao-ledger-read 0750"
+    echo "/var/lib/$a/keys $a $a 0700"
+    echo "/var/lib/$a/ledger $a aao-ledger-read 0750"
+  done
+  echo "/var/lib/aao-supervisor aao-supervisor aao-events 0750"
+  echo "/var/lib/aao-supervisor/events aao-supervisor aao-events 0750"
+  echo "/srv/aao aao-trust aao-trust 0755"
+  echo "/srv/aao/trust aao-trust aao-trust 0755"
+  echo "/srv/aao/trust/keys aao-trust aao-trust 0755"
+  echo "/srv/aao/frozen aao-trust aao-trust 0755"
+  for c in "${AUDITORS[@]}" aao-integrator aao-supervisor; do echo "/srv/aao/frozen/$c aao-trust aao-trust 0755"; done
+}
+
 run() { printf '+ %s\n' "$*"; if (( APPLY )); then "$@"; fi; }
 die() { echo "PREFLIGHT FAIL: $*" >&2; exit 1; }
 
@@ -86,6 +103,31 @@ if [[ -d /etc/sudoers.d ]]; then
   done
 fi
 if [[ -f "$SUDOERS" ]] && ! grep -qxF "$MARKER" "$SUDOERS"; then die "$SUDOERS exists and is not managed by this script"; fi
+# Account identity: never uid 0, never shared with another account.
+for u in "${ALL_USERS[@]}"; do
+  id "$u" >/dev/null 2>&1 || continue
+  uid=$(id -u "$u")
+  (( uid != 0 )) || die "$u has uid 0"
+  [[ $(getent passwd | awk -F: -v x="$uid" '$3==x' | wc -l) -eq 1 ]] || die "uid $uid of $u is shared"
+done
+# Existing managed paths must already have the expected owner, group, mode
+# and no extended ACL; otherwise stop before changing anything.
+check_path() {  # path owner group mode
+  [[ -e "$1" ]] || return 0
+  [[ -d "$1" && ! -L "$1" ]] || die "$1 exists and is not a plain directory"
+  local actual; actual=$(stat -c '%U %G %a' "$1")
+  [[ "$actual" == "$2 $3 ${4#0}" ]] || die "$1 is '$actual', expected '$2 $3 ${4#0}'"
+  if command -v getfacl >/dev/null && [[ -n $(getfacl -s -p "$1" 2>/dev/null) ]]; then die "$1 has an extended ACL"; fi
+}
+while read -r path owner group mode; do check_path "$path" "$owner" "$group" "$mode"; done < <(layout)
+# An existing public key must match its auditor's private key.
+for a in "${AUDITORS[@]}"; do
+  key="/var/lib/$a/keys/auditor-ed25519.pem"; pub="/srv/aao/trust/keys/$a-ed25519.pub"
+  if [[ -e "$pub" ]]; then
+    [[ -f "$key" ]] || die "$pub exists without its private key"
+    cmp -s "$pub" <(openssl pkey -in "$key" -pubout 2>/dev/null) || die "$pub does not match $key"
+  fi
+done
 echo "# preflight OK"
 echo "# docker group members (not modified): $(getent group docker | cut -d: -f4)"
 (( APPLY )) || echo "# DRY RUN: no changes will be made."
@@ -103,26 +145,11 @@ ensure_group aao-events
 for u in "${ALL_USERS[@]}"; do ensure_user "$u"; done
 for u in "${!ALLOWED_GROUPS[@]}"; do run usermod -aG "${ALLOWED_GROUPS[$u]}" "$u"; done
 
-# Auditors: each keeps its own private key; its ledger is readable by the
-# supervisor and the integrator only. The two auditors cannot read each other.
-for a in "${AUDITORS[@]}"; do
-  ensure_dir "/var/lib/$a"        "$a" aao-ledger-read 0750
-  ensure_dir "/var/lib/$a/keys"   "$a" "$a"            0700
-  ensure_dir "/var/lib/$a/ledger" "$a" aao-ledger-read 0750
-done
-
-ensure_dir /var/lib/aao-supervisor        aao-supervisor aao-events 0750
-ensure_dir /var/lib/aao-supervisor/events aao-supervisor aao-events 0750
-
-# Trust registry and one frozen checkout per component, owned by aao-trust.
-# No role can write here, so no auditor can change its own code, key or policy.
-ensure_dir /srv/aao             aao-trust aao-trust 0755
-ensure_dir /srv/aao/trust       aao-trust aao-trust 0755
-ensure_dir /srv/aao/trust/keys  aao-trust aao-trust 0755
-ensure_dir /srv/aao/frozen      aao-trust aao-trust 0755
-for c in "${AUDITORS[@]}" aao-integrator aao-supervisor; do
-  ensure_dir "/srv/aao/frozen/$c" aao-trust aao-trust 0755
-done
+# Directories: the auditors cannot read each other; ledgers are readable by
+# the supervisor and the integrator only; trust registry and frozen
+# checkouts are owned by aao-trust, so no role can change its own code, key
+# or policy.
+while read -r path owner group mode; do ensure_dir "$path" "$owner" "$group" "$mode"; done < <(layout)
 
 # Key path used by independent_audit.py:  --key /var/lib/<auditor>/keys/auditor-ed25519.pem
 # The public key goes to the trust registry. policy.json is R3 trust root and is NOT written here.
@@ -134,9 +161,14 @@ for a in "${AUDITORS[@]}"; do
       runuser -u "$a" -- sh -c "umask 077 && openssl genpkey -algorithm ed25519 -out '$key'"
       echo "+ generated $key as $a"
     fi
-    runuser -u "$a" -- openssl pkey -in "$key" -pubout > "$pub"
-    chown aao-trust:aao-trust "$pub"; chmod 0644 "$pub"
-    echo "+ published $pub"
+    if [[ ! -e "$pub" ]]; then
+      tmp=$(mktemp /srv/aao/trust/keys/.pub.XXXXXX)
+      runuser -u "$a" -- openssl pkey -in "$key" -pubout > "$tmp"
+      openssl pkey -pubin -in "$tmp" -noout || { rm -f "$tmp"; die "generated public key for $a is invalid"; }
+      chown aao-trust:aao-trust "$tmp"; chmod 0644 "$tmp"
+      mv -f "$tmp" "$pub"   # atomic rename within the same directory
+      echo "+ published $pub"
+    fi
   else
     echo "+ (would generate $key as $a if absent and publish $pub)"
   fi

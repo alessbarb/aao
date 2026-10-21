@@ -26,6 +26,18 @@ TEST PASS  verify aao-notifier
 TEST PASS  ACL leak detected
 == T8 verifier: missing target is NOT RUN, not PASS
 TEST PASS  missing target -> NOT RUN
+== T8b verifier: a hidden or missing managed path is never PASS
+TEST PASS  missing keys dir seen by supervisor -> NOT RUN
+TEST PASS  verifier has no ancestor inference
+== T8c layout asserted as root
+TEST PASS  layout matches
+TEST PASS  private key mode 600 owned by auditor
+== T8d preflight rejects non-conforming existing state
+TEST PASS  wrong mode on existing dir -> fail closed
+TEST PASS  extended ACL on existing dir -> fail closed
+TEST PASS  public key not matching private key -> fail closed
+TEST PASS  clean state applies again
+TEST PASS  no temp key files left
 == T9 auditor-auditor isolation
 TEST PASS  alt cannot enter primary keys
 TEST PASS  primary cannot read alt ledger
