@@ -404,3 +404,56 @@ def test_provisional_and_custody_less_veto_write_a_report_but_record_nothing(env
     veto = audit(env, path, run="veto", veto_reason="unsafe")  # veto without resolved attribution = no custody
     assert veto["verdict"] == "veto" and veto["custody_problems"]
     assert ledger.read_bytes() == b""  # an unsigned veto is not a recorded decision
+
+
+# --- F4-02: a veto without custody must never allow an improper integration -------------------------------
+
+def _rogue_key(env):
+    other = env["state"] / "rogue-veto.pem"
+    if not other.exists():
+        subprocess.run(["openssl", "genpkey", "-algorithm", "ED25519", "-out", str(other)], check=True)
+        other.chmod(0o600)
+    return other
+
+
+def test_custodyless_veto_after_recorded_approval_blocks_integration(env):
+    path, _ = manifest(env)
+    assert audit(env, path)["verdict"] == "approve"
+    assert gate(env, path) == (True, ())
+    veto = audit(env, path, run="veto", key_path=_rogue_key(env), veto_reason="unsafe")
+    assert veto["verdict"] == "veto" and veto["custody_problems"]
+    conformant, reasons = gate(env, path)  # the earlier signed approval is still the latest ledger decision
+    assert not conformant
+    assert "candidate has an unresolved pending veto (recorded without custody)" in reasons
+
+
+def test_later_signed_approval_does_not_lift_a_pending_veto_unless_explicit(env):
+    path, _ = manifest(env)
+    audit(env, path, run="veto", key_path=_rogue_key(env), veto_reason="unsafe")
+    audit(env, path, run="again")
+    assert not gate(env, path, run="again")[0]
+    audit(env, path, run="resolved", resolve_pending_vetoes=True)
+    assert gate(env, path, run="resolved") == (True, ())
+
+
+def test_tampered_or_exposed_pending_veto_marker_fails_closed(env):
+    path, _ = manifest(env)
+    audit(env, path, run="veto", key_path=_rogue_key(env), veto_reason="unsafe")
+    audit(env, path, run="resolved", resolve_pending_vetoes=True)
+    directory = env["state"] / "ledger.jsonl.pending-vetoes"
+    marker = next(directory.iterdir())
+    marker.chmod(0o600)
+    marker.write_bytes(marker.read_bytes().replace(b"unsafe", b"safe!!"))
+    assert any("pending vetoes cannot be verified" in r for r in gate(env, path, run="resolved")[1])
+    marker.unlink()
+    directory.chmod(0o770)
+    assert any("pending vetoes cannot be verified" in r for r in gate(env, path, run="resolved")[1])
+
+
+def test_veto_that_cannot_record_its_marker_raises(env):
+    path, _ = manifest(env)
+    directory = env["state"] / "ledger.jsonl.pending-vetoes"
+    directory.mkdir(mode=0o500)
+    with pytest.raises(AuditError, match="cannot record pending veto marker"):
+        audit(env, path, run="veto", key_path=_rogue_key(env), veto_reason="unsafe")
+    directory.chmod(0o700)

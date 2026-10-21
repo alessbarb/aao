@@ -70,6 +70,18 @@ custody, write an unsigned report but **append nothing to the ledger**. They are
 not decisions: the gate ignores them, and an unsigned veto has no effect. A
 veto counts only when the anchored auditor records it with valid custody.
 
+**Pending vetoes (F4-02).** Every `--veto` run, with or without custody, also
+writes a pending-veto marker to `<ledger_path>.pending-vetoes/`. The directory
+has the same custody as the ledger: auditor uid, `0700`, markers `0600`, file
+name bound to the marker digest. If the marker cannot be written, the run fails.
+The gate denies any candidate with a marker that no verified ledger entry
+lists in `resolves_pending`. It also denies when the markers cannot be
+verified: tampering, unsafe permissions or an inconsistent name. Only a
+custody-valid run resolves markers: a recorded veto (which still blocks), or
+an explicit `--resolve-pending-vetoes` run. An ordinary later approval does
+not lift a pending veto. Fake markers can only cause a denial of service,
+which is the safe direction.
+
 ## 4. Gate (`python -m aao.manifest_audit gate --manifest M --report R --signature S [--promoted-sha P]`)
 
 Exit 0 / `{"conformant": true}` only if all of these hold:

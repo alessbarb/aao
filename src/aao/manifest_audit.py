@@ -92,6 +92,54 @@ def load_anchor(anchor_path: Path = ANCHOR_PATH, anchor_owner_uids: tuple[int, .
     return {**anchor, "policy": policy, "anchor_sha256": _sha(raw), "anchor_owner_uids": anchor_owner_uids}
 
 
+def _pending_dir(anchor: dict[str, Any]) -> Path:
+    """Pending-veto markers live next to the ledger, with the ledger's custody (auditor uid, no group/other write)."""
+    return Path(anchor["ledger_path"] + ".pending-vetoes")
+
+
+def record_pending_veto(anchor: dict[str, Any], candidate_sha: str, report_sha256: str, reason: str) -> str:
+    """F4-02: every --veto leaves a marker, signed or not. Failing to write it is an error, never a silent pass."""
+    directory = _pending_dir(anchor)
+    try:
+        if not directory.exists():
+            _check_parents(directory, (anchor["auditor_uid"],))
+            directory.mkdir(mode=0o700)
+        marker = {"schema": "aao.pending-veto.v1", "candidate_sha": candidate_sha,
+                  "report_sha256": report_sha256, "reason": reason}
+        data = _canonical(marker)
+        digest = _sha(data)
+        path = directory / f"{candidate_sha}-{digest}.json"
+        descriptor = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW, 0o600)
+        with os.fdopen(descriptor, "wb") as handle:
+            handle.write(data)
+    except FileExistsError:
+        return digest
+    except OSError as error:
+        raise AuditError(f"cannot record pending veto marker: {error}") from error
+    return digest
+
+
+def pending_vetoes(anchor: dict[str, Any], candidate_sha: str) -> list[str]:
+    """Digests of pending-veto markers for a candidate. Unreadable or unsafe markers raise (fail closed)."""
+    directory = _pending_dir(anchor)
+    if not directory.exists():
+        return []
+    _check_parents(directory / "x", (anchor["auditor_uid"],))
+    info = os.lstat(directory)
+    if stat.S_ISLNK(info.st_mode) or info.st_uid != anchor["auditor_uid"] or info.st_mode & 0o022:
+        raise AuditError("pending-veto directory is not private to the auditor uid")
+    digests = []
+    for path in sorted(directory.iterdir()):
+        if not path.name.startswith(candidate_sha + "-"):
+            continue
+        data = read_protected(path, (anchor["auditor_uid"],))
+        marker = json.loads(data)
+        if marker.get("candidate_sha") != candidate_sha or path.name != f"{candidate_sha}-{_sha(data)}.json":
+            raise AuditError(f"pending-veto marker {path.name} is inconsistent")
+        digests.append(_sha(data))
+    return digests
+
+
 def attributed_implementers(anchor: dict[str, Any], candidate_sha: str) -> list[str]:
     """Implementer identities from the anchored attribution source, never from the manifest or Git metadata.
 
@@ -235,6 +283,7 @@ def _ledger(anchor: dict[str, Any]) -> Path:
 def audit_manifest(
     manifest_path: Path, output: Path, key_path: Path | None, veto_reason: str | None = None, *,
     anchor_path: Path = ANCHOR_PATH, anchor_owner_uids: tuple[int, ...] = (0,), runner=run_sandboxed,
+    resolve_pending_vetoes: bool = False,
 ) -> dict[str, Any]:
     anchor = load_anchor(anchor_path, anchor_owner_uids)
     policy = anchor["policy"]
@@ -295,6 +344,8 @@ def audit_manifest(
     report_bytes = _canonical(report)
     (output / "report.json").write_bytes(report_bytes)
     (output / "report.json").chmod(0o444)
+    if veto_reason:
+        record_pending_veto(anchor, manifest["candidate_sha"], _sha(report_bytes), veto_reason)
     if not custody:
         signature = subprocess.run(["openssl", "pkeyutl", "-sign", "-inkey", str(key_path), "-rawin", "-in",
                                     str(output / "report.json")], check=True, capture_output=True).stdout
@@ -306,6 +357,8 @@ def audit_manifest(
                 ledger, {"type": "veto" if verdict == "veto" else "audit-verdict",
                          "candidate_sha": manifest["candidate_sha"], "result_tree": manifest["result_tree"],
                          "report_sha256": _sha(report_bytes), "verdict": verdict, "veto": verdict == "veto",
+                         "resolves_pending": pending_vetoes(anchor, manifest["candidate_sha"])
+                         if resolve_pending_vetoes or verdict == "veto" else [],
                          "recorded_at": report["created_at"]},
                 policy["auditor_id"], str(key_path), _ledger_keys(anchor, Path(temporary)))
     return report
@@ -356,6 +409,13 @@ def verify_promotion(
     if not report.get("evidence_files"):
         reasons.append("report has no evidence")
     try:
+        resolved = {d for e in ledger_rows(anchor) for d in e.get("resolves_pending") or []}
+        open_markers = [d for d in pending_vetoes(anchor, manifest["candidate_sha"]) if d not in resolved]
+        if open_markers:
+            reasons.append("candidate has an unresolved pending veto (recorded without custody)")
+    except (AuditError, OSError, ValueError) as error:
+        reasons.append(f"pending vetoes cannot be verified: {error}")
+    try:
         entries = [e for e in ledger_rows(anchor) if e.get("candidate_sha") == manifest["candidate_sha"]]
         if any(e.get("veto") for e in entries):
             reasons.append("candidate has a recorded audit veto")
@@ -401,6 +461,8 @@ def main() -> int:
     audit.add_argument("--output", type=Path, required=True)
     audit.add_argument("--key", type=Path)
     audit.add_argument("--veto", metavar="REASON")
+    audit.add_argument("--resolve-pending-vetoes", action="store_true",
+                       help="custody-valid run explicitly resolves this candidate's pending-veto markers")
     gate = commands.add_parser("gate")
     gate.add_argument("--manifest", type=Path, required=True)
     gate.add_argument("--report", type=Path, required=True)
@@ -412,7 +474,8 @@ def main() -> int:
         print(json.dumps({"conformant": conformant, "reasons": reasons}, sort_keys=True))
         return 0 if conformant else 1
     try:
-        report = audit_manifest(args.manifest, args.output, args.key, args.veto)
+        report = audit_manifest(args.manifest, args.output, args.key, args.veto,
+                                resolve_pending_vetoes=args.resolve_pending_vetoes)
     except (AuditError, OSError, subprocess.SubprocessError) as error:
         print(json.dumps({"error": str(error)}))
         return 2
