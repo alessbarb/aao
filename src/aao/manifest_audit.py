@@ -97,7 +97,7 @@ def _pending_dir(anchor: dict[str, Any]) -> Path:
     return Path(anchor["ledger_path"] + ".pending-vetoes")
 
 
-def record_pending_veto(anchor: dict[str, Any], candidate_sha: str, report_sha256: str, reason: str) -> str:
+def record_pending_veto(anchor: dict[str, Any], candidate_sha: str, manifest_sha256: str, reason: str) -> str:
     """F4-02: every --veto leaves a marker, signed or not. Failing to write it is an error, never a silent pass."""
     directory = _pending_dir(anchor)
     try:
@@ -105,7 +105,7 @@ def record_pending_veto(anchor: dict[str, Any], candidate_sha: str, report_sha25
             _check_parents(directory, (anchor["auditor_uid"],))
             directory.mkdir(mode=0o700)
         marker = {"schema": "aao.pending-veto.v1", "candidate_sha": candidate_sha,
-                  "report_sha256": report_sha256, "reason": reason}
+                  "manifest_sha256": manifest_sha256, "reason": reason}
         data = _canonical(marker)
         digest = _sha(data)
         path = directory / f"{candidate_sha}-{digest}.json"
@@ -126,7 +126,7 @@ def pending_vetoes(anchor: dict[str, Any], candidate_sha: str) -> list[str]:
         return []
     _check_parents(directory / "x", (anchor["auditor_uid"],))
     info = os.lstat(directory)
-    if stat.S_ISLNK(info.st_mode) or info.st_uid != anchor["auditor_uid"] or info.st_mode & 0o022:
+    if stat.S_ISLNK(info.st_mode) or info.st_uid != anchor["auditor_uid"] or stat.S_IMODE(info.st_mode) != 0o700:
         raise AuditError("pending-veto directory is not private to the auditor uid")
     digests = []
     for path in sorted(directory.iterdir()):
@@ -288,6 +288,9 @@ def audit_manifest(
     anchor = load_anchor(anchor_path, anchor_owner_uids)
     policy = anchor["policy"]
     manifest, manifest_digest = parse_manifest(manifest_path)
+    if veto_reason:
+        # A-1: the marker exists before any analysis, so no gate can run in a window where the veto is unseen.
+        record_pending_veto(anchor, manifest["candidate_sha"], manifest_digest, veto_reason)
     for secret in (key_path, output, Path(anchor["ledger_path"]), Path(anchor["policy_path"])):
         if secret is not None and _visible_in_sandbox(secret):
             raise AuditError(f"{secret} would be readable by candidate code inside the sandbox")
@@ -344,8 +347,6 @@ def audit_manifest(
     report_bytes = _canonical(report)
     (output / "report.json").write_bytes(report_bytes)
     (output / "report.json").chmod(0o444)
-    if veto_reason:
-        record_pending_veto(anchor, manifest["candidate_sha"], _sha(report_bytes), veto_reason)
     if not custody:
         signature = subprocess.run(["openssl", "pkeyutl", "-sign", "-inkey", str(key_path), "-rawin", "-in",
                                     str(output / "report.json")], check=True, capture_output=True).stdout

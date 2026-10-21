@@ -457,3 +457,16 @@ def test_veto_that_cannot_record_its_marker_raises(env):
     with pytest.raises(AuditError, match="cannot record pending veto marker"):
         audit(env, path, run="veto", key_path=_rogue_key(env), veto_reason="unsafe")
     directory.chmod(0o700)
+
+
+def test_pending_veto_marker_is_written_before_any_analysis(env):
+    # A-1 (Codex review of #30): the marker must exist even if the run fails during analysis.
+    path, _ = manifest(env)
+    assert audit(env, path)["verdict"] == "approve"
+
+    def exploding_runner(tree, argv):
+        raise RuntimeError("analysis interrupted")
+
+    with pytest.raises(RuntimeError):
+        audit(env, path, run="veto", key_path=_rogue_key(env), veto_reason="unsafe", runner=exploding_runner)
+    assert "candidate has an unresolved pending veto (recorded without custody)" in gate(env, path)[1]

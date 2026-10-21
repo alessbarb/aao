@@ -67,11 +67,12 @@ written to the output directory. Only a custody-valid run signs the report
 and appends a signed ledger entry (`audit-verdict` for `approve`/`reject`,
 `veto` for a veto). A `provisional` run, and a `--veto` run without valid
 custody, write an unsigned report but **append nothing to the ledger**. They are
-not decisions: the gate ignores them, and an unsigned veto has no effect. A
-veto counts only when the anchored auditor records it with valid custody.
+not ledger decisions, and the gate never treats their report as an approval.
+A veto without custody **does** block, through its pending-veto marker (below).
 
-**Pending vetoes (F4-02).** Every `--veto` run, with or without custody, also
-writes a pending-veto marker to `<ledger_path>.pending-vetoes/`. The directory
+**Pending vetoes (F4-02).** Every `--veto` run, with or without custody, first
+writes a pending-veto marker to `<ledger_path>.pending-vetoes/`, **before any
+analysis**, so no gate can run while the veto is unseen. The directory
 has the same custody as the ledger: auditor uid, `0700`, markers `0600`, file
 name bound to the marker digest. If the marker cannot be written, the run fails.
 The gate denies any candidate with a marker that no verified ledger entry
@@ -81,6 +82,12 @@ custody-valid run resolves markers: a recorded veto (which still blocks), or
 an explicit `--resolve-pending-vetoes` run. An ordinary later approval does
 not lift a pending veto. Fake markers can only cause a denial of service,
 which is the safe direction.
+**Limitation (custody, B; same class as ledger tail truncation):** the
+auditor uid that owns the markers, or root, can delete them. The auditor uid is
+the vetoing party, so deleting its own marker amounts to withdrawing its veto,
+and root compromises every control. While every role shares one uid (before
+P1), custody already makes every run `provisional`, so nothing can be approved.
+F4-01 extends the independent anchor to cover the marker set.
 
 ## 4. Gate (`python -m aao.manifest_audit gate --manifest M --report R --signature S [--promoted-sha P]`)
 
