@@ -2,7 +2,9 @@
 
 **Estado:** inventario preliminar de riesgo, previo al arranque (plan §6.1). **No convalida ninguna integración.**
 **Fecha de corte:** 2026-10-21 · `main` `ddd520f`
-**Fuente:** `gh pr view <n> --json mergeCommit,mergedBy,reviews,commits,files` ejecutado el 2026-10-21.
+**Fuente:** `gh pr view <n> --json mergeCommit,mergedBy,reviews,commits,files`, ejecutado el 2026-10-21.
+**Evidencia:** la salida bruta (`number, title, mergeCommit, headRefOid, mergedAt, mergedBy, reviews, reviewRequests`) está en `docs/audit-runs/20261021-historical-inventory/gh_pr_view.json`, con sha256 `a9297be246a9ecc24f50e8ffa33936fa89541b13c7456d9a26b2dfeb70d6b9c0`. Para reproducirla basta con repetir el comando con acceso a la API de GitHub; el sandbox de Codex no la tenía (FD-08).
+La clasificación de riesgo y las evaluaciones de este inventario son **propuestas del autor**, no decisiones.
 
 Las siete PR las fusionó a mano la cuenta propietaria (`alessbarb`), con **0 revisiones en GitHub** y sin un dictamen de auditoría independiente válido según GOV-REV-001. La clase de riesgo indicada es preliminar, según el modelo R0–R3 propuesto: es la clase que tendría el cambio hoy.
 

@@ -1,6 +1,17 @@
 # Estatuto del agente PM (provisional)
 
-**Estado:** provisional, vigente desde F0 por decisión D10 del CEO (`docs/decisions/CEO-DEC-GOV-2026-10-21.md`). Mientras no exista el uid `aao-pm` (F2), el PM es una instancia de Claude separada, con su propio prompt de rol, y **no comparte sesión** con el auditor ni con Claude-impl.
+**Estado:** provisional. **Origen y límite de autoridad:**
+
+- La **creación** del agente PM y su función de **priorizar** son decisión del CEO (D10, `docs/decisions/CEO-DEC-GOV-2026-10-21.md`).
+- El resto de este estatuto es **propuesta del plan** (`docs/AUTONOMOUS_GOVERNANCE_PLAN.md` §2), no decisión del CEO. Esa parte incluye:
+  - clasificación de riesgo;
+  - congelación de SHA;
+  - reasignación de auditores;
+  - escalada;
+  - funciones de COO.
+- Hasta que se apruebe GOV-REV-002 (P5), el PM ejerce esas funciones solo como **coordinación**: sus clasificaciones y asignaciones son recomendaciones. El estatuto **no activa ningún régimen ni confiere autoridad nueva**.
+
+Mientras no exista el uid `aao-pm` (F2), el PM es una instancia de Claude separada, con su propio prompt de rol, y **no comparte sesión** con el auditor ni con Claude-impl. No se declara independencia técnica antes de que se superen las pruebas de aislamiento de F2.
 
 ## Mandato
 
