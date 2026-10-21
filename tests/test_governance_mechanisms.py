@@ -686,6 +686,137 @@ def _git_fixture(tmp_path):
     return promote, r, bare, base, head, tree, d, TrustSources(reg,ledger,anchor,heartbeat,freeze), sign(d,str(private))
 
 
+def _integrator_identity(name="integrator"):
+    return type("Identity", (), {
+        "__call__": lambda self: name,
+        "push_identity": lambda self, *args: True,
+    })()
+
+
+def _remote_main(bare):
+    return subprocess.run(
+        ["git", "--git-dir", str(bare), "rev-parse", "refs/heads/main"],
+        check=True,
+        capture_output=True,
+        text=True,
+    ).stdout.strip()
+
+
+def _assert_integrator_rejects_without_main_change(
+    promote, repo, bare, auth, signature, sources, reason, *, identity=None,
+):
+    main_before = _remote_main(bare)
+    with pytest.raises((RuntimeError, ValueError), match=reason):
+        promote(
+            repo,
+            "origin",
+            auth,
+            signature,
+            sources,
+            identity_provider=identity or _integrator_identity(),
+            now=lambda: __import__("datetime").datetime(
+                2026, 1, 1, 1, tzinfo=__import__("datetime").timezone.utc
+            ),
+        )
+    assert _remote_main(bare) == main_before
+
+
+def test_integrator_blocks_on_active_veto_in_ledger(tmp_path):
+    promote, repo, bare, _base, _head, _tree, auth, sources, signature = _git_fixture(tmp_path)
+    veto_keys = tmp_path / "veto-keys"
+    veto_keys.mkdir()
+    private, public = keypair(veto_keys)
+    registry = json.loads(sources.trust_registry.read_text())
+    registry["ledger_keys"] = {"veto": str(public)}
+    sources.trust_registry.write_text(json.dumps(registry))
+    veto = append(sources.ledger, {"type": "veto", "id": "active-veto"},
+                  "veto", str(private), registry["ledger_keys"])
+    sources.ledger_anchor.write_text(veto["hash"])
+
+    _assert_integrator_rejects_without_main_change(
+        promote, repo, bare, auth, signature, sources, "active ledger veto"
+    )
+
+
+def test_integrator_blocks_on_heartbeat_with_invalid_signature(tmp_path):
+    promote, repo, bare, _base, _head, _tree, auth, sources, signature = _git_fixture(tmp_path)
+    event = json.loads(sources.heartbeat.read_text())
+    event["signature"] = base64.b64encode(b"invalid signature").decode("ascii")
+    sources.heartbeat.write_text(json.dumps(event))
+
+    _assert_integrator_rejects_without_main_change(
+        promote, repo, bare, auth, signature, sources,
+        "valid supervisor heartbeat unavailable",
+    )
+
+
+def test_integrator_blocks_on_heartbeat_with_unknown_key_id(tmp_path):
+    promote, repo, bare, _base, _head, _tree, auth, sources, signature = _git_fixture(tmp_path)
+    from aao.supervisor import signed_heartbeat
+
+    unknown_keys = tmp_path / "unknown-keys"
+    unknown_keys.mkdir()
+    private, _public = keypair(unknown_keys)
+    event = signed_heartbeat(
+        2, "2026-01-01T00:00:00+00:00", str(private), key_id="unknown-supervisor",
+        expires_at="2026-01-01T02:00:00+00:00",
+    )
+    sources.heartbeat.write_text(json.dumps(event))
+
+    _assert_integrator_rejects_without_main_change(
+        promote, repo, bare, auth, signature, sources,
+        "valid supervisor heartbeat unavailable",
+    )
+
+
+def test_integrator_blocks_on_ledger_anchor_mismatch(tmp_path):
+    promote, repo, bare, _base, _head, _tree, auth, sources, signature = _git_fixture(tmp_path)
+    sources.ledger_anchor.write_text("f" * 64)
+
+    _assert_integrator_rejects_without_main_change(
+        promote, repo, bare, auth, signature, sources,
+        "ledger truncated or unexpected terminal hash",
+    )
+
+
+def test_integrator_blocks_when_remote_main_moves_without_local_ref_change(tmp_path):
+    promote, repo, bare, base, _head, _tree, auth, sources, signature = _git_fixture(tmp_path)
+    rival = tmp_path / "rival"
+    subprocess.run(["git", "clone", str(bare), str(rival)], check=True, capture_output=True)
+    git(rival, "config", "user.name", "rival")
+    git(rival, "config", "user.email", "rival@example.invalid")
+    (rival / "f").write_text("independent remote update\n")
+    git(rival, "commit", "-am", "advance remote main")
+    git(rival, "push", "origin", "main")
+    moved_main = _remote_main(bare)
+    assert moved_main != base
+    assert git(repo, "rev-parse", "refs/heads/main") == base
+
+    _assert_integrator_rejects_without_main_change(
+        promote, repo, bare, auth, signature, sources, "target ref or base mismatch"
+    )
+
+
+def test_integrator_blocks_on_wrong_integrator_identity(tmp_path):
+    promote, repo, bare, _base, _head, _tree, auth, sources, signature = _git_fixture(tmp_path)
+
+    _assert_integrator_rejects_without_main_change(
+        promote, repo, bare, auth, signature, sources, "integrator identity mismatch",
+        identity=_integrator_identity("impostor"),
+    )
+
+
+def test_integrator_blocks_on_pending_ra_status(tmp_path):
+    promote, repo, bare, _base, _head, _tree, auth, sources, signature = _git_fixture(tmp_path)
+    registry = json.loads(sources.trust_registry.read_text())
+    registry["ra_status"]["RA-03"] = "PENDING"
+    sources.trust_registry.write_text(json.dumps(registry))
+
+    _assert_integrator_rejects_without_main_change(
+        promote, repo, bare, auth, signature, sources, "required RA status pending"
+    )
+
+
 def test_integrator_publishes_only_authorized_tree_end_to_end(tmp_path):
     promote,r,bare,base,head,tree,d,sources,sig=_git_fixture(tmp_path)
     class Identity:
