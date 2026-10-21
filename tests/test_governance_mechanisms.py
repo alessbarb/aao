@@ -70,7 +70,7 @@ def test_authorization_fail_closed_and_signature(tmp_path):
         trusted_keys={"k": str(public)},
         trusted_auditors={"audit": ["k"]},
         trusted_auditor_revisions=["rev"],
-        required_checks=["unit"],
+        required_checks_by_risk_class={"R2": ["unit"]},
         now="2026-01-01T01:00:00+00:00",
         heartbeat_valid=True,
         enabled_risk_classes=["R2"], policy_id="p", attribution_resolved=True,
@@ -91,7 +91,7 @@ def test_authorization_fail_closed_and_signature(tmp_path):
     )
     assert "suspended or vetoed" in validate(doc, sig, {**state, "ledger": {"veto": True}})
     assert "required checks/evidence missing" in validate(
-        doc, sig, {**state, "required_checks": ["unit", "ci"]}
+        doc, sig, {**state, "required_checks_by_risk_class": {"R2": ["unit", "ci"]}}
     )
     assert "untrusted or revoked key" in validate(doc, sig, {**state, "revoked_keys": ["k"]})
     assert "valid supervisor heartbeat unavailable" in validate(
@@ -266,7 +266,7 @@ def test_authorization_head_move_and_wrong_parent_are_rejected(tmp_path):
         "trusted_keys": {"k": str(public)},
         "trusted_auditors": {"audit": ["k"]},
         "trusted_auditor_revisions": ["rev"],
-        "required_checks": ["unit"],
+        "required_checks_by_risk_class": {"R2": ["unit"]},
         "now": "2026-01-01T01:00:00+00:00",
         "heartbeat_valid": True,
         "enabled_risk_classes": ["R2"], "policy_id": "p", "attribution_resolved": True,
@@ -339,7 +339,7 @@ def _auth_fixture(tmp_path):
         "trusted_keys": {"key": str(public)},
         "trusted_auditors": {"auditor": ["key"]},
         "trusted_auditor_revisions": ["rev"],
-        "required_checks": ["unit"],
+        "required_checks_by_risk_class": {"R2": ["unit"]},
         "now": "2026-01-01T01:00:00+00:00",
         "heartbeat_valid": True,
         "enabled_risk_classes": ["R2"],
@@ -399,6 +399,58 @@ def test_authorization_rejects_other_policy_hash(tmp_path):
     assert "policy mismatch" in validate(d, sig, {**s, "policy_sha256": "different"})
 
 
+@pytest.mark.parametrize("field,value", [("merge_method", "squash"), ("expected_parents", ["other", "candidate"])])
+def test_authorization_rejects_unauthorized_merge_method_or_parents(tmp_path, field, value):
+    _, _, d, s, _ = _auth_fixture(tmp_path)
+    d[field] = value
+    sig = sign(d, str(tmp_path / "key.pem"))
+    reasons = validate(d, sig, s)
+    assert any(reason in reasons for reason in ("merge method not permitted", "expected parents mismatch"))
+
+
+@pytest.mark.parametrize(
+    "location,missing,value",
+    [("authorization", False, None), ("authorization", False, ""),
+     ("authorization", True, None), ("registry", False, None),
+     ("registry", False, ""), ("registry", True, None)],
+)
+def test_authorization_rejects_missing_policy_digest(tmp_path, location, missing, value):
+    _, _, d, s, _ = _auth_fixture(tmp_path)
+    sig = sign(d, str(tmp_path / "key.pem"))
+    if location == "authorization":
+        if missing:
+            d.pop("policy_sha256")
+        else:
+            d["policy_sha256"] = value
+    else:
+        if missing:
+            s.pop("policy_sha256")
+        else:
+            s["policy_sha256"] = value
+    assert "policy digest missing" in validate(d, sig, s)
+
+
+def test_authorization_rejects_missing_class_check_registration(tmp_path):
+    _, _, d, s, sig = _auth_fixture(tmp_path)
+    s.pop("required_checks_by_risk_class")
+    assert "required checks registration missing for risk class" in validate(d, sig, s)
+
+
+@pytest.mark.parametrize(
+    "attribution,author_models,resolved",
+    [([], {"author": "author-model"}, True),
+     ([{"sha": "candidate", "principal": "unregistered", "source": "ledger", "evidence_sha256": "x"}], {}, True),
+     ([{"sha": "candidate", "principal": "author", "source": "ledger", "evidence_sha256": "x"}], {"author": "author-model"}, False)],
+)
+def test_authorization_rejects_empty_or_unresolved_attribution(tmp_path, attribution, author_models, resolved):
+    _, _, d, s, _ = _auth_fixture(tmp_path)
+    d["attribution"] = attribution
+    s["author_models"] = author_models
+    s["attribution_resolved"] = resolved
+    sig = sign(d, str(tmp_path / "key.pem"))
+    assert "actor attribution inconclusive" in validate(d, sig, s)
+
+
 def test_authorization_rejects_recused_auditor_by_attributed_identity_not_git_metadata(tmp_path):
     _, _, d, s, sig = _auth_fixture(tmp_path)
     # Git author/committer metadata is not consulted; signed attributed auditor is.
@@ -415,7 +467,7 @@ def test_authorization_rejects_unknown_or_revoked_key(tmp_path):
 def test_authorization_rejects_missing_mandatory_checks_for_class(tmp_path):
     _, _, d, s, sig = _auth_fixture(tmp_path)
     assert "required checks/evidence missing" in validate(
-        d, sig, {**s, "required_checks": ["unit", "security"]}
+        d, sig, {**s, "required_checks_by_risk_class": {"R2": ["unit", "security"]}}
     )
 
 
@@ -670,7 +722,7 @@ def _git_fixture(tmp_path):
          "issued_at":"2026-01-01T00:00:00+00:00", "expires_at":"2026-01-02T00:00:00+00:00"}
     state = {"repo":"r", "pr_number":1, "pr_head":head, "target_ref":d["target_ref"], "target_sha":base,
          "merge_tree_sha":tree, "policy_sha256":"h", "trusted_keys":{"k":str(public)},
-         "trusted_auditors":{"a":["k"]}, "trusted_auditor_revisions":["rev"], "required_checks":["unit"],
+         "trusted_auditors":{"a":["k"]}, "trusted_auditor_revisions":["rev"], "required_checks_by_risk_class":{"R2":["unit"]},
          "enabled_risk_classes":["R2"], "policy_id":"p", "attribution_resolved":True,
          "ci_candidate_sha":head, "protected_paths_match":True, "auditor_models":{"a":"auditor-model"},
          "author_models":{"author":"author-model"}, "ra03_pass":True, "ra09_pass":True}
@@ -849,19 +901,20 @@ def test_integrator_aborts_when_main_moves_between_validation_and_push(tmp_path)
     subprocess.run(["git", "clone", str(bare), str(other)], check=True, capture_output=True)
     git(other, "config", "user.name", "rival")
     git(other, "config", "user.email", "rival@example.invalid")
-    (other / "f").write_text("racing update\n")
-    git(other, "commit", "-am", "race")
+    # Move main to the candidate commit: the authorized merge commit is a
+    # fast-forward from this new tip, so without the lease Git would accept it.
     after_race = []
 
     def race_before_push():
-        git(other, "push", "origin", "main")
+        git(other, "fetch", "origin", "candidate")
+        git(other, "push", "origin", "FETCH_HEAD:main")
         after_race.append(git(other, "ls-remote", "origin", "refs/heads/main").split()[0])
 
     identity = type("Identity", (), {
         "__call__": lambda self: "integrator",
         "push_identity": lambda self, *args: True,
     })()
-    with pytest.raises(RuntimeError, match="remote base moved"):
+    with pytest.raises(RuntimeError, match="conditional push rejected"):
         promote(
             repo,
             "origin",
@@ -872,8 +925,10 @@ def test_integrator_aborts_when_main_moves_between_validation_and_push(tmp_path)
             now=lambda: __import__("datetime").datetime(
                 2026, 1, 1, 1, tzinfo=__import__("datetime").timezone.utc
             ),
-            before_push=race_before_push,
+            after_recheck=race_before_push,
         )
+    # Removing --force-with-lease lets this fast-forward push succeed, so the
+    # expected conditional-push rejection would fail; this exercises server CAS.
     assert git(other, "ls-remote", "origin", "refs/heads/main").split()[0] == after_race[0]
 
 

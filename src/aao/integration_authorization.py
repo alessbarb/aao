@@ -124,13 +124,49 @@ def validate(document: dict[str, Any], signature: str, state: dict[str, Any]) ->
         reasons.append("merge tree mismatch")
     if document.get("policy_sha256") != state.get("policy_sha256"):
         reasons.append("policy mismatch")
+    if not isinstance(document.get("policy_sha256"), str) or not document["policy_sha256"].strip() or not isinstance(
+        state.get("policy_sha256"), str
+    ) or not state["policy_sha256"].strip():
+        reasons.append("policy digest missing")
+    if document.get("merge_method") != "merge-commit":
+        reasons.append("merge method not permitted")
+    expected_parents = document.get("expected_parents")
+    if expected_parents != [state.get("target_sha"), state.get("pr_head")]:
+        reasons.append("expected parents mismatch")
     attribution = document.get("attribution")
-    authors = {entry.get("principal") for entry in attribution if isinstance(entry, dict)} if isinstance(attribution, list) else set()
+    attribution_entries = attribution if isinstance(attribution, list) else []
+    authors = {
+        entry.get("principal")
+        for entry in attribution_entries
+        if isinstance(entry, dict) and isinstance(entry.get("principal"), str) and entry["principal"].strip()
+    }
+    attribution_resolved = (
+        state.get("attribution_resolved") is True
+        and bool(attribution_entries)
+        and all(
+            isinstance(entry, dict)
+            and isinstance(entry.get("principal"), str)
+            and bool(entry["principal"].strip())
+            for entry in attribution_entries
+        )
+    )
+    if document.get("risk_class") == "R2":
+        author_models = state.get("author_models", {})
+        auditor_models = state.get("auditor_models", {})
+        auditor_model = (
+            auditor_models.get(document.get("auditor_id"))
+            if isinstance(auditor_models, dict)
+            else None
+        )
+        attribution_resolved = attribution_resolved and isinstance(auditor_model, str) and bool(auditor_model)
+        attribution_resolved = attribution_resolved and all(
+            isinstance(author_models.get(author), str) and bool(author_models.get(author))
+            for author in authors
+        ) if isinstance(author_models, dict) else False
     if document.get("auditor_id") in authors or document.get("auditor_id") in state.get("recused_auditors", []):
         reasons.append("auditor recused")
-    if document.get("risk_class") == "R2" and any(
-        state.get("auditor_models", {}).get(document.get("auditor_id"))
-        == state.get("author_models", {}).get(author)
+    if document.get("risk_class") == "R2" and attribution_resolved and any(
+        state["auditor_models"][document.get("auditor_id")] == state["author_models"][author]
         for author in authors
     ):
         reasons.append("auditor model matches author model")
@@ -143,7 +179,16 @@ def validate(document: dict[str, Any], signature: str, state: dict[str, Any]) ->
         reasons.append("policy id mismatch")
     checks_value = document.get("checks_executed")
     checks = {c.get("name") for c in checks_value if isinstance(c, dict) and c.get("result") == "PASS" and c.get("evidence_sha256")} if isinstance(checks_value, list) else set()
-    if not set(state.get("required_checks", [])).issubset(checks):
+    required_by_class = state.get("required_checks_by_risk_class")
+    required_for_class = (
+        required_by_class.get(document.get("risk_class"))
+        if isinstance(required_by_class, dict)
+        else None
+    )
+    if not isinstance(required_for_class, (list, tuple, set)):
+        reasons.append("required checks registration missing for risk class")
+        required_for_class = []
+    if not set(required_for_class).issubset(checks):
         reasons.append("required checks/evidence missing")
     try:
         now = datetime.fromisoformat(state["now"])
@@ -164,7 +209,7 @@ def validate(document: dict[str, Any], signature: str, state: dict[str, Any]) ->
         reasons.append("valid supervisor heartbeat unavailable")
     if not state.get("ra03_pass") or not state.get("ra09_pass"):
         reasons.append("RA-03/RA-09 evidence absent")
-    if state.get("attribution_resolved") is not True:
+    if not attribution_resolved:
         reasons.append("actor attribution inconclusive")
     if state.get("ci_candidate_sha") != document.get("candidate_sha"):
         reasons.append("CI evidence is for another candidate")

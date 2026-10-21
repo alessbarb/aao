@@ -51,6 +51,7 @@ def _heartbeat(path: Path, registry: dict[str, Any], now: datetime) -> bool:
 def promote(repo: Path, remote: str, auth: dict[str, Any], signature: str,
             trust_sources: TrustSources, message: str = "Governed integration",
             before_push=None, identity_provider=None, after_push=None,
+            after_recheck=None,
             now: Callable[[], datetime] = lambda: datetime.now(UTC)) -> str:
     if identity_provider is None:
         raise RuntimeError("identity provider is mandatory")
@@ -108,7 +109,9 @@ def promote(repo: Path, remote: str, auth: dict[str, Any], signature: str,
     tree = _git(repo, "merge-tree", "--write-tree", base, head).splitlines()[0]
     if tree != auth["merge_result_tree_sha"]:
         raise ValueError("computed merge tree differs from authorization")
-    commit = subprocess.run(["git", "-C", str(repo), "commit-tree", tree, "-p", base, "-p", head],
+    expected_parents = auth["expected_parents"]
+    commit = subprocess.run(["git", "-C", str(repo), "commit-tree", tree,
+        *[arg for parent in expected_parents for arg in ("-p", parent)]],
         input=message + "\n", check=True, capture_output=True, text=True).stdout.strip()
     if not identity_provider.push_identity(ref, base, commit):
         raise RuntimeError("unattributed push")
@@ -118,12 +121,13 @@ def promote(repo: Path, remote: str, auth: dict[str, Any], signature: str,
     latest = subprocess.run(["git", "ls-remote", remote_url, ref], check=True, capture_output=True, text=True).stdout.split()[0]
     if latest != base:
         raise RuntimeError("remote base moved")
+    if after_recheck:
+        after_recheck()
     result = subprocess.run(["git", "-C", str(repo), "push", "--atomic",
         f"--force-with-lease={ref}:{base}", remote_url, f"{commit}:{ref}"], check=False, capture_output=True, text=True)
     if result.returncode:
         raise RuntimeError("conditional push rejected; no fallback: " + result.stderr)
     expected_tree = auth["merge_result_tree_sha"]
-    expected_parents = [base, head]
     observed: dict[str, Any] = {"sha": None, "tree_sha": None, "parents": None}
     try:
         if after_push:
