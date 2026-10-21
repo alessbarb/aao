@@ -36,8 +36,8 @@ Cambiar de modelo no aporta independencia. La independencia la aportan uids, cla
 
 | Rol | Modelo | uid | Credencial | Puede | No puede |
 |---|---|---|---|---|---|
-| PM | Claude, instancia propia | `aao-pm` | token de solo lectura e issues | priorizar, hacer la clasificación **inicial**, asignar, redistribuir | **bajar** una clasificación, levantar vetos, fusionar, implementar |
-| COO (funciones) | sin agente propio por ahora; las ejerce el PM bajo registro | — | — | recursos, cuotas, inventario de identidades | lo mismo que el PM |
+| PM | Claude, instancia propia | `aao-pm` | token de solo lectura e issues | con respaldo CEO (D10a, D10e): priorizar, planificar y hacer la clasificación **inicial**. Propuesto y no activo hasta P5: asignar y redistribuir con efecto vinculante (antes de P5 solo recomienda; ver `docs/PM_AGENT_CHARTER.md`) | **bajar** una clasificación, levantar vetos, fusionar, implementar |
+| COO (funciones) | sin agente propio por ahora. **Propuesta no activa hasta P5:** que las ejerza el PM bajo registro | — | — | recursos, cuotas, inventario de identidades | lo mismo que el PM |
 | Implementador Codex | Codex | `aao-impl-codex` | token propio: ramas y PR | código, pruebas, PR | aprobar o fusionar; leer claves, ledger o política del auditor |
 | Implementador Claude | Claude | `aao-impl-claude` | idem | idem | idem |
 | Implementador Antigravity | Antigravity | `aao-impl-ag` | idem | idem | idem |
