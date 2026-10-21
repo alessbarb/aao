@@ -39,12 +39,19 @@ def test_authorization_fail_closed_and_signature(tmp_path):
         merge_method="merge-commit",
         merge_result_tree_sha="t",
         risk_class="R2",
+        assurance_level="A",
         policy_id="p",
         policy_sha256="policy",
+        protected_paths_sha256="paths",
+        expected_parents=["b", "c"],
+        git_version="2.43.0",
         auditor_id="audit",
         auditor_key_id="k",
         auditor_code_revision="rev",
-        checks_executed=[{"name": "unit", "evidence_sha256": "e"}],
+        attribution=[{"sha": "c", "principal": "author", "source": "ledger", "evidence_sha256": "a"}],
+        checks_executed=[{"name": "unit", "cmd": "pytest", "result": "PASS", "evidence_sha256": "e"}],
+        scope="scope", known_limitations=[], residual_risks=[], permitted_operations=[],
+        prohibited_operations=[], findings=[], expediente_sha256="expediente",
         verdict="APPROVE",
         issued_at="2026-01-01T00:00:00+00:00",
         expires_at="2026-01-02T00:00:00+00:00",
@@ -60,10 +67,14 @@ def test_authorization_fail_closed_and_signature(tmp_path):
         merge_tree_sha="t",
         policy_sha256="policy",
         trusted_keys={"k": str(public)},
+        trusted_auditors={"audit": ["k"]},
         trusted_auditor_revisions=["rev"],
         required_checks=["unit"],
         now="2026-01-01T01:00:00+00:00",
         heartbeat_valid=True,
+        enabled_risk_classes=["R2"], policy_id="p", attribution_resolved=True,
+        ci_candidate_sha="c", protected_paths_match=True,
+        auditor_models={"audit": "auditor-model"}, author_models={"author": "author-model"},
         ra03_pass=True,
         ra09_pass=True,
         ledger={},
@@ -205,12 +216,20 @@ def test_authorization_head_move_and_wrong_parent_are_rejected(tmp_path):
         "merge_method": "merge-commit",
         "merge_result_tree_sha": "tree",
         "risk_class": "R2",
+        "assurance_level": "A",
         "policy_id": "p",
         "policy_sha256": "policy",
+        "protected_paths_sha256": "paths",
+        "expected_parents": ["base", "candidate"],
+        "git_version": "2.43.0",
         "auditor_id": "audit",
         "auditor_key_id": "k",
         "auditor_code_revision": "rev",
-        "checks_executed": [{"name": "unit", "evidence_sha256": "e"}],
+        "attribution": [{"sha": "candidate", "principal": "author", "source": "ledger", "evidence_sha256": "a"}],
+        "checks_executed": [{"name": "unit", "cmd": "pytest", "result": "PASS", "evidence_sha256": "e"}],
+        "scope": "scope", "known_limitations": [], "residual_risks": [],
+        "permitted_operations": [], "prohibited_operations": [], "findings": [],
+        "expediente_sha256": "expediente",
         "verdict": "APPROVE",
         "issued_at": "2026-01-01T00:00:00+00:00",
         "expires_at": "2026-01-02T00:00:00+00:00",
@@ -226,10 +245,14 @@ def test_authorization_head_move_and_wrong_parent_are_rejected(tmp_path):
         "merge_tree_sha": "tree",
         "policy_sha256": "policy",
         "trusted_keys": {"k": str(public)},
+        "trusted_auditors": {"audit": ["k"]},
         "trusted_auditor_revisions": ["rev"],
         "required_checks": ["unit"],
         "now": "2026-01-01T01:00:00+00:00",
         "heartbeat_valid": True,
+        "enabled_risk_classes": ["R2"], "policy_id": "p", "attribution_resolved": True,
+        "ci_candidate_sha": "candidate", "protected_paths_match": True,
+        "auditor_models": {"audit": "auditor-model"}, "author_models": {"author": "author-model"},
         "ra03_pass": True,
         "ra09_pass": True,
         "ledger": {},
@@ -264,12 +287,24 @@ def _auth_fixture(tmp_path):
         "merge_method": "merge-commit",
         "merge_result_tree_sha": "tree",
         "risk_class": "R2",
+        "assurance_level": "A",
         "policy_id": "policy",
         "policy_sha256": "hash",
+        "protected_paths_sha256": "paths",
+        "expected_parents": ["base", "candidate"],
+        "git_version": "2.43.0",
         "auditor_id": "auditor",
         "auditor_key_id": "key",
         "auditor_code_revision": "rev",
-        "checks_executed": [{"name": "unit", "evidence_sha256": "x"}],
+        "attribution": [{"sha": "candidate", "principal": "author", "source": "ledger", "evidence_sha256": "attr"}],
+        "checks_executed": [{"name": "unit", "cmd": "pytest", "result": "PASS", "evidence_sha256": "x"}],
+        "scope": "scope",
+        "known_limitations": [],
+        "residual_risks": [],
+        "permitted_operations": [],
+        "prohibited_operations": [],
+        "findings": [],
+        "expediente_sha256": "expediente",
         "verdict": "APPROVE",
         "issued_at": "2026-01-01T00:00:00+00:00",
         "expires_at": "2026-01-02T00:00:00+00:00",
@@ -283,15 +318,61 @@ def _auth_fixture(tmp_path):
         "merge_tree_sha": "tree",
         "policy_sha256": "hash",
         "trusted_keys": {"key": str(public)},
+        "trusted_auditors": {"auditor": ["key"]},
         "trusted_auditor_revisions": ["rev"],
         "required_checks": ["unit"],
         "now": "2026-01-01T01:00:00+00:00",
         "heartbeat_valid": True,
+        "enabled_risk_classes": ["R2"],
+        "policy_id": "policy",
+        "attribution_resolved": True,
+        "ci_candidate_sha": "candidate",
+        "protected_paths_match": True,
+        "auditor_models": {"auditor": "model-audit"},
+        "author_models": {"author": "model-author"},
         "ra03_pass": True,
         "ra09_pass": True,
         "ledger": {},
     }
     return private, public, doc, state, sign(doc, str(private))
+
+
+@pytest.mark.parametrize("field", ["enabled_risk_classes", "policy_id", "attribution_resolved", "ci_candidate_sha", "protected_paths_match"])
+def test_authorization_rejects_missing_snapshot_fields(tmp_path, field):
+    _, _, d, s, sig = _auth_fixture(tmp_path)
+    broken = dict(s)
+    broken.pop(field)
+    assert validate(d, sig, broken)
+
+
+@pytest.mark.parametrize("field", ["expected_parents", "git_version", "expediente_sha256", "attribution", "findings"])
+def test_authorization_rejects_missing_required_document_fields(tmp_path, field):
+    _, _, d, s, sig = _auth_fixture(tmp_path)
+    broken = dict(d)
+    broken.pop(field)
+    assert validate(broken, sig, s)
+
+
+def test_authorization_requires_pass_checks_and_trusted_auditor_identity(tmp_path):
+    _, _, d, s, sig = _auth_fixture(tmp_path)
+    d["checks_executed"][0]["result"] = "FAIL"
+    assert "required checks/evidence missing" in validate(d, sig, s)
+    assert "auditor key does not belong to auditor" in validate(d, sig, {**s, "trusted_auditors": {"other": ["key"]}})
+
+
+def test_authorization_rejects_same_model_and_long_or_naive_dates(tmp_path):
+    _, _, d, s, sig = _auth_fixture(tmp_path)
+    assert "auditor model matches author model" in validate(d, sig, {**s, "auditor_models": {"auditor": "same"}, "author_models": {"author": "same"}})
+    d["expires_at"] = "2026-01-05T00:00:00+00:00"
+    assert "authorization validity exceeds 72 hours" in validate(d, sig, s)
+    d["expires_at"] = "2026-01-02T00:00:00"
+    assert "invalid expiration" in validate(d, sig, s)
+
+
+def test_authorization_rejects_boolean_pr_number(tmp_path):
+    _, _, d, s, sig = _auth_fixture(tmp_path)
+    d["pr_number"] = True
+    assert "invalid PR number" in validate(d, sig, s)
 
 
 def test_authorization_rejects_other_policy_hash(tmp_path):
@@ -516,12 +597,17 @@ def _git_fixture(tmp_path):
         "merge_method": "merge-commit",
         "merge_result_tree_sha": tree,
         "risk_class": "R2",
+        "assurance_level": "A",
         "policy_id": "p",
         "policy_sha256": "h",
+        "protected_paths_sha256": "paths", "expected_parents": [base, head], "git_version": "2.43.0",
         "auditor_id": "a",
         "auditor_key_id": "k",
         "auditor_code_revision": "rev",
-        "checks_executed": [{"name": "unit", "evidence_sha256": "e"}],
+        "attribution": [{"sha": head, "principal": "author", "source": "ledger", "evidence_sha256": "a"}],
+        "checks_executed": [{"name": "unit", "cmd": "pytest", "result": "PASS", "evidence_sha256": "e"}],
+        "scope": "scope", "known_limitations": [], "residual_risks": [], "permitted_operations": [],
+        "prohibited_operations": [], "findings": [], "expediente_sha256": "expediente",
         "verdict": "APPROVE",
         "issued_at": "2026-01-01T00:00:00+00:00",
         "expires_at": "2026-01-02T00:00:00+00:00",
@@ -536,10 +622,14 @@ def _git_fixture(tmp_path):
         "merge_tree_sha": tree,
         "policy_sha256": "h",
         "trusted_keys": {"k": str(public)},
+        "trusted_auditors": {"a": ["k"]},
         "trusted_auditor_revisions": ["rev"],
         "required_checks": ["unit"],
         "now": "2026-01-01T01:00:00+00:00",
         "heartbeat_valid": True,
+        "enabled_risk_classes": ["R2"], "policy_id": "p", "attribution_resolved": True,
+        "ci_candidate_sha": head, "protected_paths_match": True,
+        "auditor_models": {"a": "auditor-model"}, "author_models": {"author": "author-model"},
         "ra03_pass": True,
         "ra09_pass": True,
         "ledger": {},

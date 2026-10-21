@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import json
 import subprocess
-from datetime import datetime
+from datetime import datetime, timedelta
 from typing import Any
 
 FIELDS = (
@@ -16,12 +16,24 @@ FIELDS = (
     "merge_method",
     "merge_result_tree_sha",
     "risk_class",
+    "assurance_level",
     "policy_id",
     "policy_sha256",
+    "protected_paths_sha256",
+    "expected_parents",
+    "git_version",
     "auditor_id",
     "auditor_key_id",
     "auditor_code_revision",
+    "attribution",
     "checks_executed",
+    "scope",
+    "known_limitations",
+    "residual_risks",
+    "permitted_operations",
+    "prohibited_operations",
+    "findings",
+    "expediente_sha256",
     "verdict",
     "issued_at",
     "expires_at",
@@ -88,7 +100,12 @@ def validate(document: dict[str, Any], signature: str, state: dict[str, Any]) ->
     reasons: list[str] = []
     if any(field not in document for field in FIELDS):
         reasons.append("authorization fields missing")
-    key = state.get("trusted_keys", {}).get(document.get("auditor_key_id"))
+    trusted_identities = state.get("trusted_auditors")
+    key_ids = trusted_identities.get(document.get("auditor_id")) if isinstance(trusted_identities, dict) else None
+    key_id = document.get("auditor_key_id")
+    key = state.get("trusted_keys", {}).get(key_id) if isinstance(key_id, str) else None
+    if not isinstance(key_ids, (list, tuple, set)) or key_id not in key_ids:
+        reasons.append("auditor key does not belong to auditor")
     if not key or document.get("auditor_key_id") in state.get("revoked_keys", []):
         reasons.append("untrusted or revoked key")
     elif not verify_signature(document, signature, key):
@@ -107,24 +124,38 @@ def validate(document: dict[str, Any], signature: str, state: dict[str, Any]) ->
         reasons.append("merge tree mismatch")
     if document.get("policy_sha256") != state.get("policy_sha256"):
         reasons.append("policy mismatch")
-    if document.get("auditor_id") in state.get("recused_auditors", []):
+    attribution = document.get("attribution")
+    authors = {entry.get("principal") for entry in attribution if isinstance(entry, dict)} if isinstance(attribution, list) else set()
+    if document.get("auditor_id") in authors or document.get("auditor_id") in state.get("recused_auditors", []):
         reasons.append("auditor recused")
+    if document.get("risk_class") == "R2" and any(
+        state.get("auditor_models", {}).get(document.get("auditor_id"))
+        == state.get("author_models", {}).get(author)
+        for author in authors
+    ):
+        reasons.append("auditor model matches author model")
     if document.get("auditor_code_revision") not in state.get("trusted_auditor_revisions", []):
         reasons.append("auditor revision untrusted")
-    if document.get("risk_class") not in state.get("enabled_risk_classes", [document.get("risk_class")]):
+    enabled = state.get("enabled_risk_classes")
+    if not isinstance(enabled, (list, tuple, set)) or document.get("risk_class") not in enabled:
         reasons.append("auditor not enabled for risk class")
-    if document.get("policy_id") != state.get("policy_id", document.get("policy_id")):
+    if not isinstance(state.get("policy_id"), str) or document.get("policy_id") != state.get("policy_id"):
         reasons.append("policy id mismatch")
-    checks = {
-        c.get("name") for c in document.get("checks_executed", []) if c.get("evidence_sha256")
-    }
+    checks_value = document.get("checks_executed")
+    checks = {c.get("name") for c in checks_value if isinstance(c, dict) and c.get("result") == "PASS" and c.get("evidence_sha256")} if isinstance(checks_value, list) else set()
     if not set(state.get("required_checks", [])).issubset(checks):
         reasons.append("required checks/evidence missing")
-    now = datetime.fromisoformat(state["now"])
     try:
-        if document.get("verdict") != "APPROVE" or now >= datetime.fromisoformat(document["expires_at"]):
+        now = datetime.fromisoformat(state["now"])
+        issued = datetime.fromisoformat(document["issued_at"])
+        expires = datetime.fromisoformat(document["expires_at"])
+        if now.tzinfo is None or issued.tzinfo is None or expires.tzinfo is None:
+            raise ValueError("timezone required")
+        if document.get("verdict") != "APPROVE" or now >= expires:
             reasons.append("verdict not APPROVE or expired")
-    except (KeyError, ValueError):
+        if expires - issued > timedelta(hours=72):
+            reasons.append("authorization validity exceeds 72 hours")
+    except (KeyError, ValueError, TypeError):
         reasons.append("invalid expiration")
     ledger = state.get("ledger", {})
     if ledger.get("suspended") or ledger.get("veto"):
@@ -133,16 +164,17 @@ def validate(document: dict[str, Any], signature: str, state: dict[str, Any]) ->
         reasons.append("valid supervisor heartbeat unavailable")
     if not state.get("ra03_pass") or not state.get("ra09_pass"):
         reasons.append("RA-03/RA-09 evidence absent")
-    if state.get("attribution_resolved") is False:
+    if state.get("attribution_resolved") is not True:
         reasons.append("actor attribution inconclusive")
-    if state.get("ci_candidate_sha", document.get("candidate_sha")) != document.get("candidate_sha"):
+    if state.get("ci_candidate_sha") != document.get("candidate_sha"):
         reasons.append("CI evidence is for another candidate")
-    if state.get("protected_paths_match") is False:
+    if state.get("protected_paths_match") is not True:
         reasons.append("protected paths digest mismatch")
     try:
-        issued = datetime.fromisoformat(document["issued_at"])
         if now < issued:
             reasons.append("authorization issued in the future")
-    except (KeyError, ValueError):
+    except (UnboundLocalError, TypeError):
         reasons.append("invalid issue time")
+    if type(document.get("pr_number")) is not int:
+        reasons.append("invalid PR number")
     return reasons
