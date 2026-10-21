@@ -705,6 +705,114 @@ def test_integrator_revalidates_remote_and_authority_inputs(tmp_path):
     with pytest.raises(ValueError): promote(r,"origin",d,sig,sources,identity_provider=type("I",(),{"__call__":lambda self:"integrator","push_identity":lambda self,*a:True})())
 
 
+def test_integrator_aborts_when_main_moves_between_validation_and_push(tmp_path):
+    promote, repo, bare, _base, _head, _tree, auth, sources, signature = _git_fixture(tmp_path)
+    other = tmp_path / "other"
+    subprocess.run(["git", "clone", str(bare), str(other)], check=True, capture_output=True)
+    git(other, "config", "user.name", "rival")
+    git(other, "config", "user.email", "rival@example.invalid")
+    (other / "f").write_text("racing update\n")
+    git(other, "commit", "-am", "race")
+    after_race = []
+
+    def race_before_push():
+        git(other, "push", "origin", "main")
+        after_race.append(git(other, "ls-remote", "origin", "refs/heads/main").split()[0])
+
+    identity = type("Identity", (), {
+        "__call__": lambda self: "integrator",
+        "push_identity": lambda self, *args: True,
+    })()
+    with pytest.raises(RuntimeError, match="remote base moved"):
+        promote(
+            repo,
+            "origin",
+            auth,
+            signature,
+            sources,
+            identity_provider=identity,
+            now=lambda: __import__("datetime").datetime(
+                2026, 1, 1, 1, tzinfo=__import__("datetime").timezone.utc
+            ),
+            before_push=race_before_push,
+        )
+    assert git(other, "ls-remote", "origin", "refs/heads/main").split()[0] == after_race[0]
+
+
+def test_integrator_refuses_stale_supervisor_heartbeat(tmp_path):
+    promote, repo, _bare, _base, _head, _tree, auth, sources, signature = _git_fixture(tmp_path)
+    from aao.supervisor import signed_heartbeat
+
+    expired = signed_heartbeat(
+        1,
+        "2026-01-01T00:00:00+00:00",
+        str(tmp_path / "key.pem"),
+        key_id="supervisor",
+        expires_at="2026-01-01T00:30:00+00:00",
+    )
+    sources.heartbeat.write_text(json.dumps(expired))
+    identity = type("Identity", (), {
+        "__call__": lambda self: "integrator",
+        "push_identity": lambda self, *args: True,
+    })()
+    with pytest.raises(ValueError, match="heartbeat"):
+        promote(
+            repo,
+            "origin",
+            auth,
+            signature,
+            sources,
+            identity_provider=identity,
+            now=lambda: __import__("datetime").datetime(
+                2026, 1, 1, 1, tzinfo=__import__("datetime").timezone.utc
+            ),
+        )
+
+
+def test_integrator_rejects_stale_base(tmp_path):
+    promote, repo, _bare, _base, _head, _tree, auth, sources, _signature = _git_fixture(tmp_path)
+    auth["base_sha"] = "stale-base"
+    signature = sign(auth, str(tmp_path / "key.pem"))
+    identity = type("Identity", (), {
+        "__call__": lambda self: "integrator",
+        "push_identity": lambda self, *args: True,
+    })()
+    with pytest.raises(ValueError, match="target ref or base mismatch"):
+        promote(
+            repo,
+            "origin",
+            auth,
+            signature,
+            sources,
+            identity_provider=identity,
+            now=lambda: __import__("datetime").datetime(
+                2026, 1, 1, 1, tzinfo=__import__("datetime").timezone.utc
+            ),
+        )
+
+
+def test_integrator_rejects_tree_mismatch(tmp_path):
+    promote, repo, _bare, _base, _head, _tree, auth, sources, _signature = _git_fixture(tmp_path)
+    auth["merge_result_tree_sha"] = "wrong-tree"
+    signature = sign(auth, str(tmp_path / "key.pem"))
+    identity = type("Identity", (), {
+        "__call__": lambda self: "integrator",
+        "push_identity": lambda self, *args: True,
+    })()
+    with pytest.raises(ValueError, match="computed merge tree differs"):
+        promote(
+            repo,
+            "origin",
+            auth,
+            signature,
+            sources,
+            identity_provider=identity,
+            now=lambda: __import__("datetime").datetime(
+                2026, 1, 1, 1, tzinfo=__import__("datetime").timezone.utc
+            ),
+        )
+
+
 def test_integrator_refuses_when_frozen(tmp_path):
     promote,r,_,_,_,_,d,sources,sig=_git_fixture(tmp_path); sources.freeze.write_text("freeze")
     with pytest.raises(RuntimeError,match="frozen"): promote(r,"origin",d,sig,sources,identity_provider=type("I",(),{"__call__":lambda self:"integrator","push_identity":lambda self,*a:True})())
