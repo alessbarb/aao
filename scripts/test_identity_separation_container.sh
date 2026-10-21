@@ -1,0 +1,89 @@
+#!/usr/bin/env bash
+# Usage (from repo root):
+#   docker run --rm -v "$PWD/scripts:/s:ro" -v "$PWD:/repo:ro" ubuntu:24.04 bash /s/test_identity_separation_container.sh
+# Disposable-container acceptance test for scripts/identity_separation.sh (F2).
+set -u
+S=/s; R=/repo
+t() { local name=$1; shift; if "$@"; then echo "TEST PASS  $name"; else echo "TEST FAIL  $name"; FAILED=1; fi; }
+FAILED=0
+apt-get update -qq >/dev/null && apt-get install -y -qq openssl sudo acl python3 git >/dev/null 2>&1
+useradd -m alessbarb && chmod 750 /home/alessbarb && usermod -aG sudo alessbarb
+mkdir -p /home/alessbarb/.config/gh && echo token > /home/alessbarb/.config/gh/hosts.yml && chown -R alessbarb: /home/alessbarb && chmod 600 /home/alessbarb/.config/gh/hosts.yml
+groupadd docker && touch /var/run/docker.sock && chown root:docker /var/run/docker.sock && chmod 660 /var/run/docker.sock
+echo 1 > /tmp/ps 2>/dev/null
+
+echo "== T1 preflight rejects unexpected privileged group"
+useradd -m -s /bin/bash aao-impl-codex && usermod -aG docker aao-impl-codex
+t "unexpected group -> fail closed, no changes" bash -c "! bash $S/identity_separation.sh --apply >/tmp/o 2>&1 && grep -q \"unexpected group 'docker'\" /tmp/o && ! id aao-pm >/dev/null 2>&1"
+gpasswd -d aao-impl-codex docker >/dev/null
+
+echo "== T2 preflight rejects wrong shell"
+usermod -s /bin/sh aao-impl-codex
+t "wrong shell -> fail closed" bash -c "! bash $S/identity_separation.sh --apply >/tmp/o 2>&1 && grep -q 'has shell /bin/sh' /tmp/o"
+usermod -s /bin/bash aao-impl-codex
+
+echo "== T3 preflight rejects foreign sudoers rule"
+echo 'aao-impl-codex ALL=(ALL) NOPASSWD: ALL' > /etc/sudoers.d/legacy && chmod 440 /etc/sudoers.d/legacy
+t "foreign sudoers -> fail closed" bash -c "! bash $S/identity_separation.sh --apply >/tmp/o 2>&1 && grep -q 'foreign sudoers' /tmp/o"
+rm /etc/sudoers.d/legacy
+
+echo "== T4 apply twice (idempotent)"
+t "first apply" bash -c "bash $S/identity_separation.sh --apply >/tmp/a1 2>&1"
+k1=$(sha256sum /var/lib/aao-auditor/keys/auditor-ed25519.pem | cut -d' ' -f1)
+t "second apply" bash -c "bash $S/identity_separation.sh --apply >/tmp/a2 2>&1"
+k2=$(sha256sum /var/lib/aao-auditor/keys/auditor-ed25519.pem | cut -d' ' -f1)
+t "key not regenerated" test "$k1" = "$k2"
+t "no new users on second run" bash -c "! grep -q useradd /tmp/a2"
+
+echo "== T5 sudoers: CEO cannot reach auditors"
+t "sudoers excludes auditors" bash -c "! grep -q aao-auditor /etc/sudoers.d/aao-launch"
+t "CEO sudo -l lists no auditor" bash -c "! sudo -l -U alessbarb | grep -q aao-auditor"
+
+echo "== T6 verifier as every role"
+for u in aao-pm aao-impl-codex aao-impl-claude aao-impl-ag aao-auditor aao-auditor-alt aao-integrator aao-supervisor aao-notifier; do
+  t "verify $u" bash -c "runuser -u $u -- bash $S/verify_identity_separation.sh >/tmp/v_$u 2>&1"; grep -E "^(FAIL|NOT RUN)" /tmp/v_$u
+done
+
+echo "== T7 verifier catches an ACL grant (no false PASS)"
+setfacl -m u:aao-impl-codex:x /var/lib/aao-auditor && setfacl -m u:aao-impl-codex:rx /var/lib/aao-auditor/keys
+t "ACL leak detected" bash -c "! runuser -u aao-impl-codex -- bash $S/verify_identity_separation.sh >/tmp/v 2>&1 && grep -q 'FAIL     enter aao-auditor keys dir' /tmp/v"
+setfacl -b /var/lib/aao-auditor/keys /var/lib/aao-auditor
+
+echo "== T8 verifier: missing target is NOT RUN, not PASS"
+mv /srv/aao/trust /srv/aao/trust.bak
+t "missing target -> NOT RUN" bash -c "! runuser -u aao-pm -- bash $S/verify_identity_separation.sh >/tmp/v 2>&1 && grep -q 'NOT RUN  write trust registry' /tmp/v"
+mv /srv/aao/trust.bak /srv/aao/trust
+
+echo "== T9 auditor-auditor isolation"
+t "alt cannot enter primary keys" bash -c "! runuser -u aao-auditor-alt -- test -x /var/lib/aao-auditor/keys"
+t "primary cannot read alt ledger" bash -c "! runuser -u aao-auditor -- test -r /var/lib/aao-auditor-alt/ledger"
+t "alt cannot write own frozen checkout" bash -c "! runuser -u aao-auditor-alt -- test -w /srv/aao/frozen/aao-auditor-alt"
+
+echo "== T10 integration with independent_audit.py custody + signature"
+cp -r $R /tmp/repo && chown -R aao-auditor: /tmp/repo && chmod -R a+rX /tmp/repo
+cat > /tmp/custody.py <<'PY'
+import sys; sys.path.insert(0, "/tmp/repo/src")
+from pathlib import Path
+from aao.independent_audit import custody_problems
+policy = {"trusted_auditor_revisions": [], "auditor_os_user": "aao-auditor", "developer_os_users": ["alessbarb", "aao-impl-codex"]}
+print("\n".join(custody_problems(policy, Path("/var/lib/aao-auditor/keys/auditor-ed25519.pem"))))
+PY
+runuser -u aao-auditor -- git config --global --add safe.directory /tmp/repo
+runuser -u aao-auditor -- python3 /tmp/custody.py > /tmp/c_aud 2>&1
+t "as auditor: only the expected 'revision not reviewed' problem" bash -c "grep -q 'not an independently reviewed revision' /tmp/c_aud && [ \$(grep -c . /tmp/c_aud) -eq 1 ]"
+runuser -u aao-impl-codex -- python3 /tmp/custody.py > /tmp/c_impl 2>&1
+t "as implementer: rejected (wrong account, key unavailable)" bash -c "grep -q 'not running as the designated auditor' /tmp/c_impl && grep -q 'signing key is unavailable' /tmp/c_impl"
+echo '{"x":1}' > /tmp/r.json && chmod 644 /tmp/r.json
+runuser -u aao-auditor -- openssl pkeyutl -sign -inkey /var/lib/aao-auditor/keys/auditor-ed25519.pem -rawin -in /tmp/r.json -out /tmp/r.sig
+t "signature verifies with published trust key" openssl pkeyutl -verify -pubin -inkey /srv/aao/trust/keys/aao-auditor-ed25519.pub -rawin -in /tmp/r.json -sigfile /tmp/r.sig
+t "signature fails with the other auditor's key" bash -c "! openssl pkeyutl -verify -pubin -inkey /srv/aao/trust/keys/aao-auditor-alt-ed25519.pub -rawin -in /tmp/r.json -sigfile /tmp/r.sig >/dev/null 2>&1"
+
+echo "== T11 revert is non-destructive"
+t "revert" bash -c "bash $S/identity_separation.sh --revert >/tmp/rv 2>&1"
+t "sudoers removed" test ! -e /etc/sudoers.d/aao-launch
+t "accounts locked" bash -c "passwd -S aao-pm | grep -q ' L '"
+t "keys kept" test -f /var/lib/aao-auditor/keys/auditor-ed25519.pem
+t "CEO untouched" bash -c "id -nG alessbarb | grep -qw sudo"
+
+echo "== RESULT: $([ $FAILED = 0 ] && echo ALL PASS || echo FAILURES)"
+exit $FAILED

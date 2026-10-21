@@ -1,117 +1,159 @@
 #!/usr/bin/env bash
 # Create the AAO role identities and protected directories (plan F2 / proposal P1).
 #
-# Default is a dry run that only prints what would change. Applying requires
-# root and the explicit flag:  sudo scripts/identity_separation.sh --apply
+# Modes:
+#   (default)   dry run: preflight checks plus the list of intended changes
+#   --apply     make the changes (root only)
+#   --revert    non-destructive rollback (root only): remove the sudoers rule
+#               and lock the role accounts. Keys, ledgers and the trust
+#               registry are kept so no evidence is lost.
 #
-# Idempotent: existing users, groups and directories are left in place and
-# only their ownership and modes are re-asserted. Nothing is deleted, and the
-# CEO account (CEO_USER) is never modified.
+# Fail closed: if an existing aao-* account or file does not match the
+# expected state (shell, home, supplementary groups, foreign sudoers rules),
+# the script stops before changing anything and reports why.
 #
-# Status: R2 candidate. It must not be executed before an independent review
-# and the CEO decision on P1.
+# Scope: static identities and file permissions only. Runtime isolation
+# (private /tmp, venv, caches, sockets) belongs to the systemd units of F3a.
+# Docker containers and the CEO account (CEO_USER) are never modified.
+#
+# Status: R2 candidate. Do not run on the host before independent review and
+# the CEO decision on P1.
 set -euo pipefail
 
 CEO_USER="${CEO_USER:-alessbarb}"
-APPLY=0
-[[ "${1:-}" == "--apply" ]] && APPLY=1
+MODE="${1:-dry-run}"
+case "$MODE" in dry-run|--apply|--revert) ;; *) echo "usage: $0 [--apply|--revert]" >&2; exit 2;; esac
+APPLY=0; [[ "$MODE" == --apply ]] && APPLY=1
 
 AGENT_USERS=(aao-pm aao-impl-codex aao-impl-claude aao-impl-ag)
-SERVICE_USERS=(aao-auditor aao-auditor-alt aao-integrator aao-supervisor aao-notifier aao-trust)
-# Groups used only to grant read access to protected data.
-GROUPS_=(aao-ledger-read aao-events)
-# Groups that must never contain an AAO role account.
-FORBIDDEN_GROUPS=(sudo admin wheel docker adm lxd libvirt "$CEO_USER")
+AUDITORS=(aao-auditor aao-auditor-alt)
+SERVICE_USERS=("${AUDITORS[@]}" aao-integrator aao-supervisor aao-notifier aao-trust)
+ALL_USERS=("${AGENT_USERS[@]}" "${SERVICE_USERS[@]}")
+SUDOERS=/etc/sudoers.d/aao-launch
+MARKER="# Managed by scripts/identity_separation.sh"
 
-run() {
-  printf '+ %s\n' "$*"
-  if (( APPLY )); then "$@"; fi
+# The only supplementary groups each role may have. Anything else is rejected.
+declare -A ALLOWED_GROUPS=(
+  [aao-integrator]="aao-ledger-read"
+  [aao-supervisor]="aao-ledger-read"
+  [aao-notifier]="aao-events"
+)
+
+expected_shell() {
+  local u
+  for u in "${AGENT_USERS[@]}"; do [[ "$1" == "$u" ]] && { echo /bin/bash; return; }; done
+  echo /usr/sbin/nologin
 }
 
-ensure_group() {
-  getent group "$1" >/dev/null || run groupadd --system "$1"
-}
+run() { printf '+ %s\n' "$*"; if (( APPLY )); then "$@"; fi; }
+die() { echo "PREFLIGHT FAIL: $*" >&2; exit 1; }
 
-ensure_user() {
-  local user=$1 shell=$2
-  if ! id "$user" >/dev/null 2>&1; then
-    run useradd --create-home --home-dir "/home/$user" --shell "$shell" --user-group "$user"
+if [[ "$MODE" != dry-run ]] && (( EUID != 0 )); then die "$MODE requires root"; fi
+
+# ---------- revert ----------
+if [[ "$MODE" == --revert ]]; then
+  if [[ -f "$SUDOERS" ]]; then
+    grep -qxF "$MARKER" "$SUDOERS" || die "$SUDOERS is not managed by this script; leaving it untouched"
+    rm -f "$SUDOERS"; echo "+ removed $SUDOERS"
   fi
-  # Strip any privileged group membership that may exist from earlier setup.
-  for g in "${FORBIDDEN_GROUPS[@]}"; do
-    if id -nG "$user" 2>/dev/null | tr ' ' '\n' | grep -qx "$g"; then
-      run gpasswd -d "$user" "$g"
+  for u in "${ALL_USERS[@]}"; do
+    if id "$u" >/dev/null 2>&1; then
+      usermod -L -s /usr/sbin/nologin "$u"; echo "+ locked $u"
     fi
   done
-  run chmod 0700 "/home/$user"
-}
-
-ensure_dir() {  # path owner group mode
-  run install -d -o "$2" -g "$3" -m "$4" "$1"
-}
-
-if (( APPLY )) && (( EUID != 0 )); then
-  echo "--apply requires root" >&2
-  exit 1
+  echo "Reverted. Data under /var/lib/aao-* and /srv/aao is kept. Remove it by hand only after archiving the evidence."
+  exit 0
 fi
-(( APPLY )) || echo "# DRY RUN: no changes will be made. Re-run with --apply as root."
 
-for g in "${GROUPS_[@]}"; do ensure_group "$g"; done
-for u in "${AGENT_USERS[@]}"; do ensure_user "$u" /bin/bash; done
-for u in "${SERVICE_USERS[@]}"; do ensure_user "$u" /usr/sbin/nologin; done
+# ---------- preflight (no changes) ----------
+echo "# preflight"
+id "$CEO_USER" >/dev/null 2>&1 || die "CEO account $CEO_USER not found"
+for u in "${ALL_USERS[@]}"; do
+  id "$u" >/dev/null 2>&1 || continue
+  shell=$(getent passwd "$u" | cut -d: -f7); home=$(getent passwd "$u" | cut -d: -f6)
+  [[ "$shell" == "$(expected_shell "$u")" ]] || die "$u has shell $shell, expected $(expected_shell "$u")"
+  [[ "$home" == "/home/$u" ]] || die "$u has home $home, expected /home/$u"
+  for g in $(id -nG "$u"); do
+    [[ "$g" == "$u" ]] && continue
+    [[ " ${ALLOWED_GROUPS[$u]:-} " == *" $g "* ]] || die "$u is in unexpected group '$g'"
+  done
+done
+# No other sudoers rule may mention a role account (e.g. leftovers from manual setup).
+if [[ -d /etc/sudoers.d ]]; then
+  for f in /etc/sudoers /etc/sudoers.d/*; do
+    [[ -f "$f" && "$f" != "$SUDOERS" ]] || continue
+    if grep -Eq '(^|[^[:alnum:]_-])aao-' "$f" 2>/dev/null; then die "foreign sudoers rule mentions aao- in $f"; fi
+  done
+fi
+if [[ -f "$SUDOERS" ]] && ! grep -qxF "$MARKER" "$SUDOERS"; then die "$SUDOERS exists and is not managed by this script"; fi
+echo "# preflight OK"
+echo "# docker group members (not modified): $(getent group docker | cut -d: -f4)"
+(( APPLY )) || echo "# DRY RUN: no changes will be made."
 
-# Read-only access to protected data.
-run usermod -aG aao-ledger-read aao-supervisor
-run usermod -aG aao-ledger-read aao-integrator
-run usermod -aG aao-events aao-notifier
+# ---------- apply ----------
+ensure_group() { getent group "$1" >/dev/null || run groupadd --system "$1"; }
+ensure_user() {
+  id "$1" >/dev/null 2>&1 || run useradd --create-home --home-dir "/home/$1" --shell "$(expected_shell "$1")" --user-group "$1"
+  run chmod 0700 "/home/$1"
+}
+ensure_dir() { run install -d -o "$2" -g "$3" -m "$4" "$1"; }  # path owner group mode
 
-# Auditors: private keys stay with each auditor; the ledger is readable by the
-# supervisor and the integrator.
-for a in aao-auditor aao-auditor-alt; do
+ensure_group aao-ledger-read
+ensure_group aao-events
+for u in "${ALL_USERS[@]}"; do ensure_user "$u"; done
+for u in "${!ALLOWED_GROUPS[@]}"; do run usermod -aG "${ALLOWED_GROUPS[$u]}" "$u"; done
+
+# Auditors: each keeps its own private key; its ledger is readable by the
+# supervisor and the integrator only. The two auditors cannot read each other.
+for a in "${AUDITORS[@]}"; do
   ensure_dir "/var/lib/$a"        "$a" aao-ledger-read 0750
   ensure_dir "/var/lib/$a/keys"   "$a" "$a"            0700
   ensure_dir "/var/lib/$a/ledger" "$a" aao-ledger-read 0750
 done
 
-# Supervisor event channel: the supervisor writes it; the notifier only reads it.
 ensure_dir /var/lib/aao-supervisor        aao-supervisor aao-events 0750
 ensure_dir /var/lib/aao-supervisor/events aao-supervisor aao-events 0750
 
-# Trust registry and frozen checkouts: owned by aao-trust and readable by all.
-# No role account can write here, so the auditors cannot change their own
-# code, keys or policy.
-ensure_dir /srv/aao                aao-trust aao-trust 0755
-ensure_dir /srv/aao/trust          aao-trust aao-trust 0755
-ensure_dir /srv/aao/trust/keys     aao-trust aao-trust 0755
-ensure_dir /srv/aao/frozen         aao-trust aao-trust 0755
+# Trust registry and one frozen checkout per component, owned by aao-trust.
+# No role can write here, so no auditor can change its own code, key or policy.
+ensure_dir /srv/aao             aao-trust aao-trust 0755
+ensure_dir /srv/aao/trust       aao-trust aao-trust 0755
+ensure_dir /srv/aao/trust/keys  aao-trust aao-trust 0755
+ensure_dir /srv/aao/frozen      aao-trust aao-trust 0755
+for c in "${AUDITORS[@]}" aao-integrator aao-supervisor; do
+  ensure_dir "/srv/aao/frozen/$c" aao-trust aao-trust 0755
+done
 
-# Signing keys are generated by each auditor, as that auditor, and never leave
-# its account. Only the public key is copied into the trust registry.
-for a in aao-auditor aao-auditor-alt; do
+# Key path used by independent_audit.py:  --key /var/lib/<auditor>/keys/auditor-ed25519.pem
+# The public key goes to the trust registry. policy.json is R3 trust root and is NOT written here.
+for a in "${AUDITORS[@]}"; do
   key="/var/lib/$a/keys/auditor-ed25519.pem"
-  if (( APPLY )) && [[ ! -f "$key" ]]; then
-    run runuser -u "$a" -- sh -c "umask 077 && openssl genpkey -algorithm ed25519 -out '$key'"
-    run sh -c "runuser -u '$a' -- openssl pkey -in '$key' -pubout > /srv/aao/trust/keys/$a-ed25519.pub"
-    run chown aao-trust:aao-trust "/srv/aao/trust/keys/$a-ed25519.pub"
-    run chmod 0644 "/srv/aao/trust/keys/$a-ed25519.pub"
-  elif (( ! APPLY )); then
-    echo "+ (would generate $key as $a and publish its public key to /srv/aao/trust/keys/)"
+  pub="/srv/aao/trust/keys/$a-ed25519.pub"
+  if (( APPLY )); then
+    if [[ ! -f "$key" ]]; then
+      runuser -u "$a" -- sh -c "umask 077 && openssl genpkey -algorithm ed25519 -out '$key'"
+      echo "+ generated $key as $a"
+    fi
+    runuser -u "$a" -- openssl pkey -in "$key" -pubout > "$pub"
+    chown aao-trust:aao-trust "$pub"; chmod 0644 "$pub"
+    echo "+ published $pub"
+  else
+    echo "+ (would generate $key as $a if absent and publish $pub)"
   fi
 done
 
-# The CEO launches the agents. The sudo password is required on every launch,
-# so a process running as the CEO cannot silently become an auditor.
-sudoers=/etc/sudoers.d/aao-launch
-rule="$CEO_USER ALL=($(IFS=,; echo "${AGENT_USERS[*]},aao-auditor,aao-auditor-alt")) ALL"
+# The CEO may launch AGENTS only. Auditors are not reachable through sudo;
+# they run as systemd services (F3a). The rule still requires the CEO password.
+rule="$CEO_USER ALL=($(IFS=,; echo "${AGENT_USERS[*]}")) ALL"
 if (( APPLY )); then
   tmp=$(mktemp)
-  printf '%s\n' "# Managed by scripts/identity_separation.sh" "$rule" > "$tmp"
+  printf '%s\n' "$MARKER" "$rule" > "$tmp"
   visudo -cf "$tmp" >/dev/null
-  install -o root -g root -m 0440 "$tmp" "$sudoers"
+  install -o root -g root -m 0440 "$tmp" "$SUDOERS"
   rm -f "$tmp"
-  echo "+ wrote $sudoers"
+  echo "+ wrote $SUDOERS"
 else
-  echo "+ (would write $sudoers: $rule)"
+  echo "+ (would write $SUDOERS: $rule)"
 fi
 
 cat <<'EOF'
@@ -122,5 +164,6 @@ Next steps (manual, one time):
   2. Clone the repository inside each agent home (not a shared working copy).
   3. Leave PostgreSQL running from the CEO account; agents reach it over
      TCP at 127.0.0.1:54329 and never use the docker socket.
-  4. Run scripts/verify_identity_separation.sh as every role and attach its output to the F2 evidence.
+  4. Run scripts/verify_identity_separation.sh as every role and attach the output to the F2 evidence.
+  Rollback:  sudo scripts/identity_separation.sh --revert
 EOF

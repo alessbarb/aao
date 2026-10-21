@@ -1,0 +1,45 @@
+== T1 preflight rejects unexpected privileged group
+TEST PASS  unexpected group -> fail closed, no changes
+== T2 preflight rejects wrong shell
+TEST PASS  wrong shell -> fail closed
+== T3 preflight rejects foreign sudoers rule
+TEST PASS  foreign sudoers -> fail closed
+== T4 apply twice (idempotent)
+TEST PASS  first apply
+TEST PASS  second apply
+TEST PASS  key not regenerated
+TEST PASS  no new users on second run
+== T5 sudoers: CEO cannot reach auditors
+TEST PASS  sudoers excludes auditors
+TEST PASS  CEO sudo -l lists no auditor
+== T6 verifier as every role
+TEST PASS  verify aao-pm
+TEST PASS  verify aao-impl-codex
+TEST PASS  verify aao-impl-claude
+TEST PASS  verify aao-impl-ag
+TEST PASS  verify aao-auditor
+TEST PASS  verify aao-auditor-alt
+TEST PASS  verify aao-integrator
+TEST PASS  verify aao-supervisor
+TEST PASS  verify aao-notifier
+== T7 verifier catches an ACL grant (no false PASS)
+TEST PASS  ACL leak detected
+== T8 verifier: missing target is NOT RUN, not PASS
+TEST PASS  missing target -> NOT RUN
+== T9 auditor-auditor isolation
+TEST PASS  alt cannot enter primary keys
+TEST PASS  primary cannot read alt ledger
+TEST PASS  alt cannot write own frozen checkout
+== T10 integration with independent_audit.py custody + signature
+TEST PASS  as auditor: only the expected 'revision not reviewed' problem
+TEST PASS  as implementer: rejected (wrong account, key unavailable)
+Signature Verified Successfully
+TEST PASS  signature verifies with published trust key
+TEST PASS  signature fails with the other auditor's key
+== T11 revert is non-destructive
+TEST PASS  revert
+TEST PASS  sudoers removed
+TEST PASS  accounts locked
+TEST PASS  keys kept
+TEST PASS  CEO untouched
+== RESULT: ALL PASS
