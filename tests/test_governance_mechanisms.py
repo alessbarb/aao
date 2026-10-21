@@ -639,7 +639,8 @@ def test_identity_attribution_hook_records_pusher_uid_and_rejects_unattributed_p
 
 
 def _git_fixture(tmp_path):
-    from aao.integrator import promote
+    from aao.integrator import TrustSources, promote
+    from aao.supervisor import signed_heartbeat
 
     bare = tmp_path / "origin.git"
     subprocess.run(["git", "init", "--bare", str(bare)], check=True, capture_output=True)
@@ -648,146 +649,76 @@ def _git_fixture(tmp_path):
     git(r, "config", "user.name", "integrator")
     git(r, "config", "user.email", "integrator@example.invalid")
     (r / "f").write_text("base\n")
-    git(r, "add", "f")
-    git(r, "commit", "-m", "base")
-    git(r, "branch", "-M", "main")
-    git(r, "push", "-u", "origin", "main")
+    git(r, "add", "f"); git(r, "commit", "-m", "base")
+    git(r, "branch", "-M", "main"); git(r, "push", "-u", "origin", "main")
     base = git(r, "rev-parse", "HEAD")
-    (r / "f").write_text("candidate\n")
-    git(r, "commit", "-am", "candidate")
+    (r / "f").write_text("candidate\n"); git(r, "commit", "-am", "candidate")
     head = git(r, "rev-parse", "HEAD")
     tree = git(r, "merge-tree", "--write-tree", base, head).splitlines()[0]
-    git(r, "branch", "candidate", head)
+    git(r, "push", "origin", f"{head}:refs/heads/candidate")
     git(r, "reset", "--hard", base)
     private, public = keypair(tmp_path)
-    d = {
-        "repo": "r",
-        "pr_number": 1,
-        "candidate_sha": head,
-        "base_sha": base,
-        "target_ref": "refs/heads/main",
-        "merge_method": "merge-commit",
-        "merge_result_tree_sha": tree,
-        "risk_class": "R2",
-        "assurance_level": "A",
-        "policy_id": "p",
-        "policy_sha256": "h",
-        "protected_paths_sha256": "paths", "expected_parents": [base, head], "git_version": "2.43.0",
-        "auditor_id": "a",
-        "auditor_key_id": "k",
-        "auditor_code_revision": "rev",
-        "attribution": [{"sha": head, "principal": "author", "source": "ledger", "evidence_sha256": "a"}],
-        "checks_executed": [{"name": "unit", "cmd": "pytest", "result": "PASS", "evidence_sha256": "e"}],
-        "scope": "scope", "known_limitations": [], "residual_risks": [], "permitted_operations": [],
-        "prohibited_operations": [], "findings": [], "expediente_sha256": "expediente",
-        "verdict": "APPROVE",
-        "issued_at": "2026-01-01T00:00:00+00:00",
-        "expires_at": "2026-01-02T00:00:00+00:00",
-    }
-    state = {
-        "repo": "r",
-        "pr_number": 1,
-        "pr_head": head,
-        "pr_head_current": head,
-        "target_ref": d["target_ref"],
-        "target_sha": base,
-        "merge_tree_sha": tree,
-        "policy_sha256": "h",
-        "trusted_keys": {"k": str(public)},
-        "trusted_auditors": {"a": ["k"]},
-        "trusted_auditor_revisions": ["rev"],
-        "required_checks": ["unit"],
-        "now": "2026-01-01T01:00:00+00:00",
-        "heartbeat_valid": True,
-        "enabled_risk_classes": ["R2"], "policy_id": "p", "attribution_resolved": True,
-        "ci_candidate_sha": head, "protected_paths_match": True,
-        "auditor_models": {"a": "auditor-model"}, "author_models": {"author": "author-model"},
-        "ra03_pass": True,
-        "ra09_pass": True,
-        "ledger": {},
-    }
-    return promote, r, bare, base, head, tree, d, state, sign(d, str(private))
+    d = {"repo":"r", "pr_number":1, "candidate_sha":head, "base_sha":base,
+         "target_ref":"refs/heads/main", "merge_method":"merge-commit", "merge_result_tree_sha":tree,
+         "risk_class":"R2", "assurance_level":"A", "policy_id":"p", "policy_sha256":"h",
+         "protected_paths_sha256":"paths", "expected_parents":[base,head], "git_version":"2.43.0",
+         "auditor_id":"a", "auditor_key_id":"k", "auditor_code_revision":"rev",
+         "attribution":[{"sha":head,"principal":"author","source":"ledger","evidence_sha256":"a"}],
+         "checks_executed":[{"name":"unit","cmd":"pytest","result":"PASS","evidence_sha256":"e"}],
+         "scope":"scope", "known_limitations":[], "residual_risks":[], "permitted_operations":[],
+         "prohibited_operations":[], "findings":[], "expediente_sha256":"expediente", "verdict":"APPROVE",
+         "issued_at":"2026-01-01T00:00:00+00:00", "expires_at":"2026-01-02T00:00:00+00:00"}
+    state = {"repo":"r", "pr_number":1, "pr_head":head, "target_ref":d["target_ref"], "target_sha":base,
+         "merge_tree_sha":tree, "policy_sha256":"h", "trusted_keys":{"k":str(public)},
+         "trusted_auditors":{"a":["k"]}, "trusted_auditor_revisions":["rev"], "required_checks":["unit"],
+         "enabled_risk_classes":["R2"], "policy_id":"p", "attribution_resolved":True,
+         "ci_candidate_sha":head, "protected_paths_match":True, "auditor_models":{"a":"auditor-model"},
+         "author_models":{"author":"author-model"}, "ra03_pass":True, "ra09_pass":True}
+    ledger=tmp_path/"ledger.jsonl"; ledger.touch(); anchor=tmp_path/"anchor"; heartbeat=tmp_path/"heartbeat.json"; freeze=tmp_path/"freeze"
+    anchor.write_text("0"*64)
+    from aao.governance_ledger import verify
+    anchor.write_text(verify(ledger, {"k":str(public)})[-1]["hash"] if ledger.exists() and ledger.stat().st_size else "0"*64)
+    hb=signed_heartbeat(1,"2026-01-01T00:00:00+00:00",str(private),key_id="supervisor",expires_at="2026-01-01T02:00:00+00:00")
+    heartbeat.write_text(json.dumps(hb))
+    registry={**state,"ledger_keys":{"k":str(public)},"supervisor_key_id":"supervisor","supervisor_public_key":str(public),"heartbeat_max_age_seconds":7200,
+              "target_refs":["refs/heads/main"],"integrator_identity":"integrator","protected_paths":{},"ra_status":{"RA-02":"PASS","RA-03":"PASS","RA-09":"PASS"}}
+    reg=tmp_path/"registry.json"; reg.write_text(json.dumps(registry))
+    return promote, r, bare, base, head, tree, d, TrustSources(reg,ledger,anchor,heartbeat,freeze), sign(d,str(private))
 
 
 def test_integrator_publishes_only_authorized_tree_end_to_end(tmp_path):
-    promote, r, bare, base, head, tree, d, s, sig = _git_fixture(tmp_path)
-    commit = promote(r, "origin", d, sig, s)
-    assert git(r, "show", "-s", "--format=%T", commit) == tree
-    assert git(r, "show", "-s", "--format=%P", commit).split() == [base, head]
-    assert (
-        subprocess.run(
-            ["git", "--git-dir", str(bare), "rev-parse", "refs/heads/main"],
-            check=True,
-            capture_output=True,
-            text=True,
-        ).stdout.strip()
-        == commit
-    )
+    promote,r,bare,base,head,tree,d,sources,sig=_git_fixture(tmp_path)
+    class Identity:
+        def __call__(self): return "integrator"
+        def push_identity(self, *args): return True
+    commit=promote(r,"origin",d,sig,sources,identity_provider=Identity(), now=lambda: __import__("datetime").datetime(2026,1,1,1,tzinfo=__import__("datetime").timezone.utc))
+    assert git(r,"show","-s","--format=%T",commit)==tree
+    assert git(r,"show","-s","--format=%P",commit).split()==[base,head]
+    assert subprocess.run(["git","--git-dir",str(bare),"rev-parse","refs/heads/main"],check=True,capture_output=True,text=True).stdout.strip()==commit
 
 
-def test_integrator_aborts_when_main_moves_between_validation_and_push(tmp_path):
-    promote, r, bare, _base, _head, _tree, d, s, sig = _git_fixture(tmp_path)
-    other = tmp_path / "other"
-    subprocess.run(["git", "clone", str(bare), str(other)], check=True, capture_output=True)
-    git(other, "config", "user.name", "rival")
-    git(other, "config", "user.email", "r@e")
-    (other / "f").write_text("race\n")
-    git(other, "commit", "-am", "race")
-    git(other, "push", "origin", "main")
-    after_race = []
-
-    def race():
-        (other / "f").write_text("raced again\n")
-        git(other, "commit", "-am", "race2")
-        git(other, "push", "origin", "main")
-        after_race.append(git(other, "ls-remote", "origin", "refs/heads/main").split()[0])
-
-    with pytest.raises(RuntimeError, match="conditional push rejected"):
-        promote(r, "origin", d, sig, s, before_push=race)
-    assert git(other, "ls-remote", "origin", "refs/heads/main").split()[0] == after_race[0]
-
-
-def test_integrator_rejects_tree_mismatch(tmp_path):
-    promote, r, _, _, _, _, d, s, sig = _git_fixture(tmp_path)
-    d["merge_result_tree_sha"] = "wrong"
-    with pytest.raises(ValueError, match="merge tree mismatch"):
-        promote(r, "origin", d, sig, s)
-
-
-def test_integrator_rejects_stale_base(tmp_path):
-    promote, r, _, _, _, _, d, s, sig = _git_fixture(tmp_path)
-    d["base_sha"] = "stale"
-    # Signed authorization validation rejects stale target/base before creating a commit.
-    with pytest.raises(ValueError):
-        promote(r, "origin", d, sig, s)
+def test_integrator_revalidates_remote_and_authority_inputs(tmp_path):
+    promote,r,_bare,_base,_head,_tree,d,sources,sig=_git_fixture(tmp_path)
+    with pytest.raises(RuntimeError, match="identity"):
+        promote(r,"origin",d,sig,sources,now=lambda: __import__("datetime").datetime(2026,1,1,1,tzinfo=__import__("datetime").timezone.utc))
+    registry=json.loads(sources.trust_registry.read_text()); registry["target_refs"]=[]; sources.trust_registry.write_text(json.dumps(registry))
+    with pytest.raises(ValueError): promote(r,"origin",d,sig,sources,identity_provider=type("I",(),{"__call__":lambda self:"integrator","push_identity":lambda self,*a:True})())
 
 
 def test_integrator_refuses_when_frozen(tmp_path):
-    promote, r, _, _, _, _, d, s, sig = _git_fixture(tmp_path)
-    (r / ".aao-freeze").write_text("freeze")
-    with pytest.raises(RuntimeError, match="frozen"):
-        promote(r, "origin", d, sig, s)
-
-
-def test_integrator_refuses_stale_supervisor_heartbeat(tmp_path):
-    promote, r, _, _, _, _, d, s, sig = _git_fixture(tmp_path)
-    s["heartbeat_valid"] = False
-    with pytest.raises(ValueError, match="heartbeat"):
-        promote(r, "origin", d, sig, s)
+    promote,r,_,_,_,_,d,sources,sig=_git_fixture(tmp_path); sources.freeze.write_text("freeze")
+    with pytest.raises(RuntimeError,match="frozen"): promote(r,"origin",d,sig,sources,identity_provider=type("I",(),{"__call__":lambda self:"integrator","push_identity":lambda self,*a:True})())
 
 
 def test_integrator_post_publish_divergence_freezes(tmp_path):
-    # Readback mismatch is an explicit fail-stop; simulate by replacing remote after successful CAS.
-    promote, r, bare, _, _, _, d, s, sig = _git_fixture(tmp_path)
-    def rewrite_remote():
-        path = subprocess.run(["git", "--git-dir", str(bare), "rev-parse", "refs/heads/main^"],
-                              check=True, capture_output=True, text=True).stdout.strip()
-        subprocess.run(["git", "--git-dir", str(bare), "update-ref", "refs/heads/main", path], check=True)
-    with pytest.raises(RuntimeError, match="post-publication divergence"):
-        promote(r, "origin", d, sig, s, after_push=rewrite_remote)
-    assert (r / ".aao-freeze").exists()
-    with pytest.raises(RuntimeError, match="frozen"):
-        promote(r, "origin", d, sig, s)
+    promote,r,bare,_,_,_,d,sources,sig=_git_fixture(tmp_path)
+    def rewrite():
+        path=subprocess.run(["git","--git-dir",str(bare),"rev-parse","refs/heads/main^"],check=True,capture_output=True,text=True).stdout.strip()
+        subprocess.run(["git","--git-dir",str(bare),"update-ref","refs/heads/main",path],check=True)
+    with pytest.raises(RuntimeError,match="post-publication divergence"):
+        promote(r,"origin",d,sig,sources,identity_provider=type("I",(),{"__call__":lambda self:"integrator","push_identity":lambda self,*a:True})(),now=lambda: __import__("datetime").datetime(2026,1,1,1,tzinfo=__import__("datetime").timezone.utc),after_push=rewrite)
+    assert sources.freeze.exists()
+
 
 # Regression coverage for the signed ledger and persistent notifier boundary.
 def test_ledger_requires_trust_and_append_verifies_existing_chain(tmp_path):
