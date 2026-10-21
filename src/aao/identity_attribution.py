@@ -20,8 +20,13 @@ class GitHubIdentityProvider:
 def install_uid_hook(bare: Path, log: Path) -> None:
     hook = bare / "hooks" / "pre-receive"
     hook.write_text(
-        '#!/bin/sh\nwhile read old new ref; do printf \'%s %s %s %s\\n\' "$(id -u)" "$old" "$new" "$ref" >> "'
-        + str(log)
-        + '"; done\n'
+        '#!/bin/sh\n'
+        'set -eu\n'
+        'uid=$(id -u)\n'
+        'while read old new ref; do\n'
+        '  printf "%s %s %s %s\\n" "$uid" "$old" "$new" "$ref" >> '
+        + repr(str(log))
+        + '\n'
+        'done\n'
     )
     hook.chmod(0o755)

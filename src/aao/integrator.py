@@ -18,6 +18,7 @@ def promote(
     message: str = "Governed integration",
     before_push=None,
     identity_provider=None,
+    after_push=None,
 ) -> str:
     if Path(repo / ".aao-freeze").exists():
         raise RuntimeError("integrator frozen")
@@ -78,6 +79,8 @@ def promote(
     )
     if result.returncode:
         raise RuntimeError("conditional push rejected; no fallback: " + result.stderr)
+    if after_push is not None:
+        after_push()
     actual = subprocess.run(
         ["git", "-C", str(repo), "ls-remote", remote, "refs/heads/main"],
         check=True,

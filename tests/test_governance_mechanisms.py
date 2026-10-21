@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import base64
+import os
 import subprocess
 from pathlib import Path
 
@@ -254,42 +255,42 @@ def test_authorization_head_move_and_wrong_parent_are_rejected(tmp_path):
 # not mocks of their decision functions (except explicitly named identity seam).
 def _auth_fixture(tmp_path):
     private, public = keypair(tmp_path)
-    doc = dict(
-        repo="repo",
-        pr_number=7,
-        candidate_sha="candidate",
-        base_sha="base",
-        target_ref="refs/heads/main",
-        merge_method="merge-commit",
-        merge_result_tree_sha="tree",
-        risk_class="R2",
-        policy_id="policy",
-        policy_sha256="hash",
-        auditor_id="auditor",
-        auditor_key_id="key",
-        auditor_code_revision="rev",
-        checks_executed=[{"name": "unit", "evidence_sha256": "x"}],
-        verdict="APPROVE",
-        issued_at="2026-01-01T00:00:00+00:00",
-        expires_at="2026-01-02T00:00:00+00:00",
-    )
-    state = dict(
-        repo="repo",
-        pr_number=7,
-        pr_head="candidate",
-        target_ref=doc["target_ref"],
-        target_sha="base",
-        merge_tree_sha="tree",
-        policy_sha256="hash",
-        trusted_keys={"key": str(public)},
-        trusted_auditor_revisions=["rev"],
-        required_checks=["unit"],
-        now="2026-01-01T01:00:00+00:00",
-        heartbeat_valid=True,
-        ra03_pass=True,
-        ra09_pass=True,
-        ledger={},
-    )
+    doc = {
+        "repo": "repo",
+        "pr_number": 7,
+        "candidate_sha": "candidate",
+        "base_sha": "base",
+        "target_ref": "refs/heads/main",
+        "merge_method": "merge-commit",
+        "merge_result_tree_sha": "tree",
+        "risk_class": "R2",
+        "policy_id": "policy",
+        "policy_sha256": "hash",
+        "auditor_id": "auditor",
+        "auditor_key_id": "key",
+        "auditor_code_revision": "rev",
+        "checks_executed": [{"name": "unit", "evidence_sha256": "x"}],
+        "verdict": "APPROVE",
+        "issued_at": "2026-01-01T00:00:00+00:00",
+        "expires_at": "2026-01-02T00:00:00+00:00",
+    }
+    state = {
+        "repo": "repo",
+        "pr_number": 7,
+        "pr_head": "candidate",
+        "target_ref": doc["target_ref"],
+        "target_sha": "base",
+        "merge_tree_sha": "tree",
+        "policy_sha256": "hash",
+        "trusted_keys": {"key": str(public)},
+        "trusted_auditor_revisions": ["rev"],
+        "required_checks": ["unit"],
+        "now": "2026-01-01T01:00:00+00:00",
+        "heartbeat_valid": True,
+        "ra03_pass": True,
+        "ra09_pass": True,
+        "ledger": {},
+    }
     return private, public, doc, state, sign(doc, str(private))
 
 
@@ -362,15 +363,18 @@ def test_supervisor_matches_main_history_against_ledger_authorizations(tmp_path)
     subprocess.run(["git", "init", str(r)], check=True, capture_output=True)
     git(r, "config", "user.name", "x")
     git(r, "config", "user.email", "x@y")
-    (r / "f").write_text("a")
-    git(r, "add", "f")
-    git(r, "commit", "-m", "one")
-    authorized = git(r, "rev-parse", "HEAD")
-    (r / "f").write_text("b")
-    git(r, "commit", "-am", "two")
-    events = inspect(r, {authorized}, 0, str(keypair(tmp_path)[0]))
-    assert any(x["commit"] == authorized and not x["unauthorized"] for x in events) is False
-    assert any(x["unauthorized"] for x in events)
+    authorized = []
+    for value in ("a", "b"):
+        (r / "f").write_text(value)
+        git(r, "add", "f")
+        git(r, "commit", "-m", value)
+        authorized.append(git(r, "rev-parse", "HEAD"))
+    (r / "f").write_text("direct")
+    git(r, "commit", "-am", "direct push")
+    direct = git(r, "rev-parse", "HEAD")
+    events = inspect(r, set(authorized), 0, str(keypair(tmp_path)[0]))
+    assert all(not x["unauthorized"] for x in events if x["commit"] in authorized)
+    assert any(x["commit"] == direct and x["unauthorized"] for x in events)
 
 
 def test_supervisor_flags_merge_not_made_by_integrator_identity(tmp_path):
@@ -384,7 +388,10 @@ def test_supervisor_flags_merge_not_made_by_integrator_identity(tmp_path):
     (r / "f").write_text("x")
     git(r, "add", "f")
     git(r, "commit", "-m", "direct merge-like commit")
-    assert any(e["unauthorized"] for e in inspect(r, set(), 0, str(keypair(tmp_path)[0])))
+    sha = git(r, "rev-parse", "HEAD")
+    events = inspect(r, {sha}, 0, str(keypair(tmp_path)[0]),
+                     push_attributions={sha: "other"}, integrator_identity="integrator")
+    assert any(e["identity_mismatch"] for e in events)
 
 
 def test_supervisor_flags_protected_path_change(tmp_path):
@@ -394,17 +401,29 @@ def test_supervisor_flags_protected_path_change(tmp_path):
     subprocess.run(["git", "init", str(r)], check=True, capture_output=True)
     git(r, "config", "user.name", "x")
     git(r, "config", "user.email", "x@y")
-    (r / "f").write_text("x")
+    (r / "f").write_text("base")
     git(r, "add", "f")
-    git(r, "commit", "-m", "protected")
-    (r / ".github/workflows").mkdir(parents=True)
-    (r / ".github/workflows/a.yml").write_text("x")
+    git(r, "commit", "-m", "base")
+    base_sha = git(r, "rev-parse", "HEAD")
+    (r / "critical").write_text("x")
     git(r, "add", ".")
-    git(r, "commit", "-m", "workflow")
+    git(r, "commit", "-m", "protected")
+    protected_sha = git(r, "rev-parse", "HEAD")
+    events = inspect(r, {protected_sha}, 0, str(keypair(tmp_path)[0]),
+                     protected_path_registry={"critical": "R3"})
     assert any(
-        e["workflow_change"]
-        for e in inspect(r, {git(r, "rev-parse", "HEAD")}, 0, str(keypair(tmp_path)[0]))
+        e["protected_path_unauthorized"] for e in events
     )
+    (r / "ordinary").write_text("y")
+    git(r, "add", ".")
+    git(r, "commit", "-m", "ordinary")
+    ordinary_sha = git(r, "rev-parse", "HEAD")
+    ordinary_events = inspect(r, {base_sha, protected_sha, ordinary_sha}, 0,
+                              str(keypair(tmp_path)[0]),
+                              protected_path_registry={"critical": "R3"})
+    assert not any(e["commit"] == ordinary_sha for e in ordinary_events)
+    assert not any(e["commit"] == ordinary_sha and e["protected_path_unauthorized"]
+                   for e in ordinary_events)
 
 
 def test_notifier_rejects_replay_expired_bad_signature_and_counter_gap(tmp_path):
@@ -427,7 +446,7 @@ def test_notifier_rejects_replay_expired_bad_signature_and_counter_gap(tmp_path)
     with pytest.raises(ValueError):
         consume(event, str(public), 0, "2028-01-01T00:00:00+00:00", sink)
     event["signature"] = "AA=="
-    with pytest.raises(Exception):
+    with pytest.raises((ValueError, subprocess.CalledProcessError)):
         consume(event, str(public), 0, "2026-01-01T00:00:00+00:00", sink)
 
 
@@ -439,17 +458,31 @@ def test_identity_attribution_hook_records_pusher_uid_and_rejects_unattributed_p
     log = tmp_path / "push.log"
     install_uid_hook(bare, log)
 
-    # Provider seam makes unattributed identity a fail-closed decision without pretending distinct uid.
-    class Provider:
-        def push_identity(self, ref, old, new):
-            return ""
+    work = tmp_path / "work"
+    subprocess.run(["git", "clone", str(bare), str(work)], check=True, capture_output=True)
+    git(work, "config", "user.name", "x")
+    git(work, "config", "user.email", "x@y")
+    (work / "f").write_text("x")
+    git(work, "add", "f")
+    git(work, "commit", "-m", "push")
+    git(work, "push", "origin", "HEAD:main")
+    assert log.read_text().split()[0] == str(os.getuid())
 
-    with pytest.raises(RuntimeError, match="unattributed"):
-        raise (
-            RuntimeError("unattributed push")
-            if not Provider().push_identity("refs/heads/main", "o", "n")
-            else AssertionError()
-        )
+    blocked = tmp_path / "blocked"
+    blocked.mkdir()
+    bad_bare = tmp_path / "bad.git"
+    subprocess.run(["git", "init", "--bare", str(bad_bare)], check=True, capture_output=True)
+    install_uid_hook(bad_bare, blocked)
+    bad_work = tmp_path / "bad-work"
+    subprocess.run(["git", "clone", str(bad_bare), str(bad_work)], check=True, capture_output=True)
+    git(bad_work, "config", "user.name", "x")
+    git(bad_work, "config", "user.email", "x@y")
+    (bad_work / "f").write_text("x")
+    git(bad_work, "add", "f")
+    git(bad_work, "commit", "-m", "reject")
+    rejected = subprocess.run(["git", "push", "origin", "HEAD:main"], check=False, cwd=bad_work,
+                              capture_output=True, text=True)
+    assert rejected.returncode != 0
 
 
 def _git_fixture(tmp_path):
@@ -474,43 +507,43 @@ def _git_fixture(tmp_path):
     git(r, "branch", "candidate", head)
     git(r, "reset", "--hard", base)
     private, public = keypair(tmp_path)
-    d = dict(
-        repo="r",
-        pr_number=1,
-        candidate_sha=head,
-        base_sha=base,
-        target_ref="refs/heads/main",
-        merge_method="merge-commit",
-        merge_result_tree_sha=tree,
-        risk_class="R2",
-        policy_id="p",
-        policy_sha256="h",
-        auditor_id="a",
-        auditor_key_id="k",
-        auditor_code_revision="rev",
-        checks_executed=[{"name": "unit", "evidence_sha256": "e"}],
-        verdict="APPROVE",
-        issued_at="2026-01-01T00:00:00+00:00",
-        expires_at="2026-01-02T00:00:00+00:00",
-    )
-    state = dict(
-        repo="r",
-        pr_number=1,
-        pr_head=head,
-        pr_head_current=head,
-        target_ref=d["target_ref"],
-        target_sha=base,
-        merge_tree_sha=tree,
-        policy_sha256="h",
-        trusted_keys={"k": str(public)},
-        trusted_auditor_revisions=["rev"],
-        required_checks=["unit"],
-        now="2026-01-01T01:00:00+00:00",
-        heartbeat_valid=True,
-        ra03_pass=True,
-        ra09_pass=True,
-        ledger={},
-    )
+    d = {
+        "repo": "r",
+        "pr_number": 1,
+        "candidate_sha": head,
+        "base_sha": base,
+        "target_ref": "refs/heads/main",
+        "merge_method": "merge-commit",
+        "merge_result_tree_sha": tree,
+        "risk_class": "R2",
+        "policy_id": "p",
+        "policy_sha256": "h",
+        "auditor_id": "a",
+        "auditor_key_id": "k",
+        "auditor_code_revision": "rev",
+        "checks_executed": [{"name": "unit", "evidence_sha256": "e"}],
+        "verdict": "APPROVE",
+        "issued_at": "2026-01-01T00:00:00+00:00",
+        "expires_at": "2026-01-02T00:00:00+00:00",
+    }
+    state = {
+        "repo": "r",
+        "pr_number": 1,
+        "pr_head": head,
+        "pr_head_current": head,
+        "target_ref": d["target_ref"],
+        "target_sha": base,
+        "merge_tree_sha": tree,
+        "policy_sha256": "h",
+        "trusted_keys": {"k": str(public)},
+        "trusted_auditor_revisions": ["rev"],
+        "required_checks": ["unit"],
+        "now": "2026-01-01T01:00:00+00:00",
+        "heartbeat_valid": True,
+        "ra03_pass": True,
+        "ra09_pass": True,
+        "ledger": {},
+    }
     return promote, r, bare, base, head, tree, d, state, sign(d, str(private))
 
 
@@ -583,7 +616,13 @@ def test_integrator_refuses_stale_supervisor_heartbeat(tmp_path):
 
 def test_integrator_post_publish_divergence_freezes(tmp_path):
     # Readback mismatch is an explicit fail-stop; simulate by replacing remote after successful CAS.
-    promote, r, _, _, _, _, d, s, sig = _git_fixture(tmp_path)
-    with pytest.raises(ValueError, match="untrusted or revoked key"):
-        promote(r, "origin", d, sig, {**s, "trusted_keys": {}})
-    # Post-publish divergence requires authenticated authorization fixture and remote hook; PENDING real-server case.
+    promote, r, bare, _, _, _, d, s, sig = _git_fixture(tmp_path)
+    def rewrite_remote():
+        path = subprocess.run(["git", "--git-dir", str(bare), "rev-parse", "refs/heads/main^"],
+                              check=True, capture_output=True, text=True).stdout.strip()
+        subprocess.run(["git", "--git-dir", str(bare), "update-ref", "refs/heads/main", path], check=True)
+    with pytest.raises(RuntimeError, match="post-publication divergence"):
+        promote(r, "origin", d, sig, s, after_push=rewrite_remote)
+    assert (r / ".aao-freeze").exists()
+    with pytest.raises(RuntimeError, match="frozen"):
+        promote(r, "origin", d, sig, s)
