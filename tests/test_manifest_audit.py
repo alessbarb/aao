@@ -390,3 +390,17 @@ def test_ledger_entry_signed_by_another_key_is_rejected(env):
     with (env["state"] / "ledger.jsonl").open("ab") as handle:
         handle.write(_canonical(entry) + b"\n")
     assert any("ledger is not trustworthy" in r for r in gate(env, path)[1])
+
+
+def test_provisional_and_custody_less_veto_write_a_report_but_record_nothing(env):
+    # SL-07: the contract distinguishes "report emitted" from "decision recorded in the ledger".
+    path, _ = manifest(env, attribute=False)
+    ledger = env["state"] / "ledger.jsonl"
+    report = audit(env, path)
+    assert report["verdict"] == "provisional"
+    assert (env["state"] / "run" / "report.json").is_file()
+    assert not (env["state"] / "run" / "report.sig").exists()
+    assert ledger.read_bytes() == b""  # nothing recorded for a provisional run
+    veto = audit(env, path, run="veto", veto_reason="unsafe")  # veto without resolved attribution = no custody
+    assert veto["verdict"] == "veto" and veto["custody_problems"]
+    assert ledger.read_bytes() == b""  # an unsigned veto is not a recorded decision
