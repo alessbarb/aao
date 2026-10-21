@@ -9,7 +9,7 @@ from pathlib import Path
 
 import pytest
 
-from aao.governance_ledger import append, verify
+from aao.governance_ledger import active_vetoes, append, verify
 from aao.integration_authorization import canonical, sign, validate
 from aao.notifier import FileSink, consume
 
@@ -153,17 +153,21 @@ def supervisor_inspect(repo, authorized, sequence, private, tmp_path, **kwargs):
                    capture_output=True)
     ledger = tmp_path / "supervisor-ledger.jsonl"
     ledger.unlink(missing_ok=True)
-    ledger_keys = {"supervisor": {"public_key": str(public), "can_authorize": True}}
+    authorizer_dir = tmp_path / "ledger-authorizer"
+    authorizer_dir.mkdir(exist_ok=True)
+    authorizer_private, authorizer_public = keypair(authorizer_dir)
+    ledger_keys = {"ledger-authorizer": {"public_key": str(authorizer_public), "can_authorize": True}}
     for sha in authorized:
         if not ledger.exists() or not any(json.loads(line).get("commit") == sha
                                           for line in ledger.read_text().splitlines()):
             append(ledger, {"type": "authorization", "commit": sha,
                             "risk_class": (kwargs.get("authorized_classes") or {}).get(sha, "R1")},
-                   "supervisor", private, ledger_keys)
+                   "ledger-authorizer", str(authorizer_private), ledger_keys)
     ledger.touch(exist_ok=True)
     return inspect(repo, authorized, sequence, private, key_id="supervisor",
                    state_path=tmp_path / "supervisor-sequence.json", ledger_path=ledger,
-                   trusted_keys=ledger_keys, now="2026-01-01T00:00:00+00:00", **kwargs)
+                   trusted_keys={**ledger_keys, "supervisor": str(public)},
+                   now="2026-01-01T00:00:00+00:00", **kwargs)
 
 
 def test_bare_remote_compare_and_swap_rejects_competing_main(tmp_path):
@@ -710,7 +714,18 @@ def _git_fixture(tmp_path):
     tree = git(r, "merge-tree", "--write-tree", base, head).splitlines()[0]
     git(r, "push", "origin", f"{head}:refs/heads/candidate")
     git(r, "reset", "--hard", base)
-    private, public = keypair(tmp_path)
+    auditor_dir = tmp_path / "auditor"
+    auditor_dir.mkdir()
+    auditor_private, auditor_public = keypair(auditor_dir)
+    supervisor_dir = tmp_path / "supervisor"
+    supervisor_dir.mkdir()
+    supervisor_private, supervisor_public = keypair(supervisor_dir)
+    integrator_dir = tmp_path / "integrator-key"
+    integrator_dir.mkdir()
+    integrator_private, _integrator_public = keypair(integrator_dir)
+    ledger_dir = tmp_path / "ledger-key"
+    ledger_dir.mkdir()
+    _ledger_private, ledger_public = keypair(ledger_dir)
     d = {"repo":"r", "pr_number":1, "candidate_sha":head, "base_sha":base,
          "target_ref":"refs/heads/main", "merge_method":"merge-commit", "merge_result_tree_sha":tree,
          "risk_class":"R2", "assurance_level":"A", "policy_id":"p", "policy_sha256":"h",
@@ -722,7 +737,7 @@ def _git_fixture(tmp_path):
          "prohibited_operations":[], "findings":[], "expediente_sha256":"expediente", "verdict":"APPROVE",
          "issued_at":"2026-01-01T00:00:00+00:00", "expires_at":"2026-01-02T00:00:00+00:00"}
     state = {"repo":"r", "pr_number":1, "pr_head":head, "target_ref":d["target_ref"], "target_sha":base,
-         "merge_tree_sha":tree, "policy_sha256":"h", "trusted_keys":{"k":str(public)},
+         "merge_tree_sha":tree, "policy_sha256":"h", "trusted_keys":{"k":str(auditor_public)},
          "trusted_auditors":{"a":["k"]}, "trusted_auditor_revisions":["rev"], "required_checks_by_risk_class":{"R2":["unit"]},
          "enabled_risk_classes":["R2"], "policy_id":"p", "attribution_resolved":True,
          "ci_candidate_sha":head, "protected_paths":{}, "changed_paths":[], "git_version":git(r,"--version").removeprefix("git version "), "auditor_models":{"a":"auditor-model"},
@@ -733,17 +748,21 @@ def _git_fixture(tmp_path):
     ledger=tmp_path/"ledger.jsonl"; ledger.touch(); anchor=tmp_path/"anchor"; heartbeat=tmp_path/"heartbeat.json"; freeze=tmp_path/"freeze"
     anchor.write_text("0"*64)
     from aao.governance_ledger import verify
-    anchor.write_text(verify(ledger, {"k":str(public)})[-1]["hash"] if ledger.exists() and ledger.stat().st_size else "0"*64)
-    hb=signed_heartbeat(1,"2026-01-01T00:00:00+00:00",str(private),key_id="supervisor",expires_at="2026-01-01T02:00:00+00:00")
+    anchor.write_text(verify(ledger, {"ledger":str(ledger_public)})[-1]["hash"] if ledger.exists() and ledger.stat().st_size else "0"*64)
+    hb=signed_heartbeat(1,"2026-01-01T00:00:00+00:00",str(supervisor_private),key_id="supervisor",expires_at="2026-01-01T02:00:00+00:00")
     heartbeat.write_text(json.dumps(hb))
-    registry={**state,"repo":"r","pr_number":1,"ledger_keys":{"k":{"public_key":str(public),"can_record_incidents":True}},"supervisor_key_id":"supervisor","supervisor_public_key":str(public),"heartbeat_max_age_seconds":3600,
+    registry={**state,"repo":"r","pr_number":1,"ledger_keys":{"ledger":{"public_key":str(ledger_public)}, "integrator":{"public_key":str(_integrator_public),"can_record_incidents":True}},"supervisor_key_id":"supervisor","supervisor_public_key":str(supervisor_public),"heartbeat_max_age_seconds":3600,
               "target_refs":["refs/heads/main"],"integrator_identity":"integrator","protected_paths":{},"ra_status":{"RA-01":"PASS","RA-02":"PASS","RA-03":"PASS","RA-07":"PASS","RA-09":"PASS"}}
-    registry["integrator_key_id"] = "k"
+    registry["integrator_key_id"] = "integrator"
+    # Expose local fixture-only signing paths so negative cases can re-sign the
+    # exact authorization/heartbeat after changing one field.
+    registry["test_auditor_private_key"] = str(auditor_private)
+    registry["test_supervisor_private_key"] = str(supervisor_private)
     registry["incident_resolvers"] = ["resolver"]
     registry["ledger_keys"]["resolver"] = {"public_key": str(resolver_public), "can_resolve_incidents": True}
     reg=tmp_path/"registry.json"; reg.write_text(json.dumps(registry))
     return promote, r, bare, base, head, tree, d, TrustSources(reg,ledger,anchor,heartbeat,freeze,
-        private), sign(d,str(private))
+        integrator_private), sign(d,str(auditor_private))
 
 
 def _integrator_identity(name="integrator"):
@@ -796,6 +815,191 @@ def test_integrator_blocks_on_active_veto_in_ledger(tmp_path):
     _assert_integrator_rejects_without_main_change(
         promote, repo, bare, auth, signature, sources, "active ledger veto"
     )
+
+
+def test_ledger_new_veto_with_reused_id_stays_active_after_old_revocation(tmp_path):
+    private, public = keypair(tmp_path)
+    keys = {"veto": {"public_key": str(public), "can_revoke": True}}
+    ledger = tmp_path / "reused-veto-id.jsonl"
+    old = append(ledger, {"type": "veto", "id": "reused"}, "veto", str(private), keys)
+    append(ledger, {"type": "revocation", "target": old["hash"]}, "veto", str(private), keys)
+    new = append(ledger, {"type": "veto", "id": "reused"}, "veto", str(private), keys)
+    assert new["hash"] in {row["hash"] for row in active_vetoes(verify(ledger, keys), keys)}
+
+
+def test_integrator_rejects_replayed_heartbeat_sequence(tmp_path):
+    from aao.integrator import _heartbeat
+    from aao.supervisor import signed_heartbeat
+    private, public = keypair(tmp_path)
+    heartbeat = tmp_path / "heartbeat.json"
+    heartbeat.with_suffix(".json.sequence").write_text("4")
+    heartbeat.write_text(json.dumps(signed_heartbeat(4, "2026-01-01T00:00:00+00:00",
+        str(private), key_id="supervisor", expires_at="2026-01-01T00:05:00+00:00")))
+    now = __import__("datetime").datetime(2026, 1, 1, 0, 1, tzinfo=__import__("datetime").timezone.utc)
+    assert not _heartbeat(heartbeat, {"supervisor_key_id": "supervisor",
+        "supervisor_public_key": str(public)}, now)
+
+
+def test_integrator_rejects_heartbeat_older_than_one_hour_even_if_registry_allows_more(tmp_path):
+    from aao.integrator import _heartbeat
+    from aao.supervisor import signed_heartbeat
+    private, public = keypair(tmp_path)
+    heartbeat = tmp_path / "heartbeat.json"
+    heartbeat.write_text(json.dumps(signed_heartbeat(1, "2026-01-01T00:00:00+00:00",
+        str(private), key_id="supervisor", expires_at="2026-01-01T03:00:00+00:00")))
+    now = __import__("datetime").datetime(2026, 1, 1, 1, 0, 1, tzinfo=__import__("datetime").timezone.utc)
+    assert not _heartbeat(heartbeat, {"supervisor_key_id": "supervisor",
+        "supervisor_public_key": str(public), "heartbeat_max_age_seconds": 7200}, now)
+
+
+def test_integrator_rejects_heartbeat_issued_in_the_future(tmp_path):
+    from aao.integrator import _heartbeat
+    from aao.supervisor import signed_heartbeat
+    private, public = keypair(tmp_path)
+    heartbeat = tmp_path / "heartbeat.json"
+    heartbeat.write_text(json.dumps(signed_heartbeat(1, "2026-01-01T00:02:00+00:00",
+        str(private), key_id="supervisor", expires_at="2026-01-01T01:00:00+00:00")))
+    now = __import__("datetime").datetime(2026, 1, 1, 0, 0, tzinfo=__import__("datetime").timezone.utc)
+    assert not _heartbeat(heartbeat, {"supervisor_key_id": "supervisor",
+        "supervisor_public_key": str(public)}, now)
+
+
+def test_integrator_rejects_pending_ra01_or_ra07(tmp_path):
+    for requirement in ("RA-01", "RA-07"):
+        case = tmp_path / requirement
+        case.mkdir()
+        promote, repo, bare, _base, _head, _tree, auth, sources, signature = _git_fixture(case)
+        registry = json.loads(sources.trust_registry.read_text())
+        registry["ra_status"][requirement] = "PENDING"
+        sources.trust_registry.write_text(json.dumps(registry))
+        _assert_integrator_rejects_without_main_change(
+            promote, repo, bare, auth, signature, sources, "required RA status pending")
+
+
+def test_authorization_rejects_protected_path_change_below_minimum_class(tmp_path):
+    private, _, doc, state, _signature = _auth_fixture(tmp_path)
+    protected = {"src/aao/policy.py": "R3"}
+    doc["protected_paths_sha256"] = hashlib.sha256(canonical([
+        {"path": path, "minimum_risk_class": minimum}
+        for path, minimum in sorted(protected.items())])).hexdigest()
+    signature = sign(doc, str(private))
+    state.update(protected_paths=protected, changed_paths=["src/aao/policy.py"])
+    assert "protected path risk class insufficient" in validate(doc, signature, state)
+
+
+def test_authorization_rejects_protected_paths_digest_mismatch(tmp_path):
+    _, _, doc, state, signature = _auth_fixture(tmp_path)
+    state["protected_paths"] = {"src/aao/policy.py": "R2"}
+    state["changed_paths"] = ["src/aao/policy.py"]
+    assert "protected paths digest mismatch" in validate(doc, signature, state)
+
+
+def test_ledger_rejects_authorization_row_from_key_without_can_authorize(tmp_path):
+    private, public = keypair(tmp_path)
+    ledger = tmp_path / "unauthorized-authorization.jsonl"
+    append(ledger, {"type": "authorization", "commit": "candidate"}, "writer",
+        str(private), {"writer": {"public_key": str(public)}})
+    with pytest.raises(ValueError, match="authorization signer"):
+        verify(ledger, {"writer": {"public_key": str(public)}})
+
+
+def test_supervisor_ignores_unverified_authorization_rows(tmp_path):
+    repo = tmp_path / "untrusted-auth-repo"
+    subprocess.run(["git", "init", str(repo)], check=True, capture_output=True)
+    git(repo, "config", "user.name", "test")
+    git(repo, "config", "user.email", "test@example.invalid")
+    (repo / "f").write_text("unauthorized\n")
+    git(repo, "add", "f"); git(repo, "commit", "-m", "unauthorized")
+    sha = git(repo, "rev-parse", "HEAD")
+    private, public = keypair(tmp_path)
+    ledger = tmp_path / "untrusted-auth-ledger.jsonl"
+    keys = {"writer": {"public_key": str(public)}}
+    append(ledger, {"type": "authorization", "commit": sha}, "writer", str(private), keys)
+    with pytest.raises(ValueError, match="authorization signer"):
+        from aao.supervisor import inspect
+        inspect(repo, {sha}, 0, str(private), key_id="supervisor",
+            state_path=tmp_path / "untrusted-sequence.json", ledger_path=ledger,
+            trusted_keys=keys, now="2026-01-01T00:00:00+00:00")
+
+
+def test_integrator_blocks_when_remote_candidate_head_moves(tmp_path):
+    promote, repo, bare, _base, head, _tree, auth, sources, signature = _git_fixture(tmp_path)
+    rival = tmp_path / "candidate-rival"
+    subprocess.run(["git", "clone", str(bare), str(rival)], check=True, capture_output=True)
+    git(rival, "fetch", "origin", "candidate")
+    git(rival, "checkout", "-B", "candidate", "FETCH_HEAD")
+    git(rival, "config", "user.name", "rival")
+    git(rival, "config", "user.email", "rival@example.invalid")
+    (rival / "f").write_text("moved candidate\n")
+    git(rival, "commit", "-am", "move candidate")
+    git(rival, "push", "--force", "origin", "candidate")
+    git(repo, "fetch", "origin", "candidate")
+    assert git(rival, "rev-parse", "HEAD") != head
+    _assert_integrator_rejects_without_main_change(
+        promote, repo, bare, auth, signature, sources, "PR head mismatch")
+
+
+def test_authorization_rejects_git_version_mismatch(tmp_path):
+    private, _, doc, state, _signature = _auth_fixture(tmp_path)
+    doc["git_version"] = "git version not-the-runtime"
+    signature = sign(doc, str(private))
+    assert "git version mismatch" in validate(doc, signature, state)
+
+
+def test_authorization_rejects_open_critical_finding_or_empty_expediente(tmp_path):
+    private, _, doc, state, _signature = _auth_fixture(tmp_path)
+    doc["findings"] = [{"severity": "CRITICAL", "disposition": "OPEN"}]
+    signature = sign(doc, str(private))
+    assert "open critical finding" in validate(doc, signature, state)
+    doc["findings"] = []
+    doc["expediente_sha256"] = ""
+    signature = sign(doc, str(private))
+    assert "expediente digest missing" in validate(doc, signature, state)
+
+
+def test_integrator_freezes_when_published_parents_differ(tmp_path):
+    promote, repo, bare, _base, _head, tree, auth, sources, signature = _git_fixture(tmp_path)
+    assert git(repo, "show", "-s", "--format=%T", auth["candidate_sha"]) == tree
+    def replace_published_merge_with_candidate():
+        git(repo, "push", "--force", "origin", f"{auth['candidate_sha']}:refs/heads/main")
+    with pytest.raises(RuntimeError, match="post-publication incident"):
+        promote(repo, "origin", auth, signature, sources,
+            identity_provider=_integrator_identity(), after_push=replace_published_merge_with_candidate,
+            now=lambda: __import__("datetime").datetime(2026, 1, 1, 1,
+                tzinfo=__import__("datetime").timezone.utc))
+    assert sources.freeze.exists()
+    assert _remote_main(bare) == auth["candidate_sha"]
+
+
+def test_ledger_verify_fails_on_edited_intermediate_entry(tmp_path):
+    private, public = keypair(tmp_path)
+    ledger = tmp_path / "edited-intermediate.jsonl"
+    append(ledger, {"type": "note", "detail": "original"}, "key", str(private), {"key": str(public)})
+    append(ledger, {"type": "note", "detail": "later"}, "key", str(private), {"key": str(public)})
+    rows = ledger.read_text().splitlines()
+    first = json.loads(rows[0]); first["detail"] = "edited"
+    rows[0] = canonical(first).decode()
+    ledger.write_text("\n".join(rows) + "\n")
+    with pytest.raises(ValueError, match="edited"):
+        verify(ledger, {"key": str(public)})
+
+
+def test_authorization_rejects_auditor_with_same_model_as_author_for_r2(tmp_path):
+    _, _, doc, state, signature = _auth_fixture(tmp_path)
+    state["auditor_models"]["auditor"] = state["author_models"]["author"]
+    assert "auditor model matches author model" in validate(doc, signature, state)
+
+
+def test_supervisor_flags_merge_pushed_by_non_integrator_identity(tmp_path):
+    repo = tmp_path / "wrong-pusher"
+    subprocess.run(["git", "init", str(repo)], check=True, capture_output=True)
+    git(repo, "config", "user.name", "test"); git(repo, "config", "user.email", "test@example.invalid")
+    (repo / "f").write_text("merge\n")
+    git(repo, "add", "f"); git(repo, "commit", "-m", "merge")
+    sha = git(repo, "rev-parse", "HEAD")
+    events = supervisor_inspect(repo, {sha}, 0, str(keypair(tmp_path)[0]), tmp_path,
+        push_attributions={sha: "other"}, integrator_identity="integrator")
+    assert any(event["commit"] == sha and event["identity_mismatch"] for event in events)
 
 
 def test_integrator_blocks_on_heartbeat_with_invalid_signature(tmp_path):
@@ -940,7 +1144,7 @@ def test_integrator_refuses_stale_supervisor_heartbeat(tmp_path):
     expired = signed_heartbeat(
         1,
         "2026-01-01T00:00:00+00:00",
-        str(tmp_path / "key.pem"),
+        json.loads(sources.trust_registry.read_text())["test_supervisor_private_key"],
         key_id="supervisor",
         expires_at="2026-01-01T00:30:00+00:00",
     )
@@ -966,7 +1170,7 @@ def test_integrator_refuses_stale_supervisor_heartbeat(tmp_path):
 def test_integrator_rejects_stale_base(tmp_path):
     promote, repo, _bare, _base, _head, _tree, auth, sources, _signature = _git_fixture(tmp_path)
     auth["base_sha"] = "stale-base"
-    signature = sign(auth, str(tmp_path / "key.pem"))
+    signature = sign(auth, json.loads(sources.trust_registry.read_text())["test_auditor_private_key"])
     identity = type("Identity", (), {
         "__call__": lambda self: "integrator",
         "push_identity": lambda self, *args: True,
@@ -988,7 +1192,7 @@ def test_integrator_rejects_stale_base(tmp_path):
 def test_integrator_rejects_tree_mismatch(tmp_path):
     promote, repo, _bare, _base, _head, _tree, auth, sources, _signature = _git_fixture(tmp_path)
     auth["merge_result_tree_sha"] = "wrong-tree"
-    signature = sign(auth, str(tmp_path / "key.pem"))
+    signature = sign(auth, json.loads(sources.trust_registry.read_text())["test_auditor_private_key"])
     identity = type("Identity", (), {
         "__call__": lambda self: "integrator",
         "push_identity": lambda self, *args: True,
