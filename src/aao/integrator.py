@@ -16,6 +16,8 @@ def promote(
     signature: str,
     snapshot: dict[str, Any],
     message: str = "Governed integration",
+    before_push=None,
+    identity_provider=None,
 ) -> str:
     if Path(repo / ".aao-freeze").exists():
         raise RuntimeError("integrator frozen")
@@ -53,6 +55,12 @@ def promote(
         capture_output=True,
         text=True,
     ).stdout.strip()
+    if identity_provider is not None and not identity_provider.push_identity(
+        "refs/heads/main", base, commit
+    ):
+        raise RuntimeError("unattributed push")
+    if before_push is not None:
+        before_push()
     result = subprocess.run(
         [
             "git",

@@ -60,6 +60,8 @@ def consume(
         )
     if event["sequence"] <= last_sequence:
         raise ValueError("replayed event")
+    if event["sequence"] != last_sequence + 1:
+        raise ValueError("event sequence gap")
     if datetime.fromisoformat(event["expires_at"].replace("Z", "+00:00")) <= datetime.fromisoformat(  # noqa: FURB162
         now.replace("Z", "+00:00")  # noqa: FURB162
     ):
