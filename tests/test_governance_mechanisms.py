@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import base64
+import json
 import os
 import subprocess
 from pathlib import Path
@@ -144,6 +145,26 @@ def git(path, *args, input_text=None):
     ).stdout.strip()
 
 
+def supervisor_inspect(repo, authorized, sequence, private, tmp_path, **kwargs):
+    from aao.supervisor import inspect
+    public = tmp_path / "supervisor-public.pem"
+    subprocess.run(["openssl", "pkey", "-in", private, "-pubout", "-out", str(public)], check=True,
+                   capture_output=True)
+    ledger = tmp_path / "supervisor-ledger.jsonl"
+    ledger.unlink(missing_ok=True)
+    ledger_keys = {"supervisor": str(public)}
+    for sha in authorized:
+        if not ledger.exists() or not any(json.loads(line).get("commit") == sha
+                                          for line in ledger.read_text().splitlines()):
+            append(ledger, {"type": "authorization", "commit": sha,
+                            "risk_class": (kwargs.get("authorized_classes") or {}).get(sha, "R1")},
+                   "supervisor", private, ledger_keys)
+    ledger.touch(exist_ok=True)
+    return inspect(repo, authorized, sequence, private, key_id="supervisor",
+                   state_path=tmp_path / "supervisor-sequence.json", ledger_path=ledger,
+                   trusted_keys=ledger_keys, now="2026-01-01T00:00:00+00:00", **kwargs)
+
+
 def test_bare_remote_compare_and_swap_rejects_competing_main(tmp_path):
     bare = tmp_path / "remote.git"
     subprocess.run(["git", "init", "--bare", str(bare)], check=True, capture_output=True)
@@ -187,8 +208,6 @@ def test_bare_remote_compare_and_swap_rejects_competing_main(tmp_path):
 
 
 def test_supervisor_flags_direct_push_and_workflow_change(tmp_path):
-    from aao.supervisor import inspect
-
     repo = tmp_path / "repo"
     subprocess.run(["git", "init", str(repo)], check=True, capture_output=True)
     git(repo, "config", "user.name", "direct pusher")
@@ -200,7 +219,7 @@ def test_supervisor_flags_direct_push_and_workflow_change(tmp_path):
     (repo / ".github/workflows/ci.yml").write_text("name: ci\n")
     git(repo, "add", ".")
     git(repo, "commit", "-m", "unapproved workflow")
-    events = inspect(repo, set(), 0, str(keypair(tmp_path)[0]))
+    events = supervisor_inspect(repo, set(), 0, str(keypair(tmp_path)[0]), tmp_path)
     assert events
     assert any(e["unauthorized"] and e["workflow_change"] for e in events)
 
@@ -438,8 +457,6 @@ def test_ledger_rejects_entry_signed_by_unknown_key(tmp_path):
 
 
 def test_supervisor_matches_main_history_against_ledger_authorizations(tmp_path):
-    from aao.supervisor import inspect
-
     r = tmp_path / "r"
     subprocess.run(["git", "init", str(r)], check=True, capture_output=True)
     git(r, "config", "user.name", "x")
@@ -453,14 +470,13 @@ def test_supervisor_matches_main_history_against_ledger_authorizations(tmp_path)
     (r / "f").write_text("direct")
     git(r, "commit", "-am", "direct push")
     direct = git(r, "rev-parse", "HEAD")
-    events = inspect(r, set(authorized), 0, str(keypair(tmp_path)[0]))
+    events = supervisor_inspect(r, set(authorized), 0, str(keypair(tmp_path)[0]), tmp_path)
     assert all(not x["unauthorized"] for x in events if x["commit"] in authorized)
     assert any(x["commit"] == direct and x["unauthorized"] for x in events)
 
 
 def test_supervisor_flags_merge_not_made_by_integrator_identity(tmp_path):
     # Supervisor reports unauthorized merge ancestry as a commit lacking an authorization.
-    from aao.supervisor import inspect
 
     r = tmp_path / "r"
     subprocess.run(["git", "init", str(r)], check=True, capture_output=True)
@@ -470,14 +486,12 @@ def test_supervisor_flags_merge_not_made_by_integrator_identity(tmp_path):
     git(r, "add", "f")
     git(r, "commit", "-m", "direct merge-like commit")
     sha = git(r, "rev-parse", "HEAD")
-    events = inspect(r, {sha}, 0, str(keypair(tmp_path)[0]),
-                     push_attributions={sha: "other"}, integrator_identity="integrator")
+    events = supervisor_inspect(r, {sha}, 0, str(keypair(tmp_path)[0]), tmp_path,
+                                push_attributions={sha: "other"}, integrator_identity="integrator")
     assert any(e["identity_mismatch"] for e in events)
 
 
 def test_supervisor_flags_protected_path_change(tmp_path):
-    from aao.supervisor import inspect
-
     r = tmp_path / "r"
     subprocess.run(["git", "init", str(r)], check=True, capture_output=True)
     git(r, "config", "user.name", "x")
@@ -490,8 +504,8 @@ def test_supervisor_flags_protected_path_change(tmp_path):
     git(r, "add", ".")
     git(r, "commit", "-m", "protected")
     protected_sha = git(r, "rev-parse", "HEAD")
-    events = inspect(r, {protected_sha}, 0, str(keypair(tmp_path)[0]),
-                     protected_path_registry={"critical": "R3"})
+    events = supervisor_inspect(r, {protected_sha}, 0, str(keypair(tmp_path)[0]), tmp_path,
+                                protected_path_registry={"critical": "R3"})
     assert any(
         e["protected_path_unauthorized"] for e in events
     )
@@ -499,12 +513,70 @@ def test_supervisor_flags_protected_path_change(tmp_path):
     git(r, "add", ".")
     git(r, "commit", "-m", "ordinary")
     ordinary_sha = git(r, "rev-parse", "HEAD")
-    ordinary_events = inspect(r, {base_sha, protected_sha, ordinary_sha}, 0,
-                              str(keypair(tmp_path)[0]),
-                              protected_path_registry={"critical": "R3"})
+    ordinary_events = supervisor_inspect(r, {base_sha, protected_sha, ordinary_sha}, 0,
+                                         str(keypair(tmp_path)[0]), tmp_path,
+                                         protected_path_registry={"critical": "R3"})
     assert not any(e["commit"] == ordinary_sha for e in ordinary_events)
     assert not any(e["commit"] == ordinary_sha and e["protected_path_unauthorized"]
                    for e in ordinary_events)
+
+
+def test_supervisor_signs_events_and_heartbeat_for_notifier(tmp_path):
+    from aao.supervisor import inspect, signed_heartbeat
+
+    repo = tmp_path / "signed-repo"
+    subprocess.run(["git", "init", str(repo)], check=True, capture_output=True)
+    git(repo, "config", "user.name", "test")
+    git(repo, "config", "user.email", "test@example.invalid")
+    (repo / "f").write_text("x")
+    git(repo, "add", "f")
+    git(repo, "commit", "-m", "initial")
+    (repo / "f").write_text("unapproved")
+    git(repo, "commit", "-am", "unapproved")
+    private, public = keypair(tmp_path)
+    ledger = tmp_path / "ledger.jsonl"
+    append(ledger, {"type": "authorization", "commit": git(repo, "rev-parse", "HEAD")},
+           "k", str(private), {"k": str(public)})
+    events = inspect(repo, set(), 0, str(private), key_id="k", state_path=tmp_path / "seq.json",
+                     ledger_path=ledger, trusted_keys={"k": str(public)}, now="2026-01-01T00:00:00+00:00")
+    heartbeat = signed_heartbeat(2, "2026-01-01T00:00:00+00:00", str(private), key_id="k",
+                                 expires_at="2026-01-01T00:05:00+00:00")
+    sink = FileSink(tmp_path / "sink.jsonl")
+    consume(events[0], {"k": str(public)}, tmp_path / "notify.json", "2026-01-01T00:00:01+00:00", sink)
+    consume(heartbeat, {"k": str(public)}, tmp_path / "notify.json", "2026-01-01T00:00:01+00:00", sink)
+    assert len((tmp_path / "sink.jsonl").read_text().splitlines()) == 2
+
+
+def test_supervisor_detects_protected_change_in_real_merge_using_minimum_class(tmp_path):
+    from aao.supervisor import inspect
+
+    repo = tmp_path / "merge-repo"
+    subprocess.run(["git", "init", "--bare", str(repo)], check=True, capture_output=True)
+    work = tmp_path / "merge-work"
+    subprocess.run(["git", "clone", str(repo), str(work)], check=True, capture_output=True)
+    git(work, "config", "user.name", "test")
+    git(work, "config", "user.email", "test@example.invalid")
+    (work / "base").write_text("base")
+    git(work, "add", ".")
+    git(work, "commit", "-m", "base")
+    git(work, "branch", "-M", "main")
+    git(work, "checkout", "-b", "feature")
+    (work / ".github/workflows").mkdir(parents=True)
+    (work / ".github/workflows/ci.yml").write_text("name: CI")
+    git(work, "add", ".")
+    git(work, "commit", "-m", "workflow")
+    git(work, "checkout", "main")
+    git(work, "merge", "--no-ff", "feature", "-m", "promotion")
+    merge = git(work, "rev-parse", "HEAD")
+    private, public = keypair(tmp_path)
+    ledger = tmp_path / "merge-ledger"
+    append(ledger, {"type": "authorization", "commit": merge, "risk_class": "R1"},
+           "k", str(private), {"k": str(public)})
+    events = inspect(work, {merge}, 0, str(private), key_id="k", state_path=tmp_path / "merge-seq",
+                     ledger_path=ledger, trusted_keys={"k": str(public)},
+                     protected_path_registry={".github/workflows/": "R2"},
+                     now="2026-01-01T00:00:00+00:00")
+    assert any(e["commit"] == merge and e["protected_path_unauthorized"] for e in events)
 
 
 def test_notifier_rejects_replay_expired_bad_signature_and_counter_gap(tmp_path):
