@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import base64
+import json
+import os
 import subprocess
 from datetime import datetime
 from pathlib import Path
@@ -31,11 +33,18 @@ class GitHubIssueSink:
         raise RuntimeError("GitHub sink requires P2 authorization")
 
 
-def consume(
-    event: dict[str, Any], public_key: str, last_sequence: int, now: str, sink: Sink
-) -> int:
+def consume(event: dict[str, Any], trusted_keys: dict[str, str], state_path: Path,
+           now: str, sink: Sink) -> int:
     import tempfile
 
+    if not isinstance(trusted_keys, dict) or not trusted_keys:
+        raise ValueError("trusted key registry is required")
+    key_id = event.get("key_id")
+    public_key = trusted_keys.get(key_id)
+    if not public_key:
+        raise ValueError("unknown signing key")
+    state = json.loads(state_path.read_text()) if state_path.exists() else {}
+    last_sequence = int(state.get(key_id, 0))
     payload = {k: v for k, v in event.items() if k != "signature"}
     with tempfile.TemporaryDirectory() as d:
         sig, msg = Path(d) / "sig", Path(d) / "msg"
@@ -66,5 +75,10 @@ def consume(
         now.replace("Z", "+00:00")  # noqa: FURB162
     ):
         raise ValueError("expired event")
-    sink.publish(payload)
+    sink.publish(dict(event))
+    state[key_id] = event["sequence"]
+    state_path.parent.mkdir(parents=True, exist_ok=True)
+    temporary = state_path.with_name(state_path.name + ".tmp")
+    temporary.write_text(json.dumps(state, sort_keys=True))
+    os.replace(temporary, state_path)
     return event["sequence"]

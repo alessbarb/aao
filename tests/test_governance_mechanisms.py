@@ -101,8 +101,8 @@ def test_authorization_fail_closed_and_signature(tmp_path):
 def test_ledger_signatures_chain_and_edit_detection(tmp_path):
     private, public = keypair(tmp_path)
     file = tmp_path / "ledger.jsonl"
-    append(file, {"type": "veto", "id": "v1"}, "k", str(private))
-    append(file, {"type": "clear"}, "k", str(private))
+    append(file, {"type": "veto", "id": "v1"}, "k", str(private), {"k": str(public)})
+    append(file, {"type": "clear"}, "k", str(private), {"k": str(public)})
     assert len(verify(file, {"k": str(public)})) == 2
     expected_head = verify(file, {"k": str(public)})[-1]["hash"]
     lines = file.read_bytes().splitlines()
@@ -113,7 +113,7 @@ def test_ledger_signatures_chain_and_edit_detection(tmp_path):
 
 def test_notifier_replay_expiry_and_signature(tmp_path):
     private, public = keypair(tmp_path)
-    event = {"sequence": 2, "type": "alert", "expires_at": "2027-01-01T00:00:00+00:00"}
+    event = {"sequence": 1, "key_id": "k", "type": "alert", "expires_at": "2027-01-01T00:00:00+00:00"}
     with __import__("tempfile").TemporaryDirectory() as d:
         msg = Path(d) / "m"
         msg.write_bytes(canonical(event))
@@ -124,14 +124,14 @@ def test_notifier_replay_expiry_and_signature(tmp_path):
         ).stdout
     event["signature"] = base64.b64encode(sig).decode()
     sink = FileSink(tmp_path / "out")
-    assert consume(event, str(public), 1, "2026-01-01T00:00:00+00:00", sink) == 2
+    assert consume(event, {"k": str(public)}, tmp_path / "state.json", "2026-01-01T00:00:00+00:00", sink) == 1
     with pytest.raises(ValueError):
-        consume(event, str(public), 2, "2026-01-01T00:00:00+00:00", sink)
+        consume(event, {"k": str(public)}, tmp_path / "state.json", "2026-01-01T00:00:00+00:00", sink)
     with pytest.raises(ValueError):
-        consume(event, str(public), 0, "2028-01-01T00:00:00+00:00", sink)
+        consume(event, {"k": str(public)}, tmp_path / "expired-state.json", "2028-01-01T00:00:00+00:00", sink)
     event["signature"] = "AA=="
     with pytest.raises(subprocess.CalledProcessError):
-        consume(event, str(public), 0, "2026-01-01T00:00:00+00:00", sink)
+        consume(event, {"k": str(public)}, tmp_path / "bad-state.json", "2026-01-01T00:00:00+00:00", sink)
 
 
 def git(path, *args, input_text=None):
@@ -417,8 +417,8 @@ def test_authorization_rejects_other_repo_or_pr(tmp_path):
 def test_ledger_detects_edit_reorder_and_truncation_with_external_anchor(tmp_path):
     private, public = keypair(tmp_path)
     f = tmp_path / "ledger"
-    append(f, {"type": "a"}, "k", str(private))
-    append(f, {"type": "b"}, "k", str(private))
+    append(f, {"type": "a"}, "k", str(private), {"k": str(public)})
+    append(f, {"type": "b"}, "k", str(private), {"k": str(public)})
     head = verify(f, {"k": str(public)})[-1]["hash"]
     lines = f.read_bytes().splitlines()
     f.write_bytes(lines[1] + b"\n" + lines[0] + b"\n")
@@ -432,9 +432,9 @@ def test_ledger_detects_edit_reorder_and_truncation_with_external_anchor(tmp_pat
 def test_ledger_rejects_entry_signed_by_unknown_key(tmp_path):
     private, _ = keypair(tmp_path)
     f = tmp_path / "ledger"
-    append(f, {"type": "a"}, "unknown", str(private))
+    append(f, {"type": "a"}, "unknown", str(private), {"unknown": "missing.pub"})
     with pytest.raises(ValueError):
-        verify(f, {}) if False else verify(f, {"known": "missing.pub"})
+        verify(f, {"known": "missing.pub"})
 
 
 def test_supervisor_matches_main_history_against_ledger_authorizations(tmp_path):
@@ -509,7 +509,7 @@ def test_supervisor_flags_protected_path_change(tmp_path):
 
 def test_notifier_rejects_replay_expired_bad_signature_and_counter_gap(tmp_path):
     private, public = keypair(tmp_path)
-    event = {"sequence": 3, "type": "alert", "expires_at": "2027-01-01T00:00:00+00:00"}
+    event = {"sequence": 2, "key_id": "k", "type": "alert", "expires_at": "2027-01-01T00:00:00+00:00"}
     with __import__("tempfile").TemporaryDirectory() as d:
         m = Path(d) / "m"
         m.write_bytes(canonical(event))
@@ -521,14 +521,14 @@ def test_notifier_rejects_replay_expired_bad_signature_and_counter_gap(tmp_path)
     event["signature"] = base64.b64encode(sig).decode()
     sink = FileSink(tmp_path / "out")
     with pytest.raises(ValueError):
-        consume(event, str(public), 1, "2026-01-01T00:00:00+00:00", sink)
+        consume(event, {"k": str(public)}, tmp_path / "state.json", "2026-01-01T00:00:00+00:00", sink)
     with pytest.raises(ValueError):
-        consume(event, str(public), 3, "2026-01-01T00:00:00+00:00", sink)
+        consume(event, {"k": str(public)}, tmp_path / "notifier-gap.json", "2026-01-01T00:00:00+00:00", sink)
     with pytest.raises(ValueError):
-        consume(event, str(public), 0, "2028-01-01T00:00:00+00:00", sink)
+        consume(event, {"k": str(public)}, tmp_path / "expired-state.json", "2028-01-01T00:00:00+00:00", sink)
     event["signature"] = "AA=="
     with pytest.raises((ValueError, subprocess.CalledProcessError)):
-        consume(event, str(public), 0, "2026-01-01T00:00:00+00:00", sink)
+        consume(event, {"k": str(public)}, tmp_path / "bad-state.json", "2026-01-01T00:00:00+00:00", sink)
 
 
 def test_identity_attribution_hook_records_pusher_uid_and_rejects_unattributed_push(tmp_path):
@@ -716,3 +716,54 @@ def test_integrator_post_publish_divergence_freezes(tmp_path):
     assert (r / ".aao-freeze").exists()
     with pytest.raises(RuntimeError, match="frozen"):
         promote(r, "origin", d, sig, s)
+
+# Regression coverage for the signed ledger and persistent notifier boundary.
+def test_ledger_requires_trust_and_append_verifies_existing_chain(tmp_path):
+    private, public = keypair(tmp_path)
+    f = tmp_path / "trusted-ledger"
+    first = append(f, {"type": "veto", "id": "v1"}, "k", str(private), {"k": str(public)})
+    with pytest.raises(ValueError):
+        verify(f, {})
+    with pytest.raises(ValueError):
+        append(f, {"type": "clear"}, "k", str(private), {"k": str(public)}, expected_head="0" * 64)
+    assert verify(f, {"k": str(public)}, expected_head=first["hash"])[0]["id"] == "v1"
+
+
+def test_ledger_revocation_requires_enabled_authority_and_exact_veto_reference(tmp_path):
+    private, public = keypair(tmp_path)
+    f = tmp_path / "revocations"
+    append(f, {"type": "veto", "id": "v1"}, "k", str(private), {"k": str(public)})
+    with pytest.raises(ValueError, match="revocation"):
+        append(f, {"type": "revocation", "target": "v1"}, "k", str(private), {"k": str(public)})
+
+
+def _signed_event(private, key_id, sequence, **fields):
+    event = {"sequence": sequence, "key_id": key_id, **fields}
+    with __import__("tempfile").TemporaryDirectory() as d:
+        msg = Path(d) / "msg"
+        msg.write_bytes(canonical(event))
+        signature = subprocess.run(["openssl", "pkeyutl", "-sign", "-rawin", "-inkey", str(private), "-in", str(msg)], check=True, capture_output=True).stdout
+    event["signature"] = base64.b64encode(signature).decode()
+    return event
+
+
+def test_notifier_persists_sequences_across_restart_and_publishes_signature(tmp_path):
+    private, public = keypair(tmp_path)
+    state = tmp_path / "notifier-state.json"
+    sink = FileSink(tmp_path / "events")
+    event = _signed_event(private, "issuer", 1, type="alert", expires_at="2027-01-01T00:00:00+00:00")
+    consume(event, {"issuer": str(public)}, state, "2026-01-01T00:00:00+00:00", sink)
+    assert '"signature"' in (tmp_path / "events").read_text()
+    with pytest.raises(ValueError):
+        consume(event, {"issuer": str(public)}, state, "2026-01-01T00:00:00+00:00", sink)
+
+
+def test_notifier_rejects_unknown_key_and_control_field_collision(tmp_path):
+    private, public = keypair(tmp_path)
+    state = tmp_path / "state.json"
+    sink = FileSink(tmp_path / "events")
+    event = _signed_event(private, "unknown", 1, type="alert", expires_at="2027-01-01T00:00:00+00:00")
+    with pytest.raises(ValueError):
+        consume(event, {"issuer": str(public)}, state, "2026-01-01T00:00:00+00:00", sink)
+    with pytest.raises(ValueError, match="control"):
+        append(tmp_path / "collision", {"sequence": 9}, "issuer", str(private), {"issuer": str(public)})

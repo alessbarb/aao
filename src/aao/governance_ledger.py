@@ -42,8 +42,21 @@ def _verify(entry: dict[str, Any], public_key: str) -> bool:
         )
 
 
-def append(path: Path, payload: dict[str, Any], key_id: str, private_key: str) -> dict[str, Any]:
-    rows = verify(path, {}) if path.exists() else []
+def append(path: Path, payload: dict[str, Any], key_id: str, private_key: str,
+           trusted_keys: dict[str, Any], expected_head: str | None = None) -> dict[str, Any]:
+    rows = verify(path, trusted_keys, expected_head) if path.exists() else []
+    controls = {"sequence", "previous_hash", "key_id", "signature", "hash"}
+    if controls.intersection(payload):
+        raise ValueError("payload collides with ledger control fields")
+    if key_id not in trusted_keys:
+        raise ValueError("ledger signing key is not trusted")
+    if payload.get("type") == "revocation":
+        authority = trusted_keys[key_id]
+        if not isinstance(authority, dict) or not authority.get("can_revoke"):
+            raise ValueError("revocation signer is not an enabled authority")
+        target = payload.get("target")
+        if not target or not any(r.get("type") == "veto" and r.get("id") == target for r in rows):
+            raise ValueError("revocation must reference an exact existing veto")
     entry = {
         "sequence": len(rows) + 1,
         "previous_hash": rows[-1]["hash"] if rows else "0" * 64,
@@ -70,6 +83,8 @@ def append(path: Path, payload: dict[str, Any], key_id: str, private_key: str) -
 def verify(
     path: Path, trusted_keys: dict[str, str], expected_head: str | None = None
 ) -> list[dict[str, Any]]:
+    if not trusted_keys:
+        raise ValueError("non-empty trusted key registry is required")
     rows = []
     previous = "0" * 64
     for number, line in enumerate(path.read_bytes().splitlines(), 1):
@@ -79,9 +94,15 @@ def verify(
             raise ValueError("ledger reordered/truncated/chain mismatch")
         if digest != hashlib.sha256(canonical(e)).hexdigest():
             raise ValueError("ledger edited")
-        key = trusted_keys.get(e.get("key_id"))
-        if trusted_keys and (not key or not _verify(e, key)):
+        key_entry = trusted_keys.get(e.get("key_id"))
+        key = key_entry.get("public_key") if isinstance(key_entry, dict) else key_entry
+        if not key or not _verify(e, key):
             raise ValueError("ledger signature invalid or key unknown")
+        if e.get("type") == "revocation":
+            if not isinstance(key_entry, dict) or not key_entry.get("can_revoke"):
+                raise ValueError("revocation signer is not an enabled authority")
+            if not e.get("target") or not any(r.get("type") == "veto" and r.get("id") == e["target"] for r in rows):
+                raise ValueError("revocation must reference an exact existing veto")
         e["hash"] = digest
         previous = digest
         rows.append(e)
@@ -90,6 +111,23 @@ def verify(
     return rows
 
 
-def active_vetoes(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
-    revoked = {r.get("target") for r in rows if r.get("type") == "revocation"}
+def active_vetoes(rows: list[dict[str, Any]], trusted_keys: dict[str, Any]) -> list[dict[str, Any]]:
+    if not trusted_keys:
+        raise ValueError("non-empty trusted key registry is required")
+    veto_ids = {r.get("id") for r in rows if r.get("type") == "veto"}
+    revoked = set()
+    for row in rows:
+        if row.get("type") != "revocation":
+            continue
+        key_entry = trusted_keys.get(row.get("key_id"))
+        key = key_entry.get("public_key") if isinstance(key_entry, dict) else key_entry
+        if (
+            not key
+            or not _verify(row, key)
+            or not isinstance(key_entry, dict)
+            or not key_entry.get("can_revoke")
+            or row.get("target") not in veto_ids
+        ):
+            continue
+        revoked.add(row["target"])
     return [r for r in rows if r.get("type") == "veto" and r.get("id") not in revoked]
