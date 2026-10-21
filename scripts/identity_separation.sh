@@ -7,6 +7,10 @@
 #   --revert    non-destructive rollback (root only): remove the sudoers rule
 #               and lock the role accounts. Keys, ledgers and the trust
 #               registry are kept so no evidence is lost.
+#   --purge     full rollback to the pre-install state (root only): archive
+#               all managed data to /root/aao-identity-archive-<ts>.tar.gz,
+#               then remove the sudoers rule, role accounts, their groups
+#               and managed directories.
 #
 # Fail closed: if an existing aao-* account or file does not match the
 # expected state (shell, home, supplementary groups, foreign sudoers rules),
@@ -22,7 +26,7 @@ set -euo pipefail
 
 CEO_USER="${CEO_USER:-alessbarb}"
 MODE="${1:-dry-run}"
-case "$MODE" in dry-run|--apply|--revert) ;; *) echo "usage: $0 [--apply|--revert]" >&2; exit 2;; esac
+case "$MODE" in dry-run|--apply|--revert|--purge) ;; *) echo "usage: $0 [--apply|--revert|--purge]" >&2; exit 2;; esac
 APPLY=0; [[ "$MODE" == --apply ]] && APPLY=1
 
 AGENT_USERS=(aao-pm aao-impl-codex aao-impl-claude aao-impl-ag)
@@ -82,14 +86,43 @@ if [[ "$MODE" == --revert ]]; then
   exit 0
 fi
 
+# ---------- purge ----------
+if [[ "$MODE" == --purge ]]; then
+  if [[ -f "$SUDOERS" ]] && ! grep -qxF "$MARKER" "$SUDOERS"; then die "$SUDOERS is not managed by this script"; fi
+  archive="/root/aao-identity-archive-$(date +%Y%m%dT%H%M%S).tar.gz"
+  paths=()
+  for p in /var/lib/aao-auditor /var/lib/aao-auditor-alt /var/lib/aao-supervisor /srv/aao "$SUDOERS"; do [[ -e "$p" ]] && paths+=("$p"); done
+  for u in "${ALL_USERS[@]}"; do [[ -d "/home/$u" ]] && paths+=("/home/$u"); done
+  if (( ${#paths[@]} )); then
+    tar -czf "$archive" "${paths[@]}" && chmod 0600 "$archive" && echo "+ archived to $archive"
+  fi
+  rm -f "$SUDOERS"
+  for u in "${ALL_USERS[@]}"; do id "$u" >/dev/null 2>&1 && { userdel -r "$u" 2>/dev/null || userdel "$u"; echo "+ removed $u"; }; done
+  for g in aao-ledger-read aao-events; do getent group "$g" >/dev/null && groupdel "$g" && echo "+ removed group $g"; done
+  rm -rf /var/lib/aao-auditor /var/lib/aao-auditor-alt /var/lib/aao-supervisor /srv/aao
+  echo "Purged. Restore evidence from $archive if needed."
+  exit 0
+fi
+
 # ---------- preflight (no changes) ----------
 echo "# preflight"
+command -v getfacl >/dev/null || die "getfacl not found (install package 'acl'); cannot verify ACLs"
+command -v openssl >/dev/null || die "openssl not found"
+# Ancestors of managed paths must be root-owned and not writable by group/others.
+for anc in /var /var/lib /srv /etc/sudoers.d /home; do
+  [[ -d "$anc" ]] || continue
+  [[ "$(stat -c '%U' "$anc")" == root ]] || die "$anc is not owned by root"
+  (( ( 0$(stat -c '%a' "$anc") & 022 ) == 0 )) || die "$anc is writable by group or others"
+done
 id "$CEO_USER" >/dev/null 2>&1 || die "CEO account $CEO_USER not found"
 for u in "${ALL_USERS[@]}"; do
   id "$u" >/dev/null 2>&1 || continue
   shell=$(getent passwd "$u" | cut -d: -f7); home=$(getent passwd "$u" | cut -d: -f6)
   [[ "$shell" == "$(expected_shell "$u")" ]] || die "$u has shell $shell, expected $(expected_shell "$u")"
   [[ "$home" == "/home/$u" ]] || die "$u has home $home, expected /home/$u"
+  # Role accounts have no usable password; login only through su/sudo by root.
+  pw=$(passwd -S "$u" 2>/dev/null | awk '{print $2}')
+  [[ "$pw" == L ]] || die "$u password state is '$pw', expected locked (L)"
   for g in $(id -nG "$u"); do
     [[ "$g" == "$u" ]] && continue
     [[ " ${ALLOWED_GROUPS[$u]:-} " == *" $g "* ]] || die "$u is in unexpected group '$g'"
@@ -120,6 +153,27 @@ check_path() {  # path owner group mode
   if command -v getfacl >/dev/null && [[ -n $(getfacl -s -p "$1" 2>/dev/null) ]]; then die "$1 has an extended ACL"; fi
 }
 while read -r path owner group mode; do check_path "$path" "$owner" "$group" "$mode"; done < <(layout)
+# Existing content of managed directories: owned by the directory owner, no
+# ACLs, no setuid/setgid, private keys mode 0600, nothing writable by others.
+for d in /var/lib/aao-auditor /var/lib/aao-auditor-alt /var/lib/aao-supervisor /srv/aao; do
+  [[ -d "$d" ]] || continue
+  while IFS= read -r -d '' f; do
+    [[ -L "$f" ]] && die "symlink inside managed tree: $f"
+    [[ -n $(getfacl -s -p "$f" 2>/dev/null) ]] && die "extended ACL on $f"
+    m=$(stat -c '%a' "$f")
+    (( ( 0$m & 06002 ) == 0 )) || die "$f has setuid/setgid or is world-writable ($m)"
+  done < <(find "$d" -mindepth 1 -print0)
+done
+for a in "${AUDITORS[@]}"; do
+  k="/var/lib/$a/keys/auditor-ed25519.pem"
+  [[ -e "$k" ]] || continue
+  [[ "$(stat -c '%U %a' "$k")" == "$a 600" ]] || die "$k must be owned by $a with mode 600"
+done
+# Existing role homes must be private to their owner.
+for u in "${ALL_USERS[@]}"; do
+  [[ -d "/home/$u" ]] || continue
+  [[ "$(stat -c '%U' "/home/$u")" == "$u" ]] || die "/home/$u is not owned by $u"
+done
 # An existing public key must match its auditor's private key.
 for a in "${AUDITORS[@]}"; do
   key="/var/lib/$a/keys/auditor-ed25519.pem"; pub="/srv/aao/trust/keys/$a-ed25519.pub"
@@ -163,10 +217,12 @@ for a in "${AUDITORS[@]}"; do
     fi
     if [[ ! -e "$pub" ]]; then
       tmp=$(mktemp /srv/aao/trust/keys/.pub.XXXXXX)
+      trap 'rm -f "$tmp"' EXIT
       runuser -u "$a" -- openssl pkey -in "$key" -pubout > "$tmp"
       openssl pkey -pubin -in "$tmp" -noout || { rm -f "$tmp"; die "generated public key for $a is invalid"; }
       chown aao-trust:aao-trust "$tmp"; chmod 0644 "$tmp"
       mv -f "$tmp" "$pub"   # atomic rename within the same directory
+      trap - EXIT
       echo "+ published $pub"
     fi
   else
@@ -197,5 +253,6 @@ Next steps (manual, one time):
   3. Leave PostgreSQL running from the CEO account; agents reach it over
      TCP at 127.0.0.1:54329 and never use the docker socket.
   4. Run scripts/verify_identity_separation.sh as every role and attach the output to the F2 evidence.
-  Rollback:  sudo scripts/identity_separation.sh --revert
+  Rollback:  sudo scripts/identity_separation.sh --revert   (lock, keep data)
+             sudo scripts/identity_separation.sh --purge    (archive, then remove everything)
 EOF

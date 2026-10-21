@@ -10,7 +10,8 @@ apt-get update -qq >/dev/null && apt-get install -y -qq openssl sudo acl python3
 useradd -m alessbarb && chmod 750 /home/alessbarb && usermod -aG sudo alessbarb
 mkdir -p /home/alessbarb/.config/gh && echo token > /home/alessbarb/.config/gh/hosts.yml && chown -R alessbarb: /home/alessbarb && chmod 600 /home/alessbarb/.config/gh/hosts.yml
 groupadd docker && touch /var/run/docker.sock && chown root:docker /var/run/docker.sock && chmod 660 /var/run/docker.sock
-echo 1 > /tmp/ps 2>/dev/null
+snap() { { getent passwd | sort; getent group | sort; ls -la /etc/sudoers.d; ls -d /var/lib/aao-* /srv/aao /home/aao-* 2>/dev/null; } > "$1"; }
+snap /tmp/state_before
 
 echo "== T1 preflight rejects unexpected privileged group"
 useradd -m -s /bin/bash aao-impl-codex && usermod -aG docker aao-impl-codex
@@ -88,6 +89,36 @@ cp /tmp/pub.bak /srv/aao/trust/keys/aao-auditor-ed25519.pub
 t "clean state applies again" bash -c "bash $S/identity_separation.sh --apply >/tmp/o 2>&1"
 t "no temp key files left" bash -c "! ls -A /srv/aao/trust/keys | grep -q '^\\.pub'"
 
+echo "== T8e preflight fails closed on missing tools and unsafe content"
+mv /usr/bin/getfacl /usr/bin/getfacl.bak
+t "getfacl missing -> fail closed" bash -c "! bash $S/identity_separation.sh --apply >/tmp/o 2>&1 && grep -q 'getfacl not found' /tmp/o"
+mv /usr/bin/getfacl.bak /usr/bin/getfacl
+echo 'aao-pm:Secret123' | chpasswd
+t "role account with usable password -> fail closed" bash -c "! bash $S/identity_separation.sh --apply >/tmp/o 2>&1 && grep -q 'expected locked' /tmp/o"
+usermod -L aao-pm
+touch /var/lib/aao-auditor/ledger/x && chmod 0666 /var/lib/aao-auditor/ledger/x
+t "world-writable file in managed tree -> fail closed" bash -c "! bash $S/identity_separation.sh --apply >/tmp/o 2>&1 && grep -q 'world-writable' /tmp/o"
+rm /var/lib/aao-auditor/ledger/x
+ln -s /etc/shadow /srv/aao/trust/evil
+t "symlink in managed tree -> fail closed" bash -c "! bash $S/identity_separation.sh --apply >/tmp/o 2>&1 && grep -q 'symlink inside managed tree' /tmp/o"
+rm /srv/aao/trust/evil
+chmod 0644 /var/lib/aao-auditor/keys/auditor-ed25519.pem
+t "private key mode 644 -> fail closed" bash -c "! bash $S/identity_separation.sh --apply >/tmp/o 2>&1 && grep -q 'mode 600' /tmp/o"
+chmod 0600 /var/lib/aao-auditor/keys/auditor-ed25519.pem
+
+echo "== T8f induced failure while publishing a key leaves no temp file"
+rm /srv/aao/trust/keys/aao-auditor-ed25519.pub
+mkdir -p /tmp/shim && cat > /tmp/shim/openssl <<'SH'
+#!/bin/sh
+for a in "$@"; do [ "$a" = "-pubout" ] && exit 1; done
+exec /usr/bin/openssl "$@"
+SH
+chmod 755 /tmp/shim/openssl
+t "publish fails" bash -c "! PATH=/tmp/shim:\$PATH bash $S/identity_separation.sh --apply >/tmp/o 2>&1"
+t "no temp key file left after failure" bash -c "! ls -A /srv/aao/trust/keys | grep -q '^\\.pub'"
+t "no partial public key published" test ! -e /srv/aao/trust/keys/aao-auditor-ed25519.pub
+t "recovery: clean re-apply publishes the key" bash -c "bash $S/identity_separation.sh --apply >/tmp/o 2>&1 && test -s /srv/aao/trust/keys/aao-auditor-ed25519.pub"
+
 echo "== T9 auditor-auditor isolation"
 t "alt cannot enter primary keys" bash -c "! runuser -u aao-auditor-alt -- test -x /var/lib/aao-auditor/keys"
 t "primary cannot read alt ledger" bash -c "! runuser -u aao-auditor -- test -r /var/lib/aao-auditor-alt/ledger"
@@ -118,6 +149,13 @@ t "sudoers removed" test ! -e /etc/sudoers.d/aao-launch
 t "accounts locked" bash -c "passwd -S aao-pm | grep -q ' L '"
 t "keys kept" test -f /var/lib/aao-auditor/keys/auditor-ed25519.pem
 t "CEO untouched" bash -c "id -nG alessbarb | grep -qw sudo"
+
+echo "== T12 purge restores the pre-install state"
+t "purge" bash -c "bash $S/identity_separation.sh --purge >/tmp/pg 2>&1"
+snap /tmp/state_after
+t "passwd/group/sudoers/dirs identical to initial state" diff -u /tmp/state_before /tmp/state_after
+t "evidence archive kept (0600)" bash -c "f=\$(ls /root/aao-identity-archive-*.tar.gz) && [ \$(stat -c %a \$f) = 600 ] && tar -tzf \$f | grep -q 'var/lib/aao-auditor/keys/auditor-ed25519.pem'"
+t "CEO account intact after purge" bash -c "id -nG alessbarb | grep -qw sudo && test -f /home/alessbarb/.config/gh/hosts.yml"
 
 echo "== RESULT: $([ $FAILED = 0 ] && echo ALL PASS || echo FAILURES)"
 exit $FAILED

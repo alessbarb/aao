@@ -38,6 +38,17 @@ TEST PASS  extended ACL on existing dir -> fail closed
 TEST PASS  public key not matching private key -> fail closed
 TEST PASS  clean state applies again
 TEST PASS  no temp key files left
+== T8e preflight fails closed on missing tools and unsafe content
+TEST PASS  getfacl missing -> fail closed
+TEST PASS  role account with usable password -> fail closed
+TEST PASS  world-writable file in managed tree -> fail closed
+TEST PASS  symlink in managed tree -> fail closed
+TEST PASS  private key mode 644 -> fail closed
+== T8f induced failure while publishing a key leaves no temp file
+TEST PASS  publish fails
+TEST PASS  no temp key file left after failure
+TEST PASS  no partial public key published
+TEST PASS  recovery: clean re-apply publishes the key
 == T9 auditor-auditor isolation
 TEST PASS  alt cannot enter primary keys
 TEST PASS  primary cannot read alt ledger
@@ -54,4 +65,9 @@ TEST PASS  sudoers removed
 TEST PASS  accounts locked
 TEST PASS  keys kept
 TEST PASS  CEO untouched
+== T12 purge restores the pre-install state
+TEST PASS  purge
+TEST PASS  passwd/group/sudoers/dirs identical to initial state
+TEST PASS  evidence archive kept (0600)
+TEST PASS  CEO account intact after purge
 == RESULT: ALL PASS
