@@ -58,7 +58,9 @@ The run is signed only when all of these hold: it runs as `auditor_uid`, the
 account is not in `developer_os_users`, the auditor code is a clean revision
 listed in `trusted_auditor_revisions`, and the key matches the anchor.
 Attribution of the implementers must also be resolved (section 2). Otherwise
-the verdict is `provisional` and unsigned.
+the run has custody problems: without `--veto` the verdict is `provisional`;
+with `--veto` the report keeps `verdict: "veto"` (a veto always takes
+precedence). In both cases the report is unsigned and nothing is recorded.
 
 **Report emitted vs. decision recorded.** A report (`report.json`) is always
 written to the output directory. Only a custody-valid run signs the report
