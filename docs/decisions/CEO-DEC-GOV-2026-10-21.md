@@ -58,4 +58,6 @@ Historial de revisión de fidelidad por Codex:
 
 - REJECT sobre `d902f7e`;
 - REJECT sobre `59c42cb`;
-- esta versión corrige FD-01 a FD-04 de la segunda revisión.
+- REJECT sobre `da3123a`, en el que D1–D13 quedaron evaluadas como FIEL y los hallazgos restantes estaban en el plan y en el estatuto del PM.
+
+Las disposiciones de cada ronda constan en la PR #22.

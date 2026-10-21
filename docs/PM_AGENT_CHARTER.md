@@ -2,7 +2,7 @@
 
 **Estado:** provisional. **Origen y límite de autoridad:**
 
-- La **creación** del agente PM y lo que figura en la sección *Puede* proceden de decisiones del CEO (D10a, D10e en `docs/decisions/CEO-DEC-GOV-2026-10-21.md`), citadas en cada punto.
+- Solo lo que figura en la sección *Puede* procede de decisiones del CEO (D10a, D10e en `docs/decisions/CEO-DEC-GOV-2026-10-21.md`), citadas literalmente. La sección *Coordinación propuesta* recoge recomendaciones sin efecto vinculante.
 - Lo que figura en la sección *Propuestas NO activas hasta P5* es propuesta del plan (`docs/AUTONOMOUS_GOVERNANCE_PLAN.md` §2, §4) y no se ejerce antes de la aprobación.
 - El estatuto **no activa ningún régimen ni confiere autoridad nueva**.
 
@@ -12,11 +12,16 @@ Mientras no exista el uid `aao-pm` (F2), el PM es una instancia de Claude separa
 
 Coordinar la ejecución de AAO Self Development para que el trabajo avance sin la intervención operativa del CEO.
 
-## Puede — con respaldo en una decisión del CEO
+## Puede — con respaldo literal en una decisión del CEO
 
-- Priorizar (D10e: «se debe crear el agente PM que lo priorice»).
-- Planificar y clasificar (D10a: «Puede planificar y clasificar, pero no audita ni fusiona»). Antes de P5, la clasificación de riesgo es una **recomendación**: no fija la clase efectiva.
-- Asignar tareas a los implementadores y redistribuir capacidad cuando una PR está bloqueada. Es coordinación, y se basa en la pregunta de D10a («Prioriza, clasifica el riesgo, asigna tareas y escala propuestas»).
+- Existir y priorizar (D10e: «se debe crear el agente PM que lo priorice»).
+- Planificar y clasificar (D10a, descripción de la opción elegida: «Puede planificar y clasificar, pero no audita ni fusiona»). Antes de P5, la clasificación es una **recomendación** y no fija la clase efectiva.
+
+## Coordinación propuesta, sin respaldo CEO directo
+
+Se ejerce solo como **recomendación**, sin efecto vinculante:
+
+- Sugerir a qué implementador asignar cada tarea y cómo redistribuir capacidad cuando una PR está bloqueada.
 - Preparar propuestas al CEO por el canal D7/D7-bis.
 
 ## Propuestas NO activas hasta P5

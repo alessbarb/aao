@@ -9,22 +9,11 @@ Las versiones anteriores (v1 a v3) están en el historial de la conversación de
 
 ---
 
-## 1. Decisiones del CEO ratificadas (D1–D10, 2026-10-21)
+## 1. Decisiones del CEO (2026-10-21)
 
-| # | Decisión |
-|---|---|
-| D1 | El CEO solo define estrategia y propone proyectos. PR, revisiones, fusiones y publicación son trabajo de los agentes. |
-| D2 | AAO es autónomo y acepta riesgos dentro de una delegación expresa: clases R0–R2 del §3. |
-| D3 | GitHub es el maestro del desarrollo. Sustituye a la regla «100 % local» del handoff del 20-oct. |
-| D4 | El CEO administra GitHub. Las necesidades de administración se le proponen y no bloquean el trabajo. |
-| D5 | Gasto cero sin propuesta previa. |
-| D6 | Reservado al CEO (R3): efectos externos o producción, Constitución y políticas, datos sensibles reales, proveedores de modelo nuevos. |
-| D7 | Propuestas por Control Center. Mientras no exista esa vista, por GitHub Issue con la etiqueta `ceo-proposal`. |
-| D8 | La excepción Clase A se sustituye por GOV-REV-002, que el CEO aprueba una sola vez. |
-| D9 | Separación de la máquina mediante un script que el CEO ejecuta una vez con sudo. |
-| D10 | Roles del §2. Hay que crear un PM, que prioriza el trabajo. |
+El **texto autoritativo** de las decisiones está en `docs/decisions/CEO-DEC-GOV-2026-10-21.md` (D1–D13). Ahí cada una figura como cita literal del CEO o como la pregunta, la opción elegida y la descripción que se le mostró. Este plan **no las resume**: las cita por número. Si este plan dice algo distinto de una cita, prevalece la cita, y el contenido del plan que no proceda de una cita es **propuesta**.
 
-**Ratificar D1–D10 no autoriza desplegar los mecanismos.** Esa autorización llega con la aprobación única de GOV-REV-002, que incluye el arranque (§6).
+**Las decisiones D1–D13 no autorizan desplegar los mecanismos.** Esa autorización llega con la aprobación única de GOV-REV-002, que incluye el arranque (§6).
 
 ### 1.1 Corrección del alcance transitorio (H-05)
 
@@ -208,7 +197,7 @@ verdict, issued_at, expires_at
 4. **Control externo disponible:** solo P4 (revisor humano externo, con gasto). Si el CEO no lo aprueba, el arranque se registra con «independencia de la raíz no demostrada por un tercero».
 5. **Autoriza:** el CEO, en la aprobación de GOV-REV-002 (R3).
 6. **Operaciones expresamente incluidas en la autorización de arranque (V3-02):**
-   - fusionar la PR de F0 (transcripción de D1–D10, inventario y estatuto del PM);
+   - fusionar la PR de F0 (registro literal de D1–D13, inventario y estatuto del PM);
    - fusionar GOV-REV-002;
    - fusionar los componentes del punto 2, con sus SHAs;
    - instalar el registro de confianza.
@@ -222,7 +211,7 @@ verdict, issued_at, expires_at
 
 | Fase | Contenido | Depende de | Responsable | Salida verificable | ¿Bloquea al resto? |
 |---|---|---|---|---|---|
-| **F0** | Una PR con tres partes: la transcripción literal de D1–D10, el inventario de riesgo histórico (§6.1) y el estatuto del PM provisional. **Se abre, pero no se fusiona** (V3-02): toca `docs/decisions/`, una ruta R2/R3, y queda pendiente hasta la autorización de arranque (§6.6). El PM provisional coordina desde F0. | — | Claude-impl (PR) y PM | PR abierta, con un dictamen de fidelidad de Codex | No |
+| **F0** | Una PR con tres partes: el registro literal de D1–D13, el inventario de riesgo histórico (§6.1) y el estatuto del PM provisional. **Se abre, pero no se fusiona** (V3-02): toca `docs/decisions/`, una ruta R2/R3, y queda pendiente hasta la autorización de arranque (§6.6). El PM provisional coordina desde F0. | — | Claude-impl (PR) y PM | PR abierta, con un dictamen de fidelidad de Codex | No |
 | **F1** | Redactar GOV-REV-002: §2–§6, §8 y los tres niveles normativos del §3. Evaluar alternativas de GitHub para P3 (permisos efectivos, coste, mantenimiento, privacidad; preferencia por mantenerlo privado). | F0 abierta | PM y auditor de diseño (Codex) | Issue `ceo-proposal` con la política, el arranque y la recomendación | No |
 | **F2** | Script de separación: uids del §2, claves, `aao-trust`, sockets, directorios, `$HOME`, SSH y tokens, unidades systemd de lanzamiento. Pruebas de aislamiento. | F0 | Claude-impl escribe; el auditor alterno revisa; **CEO ejecuta sudo** (P1) | Matriz de aislamiento en PASS (§8.1) | Solo R2 |
 | **F3a** | **Construcción** (V3-01): autorización de integración, integrador, supervisor, notificador y ledger encadenado. Se prueban en un repo desechable con §8.2. Las PR se abren pero no se fusionan. | F1 (contrato) | Codex implementa; revisa el auditor no recusado | §8.2 en PASS en el entorno desechable, con SHAs fijados | Solo R2 |
@@ -346,5 +335,5 @@ Cada caso debe ser **rechazado**:
   - no he verificado los planes de GitHub;
   - no he probado que las CLI de los agentes funcionen bajo otros uids.
 - **Bloqueos:** ninguno para F0 y F1.
-- **Autoridad:** D1–D10.
-- **Siguiente:** F0. Claude-impl abre la PR con D1–D10 y el inventario; el PM provisional arranca F1.
+- **Autoridad:** D1–D13.
+- **Siguiente:** F0. Claude-impl abre la PR con D1–D13 y el inventario; el PM provisional arranca F1.
