@@ -10,7 +10,7 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
-from aao.governance_ledger import active_vetoes, verify
+from aao.governance_ledger import active_vetoes, append, open_incidents, verify
 from aao.integration_authorization import canonical, validate
 
 
@@ -21,6 +21,7 @@ class TrustSources:
     ledger_anchor: Path
     heartbeat: Path
     freeze: Path
+    integrator_private_key: Path
 
 
 def _git(repo: Path, *args: str) -> str:
@@ -59,8 +60,16 @@ def promote(repo: Path, remote: str, auth: dict[str, Any], signature: str,
     ledger_keys = registry["ledger_keys"]
     anchor = trust_sources.ledger_anchor.read_text().strip()
     rows = verify(trust_sources.ledger, ledger_keys, anchor)
+    incident_resolvers = registry.get("incident_resolvers")
+    if not isinstance(incident_resolvers, list) or any(
+        row.get("type") == "incident-resolution" and row.get("key_id") not in incident_resolvers
+        for row in rows
+    ):
+        raise ValueError("incident-resolution signer is not enabled in trust registry")
     if active_vetoes(rows, ledger_keys):
         raise ValueError("active ledger veto")
+    if open_incidents(rows):
+        raise RuntimeError("open ledger incident")
     current_time = now()
     if current_time.tzinfo is None:
         raise ValueError("clock must return timezone-aware datetime")
@@ -113,10 +122,43 @@ def promote(repo: Path, remote: str, auth: dict[str, Any], signature: str,
         f"--force-with-lease={ref}:{base}", remote_url, f"{commit}:{ref}"], check=False, capture_output=True, text=True)
     if result.returncode:
         raise RuntimeError("conditional push rejected; no fallback: " + result.stderr)
-    if after_push:
-        after_push()
-    actual = subprocess.run(["git", "ls-remote", remote_url, ref], check=True, capture_output=True, text=True).stdout.split()[0]
-    if actual != commit:
-        trust_sources.freeze.write_text(f"published ref divergence {actual}\n")
-        raise RuntimeError("post-publication divergence; integrator frozen")
+    expected_tree = auth["merge_result_tree_sha"]
+    expected_parents = [base, head]
+    observed: dict[str, Any] = {"sha": None, "tree_sha": None, "parents": None}
+    try:
+        if after_push:
+            after_push()
+        listing = subprocess.run(["git", "ls-remote", remote_url, ref], check=True,
+                                 capture_output=True, text=True).stdout.splitlines()
+        observed["sha"] = listing[0].split()[0] if listing else None
+        if observed["sha"] is None:
+            raise RuntimeError("published remote ref is missing")
+        _git(repo, "cat-file", "-e", f"{observed['sha']}^{{commit}}")
+        observed["tree_sha"] = _git(repo, "show", "-s", "--format=%T", observed["sha"])
+        observed["parents"] = _git(repo, "show", "-s", "--format=%P", observed["sha"]).split()
+        if (observed["sha"] != commit or observed["tree_sha"] != expected_tree or
+                observed["parents"] != expected_parents):
+            raise RuntimeError("published ref SHA, tree, or parents differ from authorized promotion")
+    except Exception as error:
+        detail = f"post-push verification failed: {type(error).__name__}: {error}"
+        trust_sources.freeze.write_text(
+            f"{detail}; intended_sha={commit}; observed_sha={observed['sha']}\n"
+        )
+        try:
+            incident = append(trust_sources.ledger, {
+                "type": "incident",
+                "id": f"post-push-{commit}",
+                "target_ref": ref,
+                "detail": detail,
+                "intended_sha": commit,
+                "observed_sha": observed["sha"],
+                "intended_tree_sha": expected_tree,
+                "observed_tree_sha": observed["tree_sha"],
+                "intended_parents": expected_parents,
+                "observed_parents": observed["parents"],
+            }, registry["integrator_key_id"], str(trust_sources.integrator_private_key), ledger_keys, anchor)
+            trust_sources.ledger_anchor.write_text(incident["hash"])
+        except Exception as ledger_error:  # noqa: BLE001 - preserve freeze if recording itself fails.
+            raise RuntimeError(f"post-publication incident; frozen; ledger recording failed: {ledger_error}") from error
+        raise RuntimeError("post-publication incident; integrator frozen") from error
     return commit

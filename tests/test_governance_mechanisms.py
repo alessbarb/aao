@@ -674,16 +674,23 @@ def _git_fixture(tmp_path):
          "enabled_risk_classes":["R2"], "policy_id":"p", "attribution_resolved":True,
          "ci_candidate_sha":head, "protected_paths_match":True, "auditor_models":{"a":"auditor-model"},
          "author_models":{"author":"author-model"}, "ra03_pass":True, "ra09_pass":True}
+    resolver_dir = tmp_path / "resolver"
+    resolver_dir.mkdir()
+    _resolver_private, resolver_public = keypair(resolver_dir)
     ledger=tmp_path/"ledger.jsonl"; ledger.touch(); anchor=tmp_path/"anchor"; heartbeat=tmp_path/"heartbeat.json"; freeze=tmp_path/"freeze"
     anchor.write_text("0"*64)
     from aao.governance_ledger import verify
     anchor.write_text(verify(ledger, {"k":str(public)})[-1]["hash"] if ledger.exists() and ledger.stat().st_size else "0"*64)
     hb=signed_heartbeat(1,"2026-01-01T00:00:00+00:00",str(private),key_id="supervisor",expires_at="2026-01-01T02:00:00+00:00")
     heartbeat.write_text(json.dumps(hb))
-    registry={**state,"ledger_keys":{"k":str(public)},"supervisor_key_id":"supervisor","supervisor_public_key":str(public),"heartbeat_max_age_seconds":7200,
+    registry={**state,"ledger_keys":{"k":{"public_key":str(public),"can_record_incidents":True}},"supervisor_key_id":"supervisor","supervisor_public_key":str(public),"heartbeat_max_age_seconds":7200,
               "target_refs":["refs/heads/main"],"integrator_identity":"integrator","protected_paths":{},"ra_status":{"RA-02":"PASS","RA-03":"PASS","RA-09":"PASS"}}
+    registry["integrator_key_id"] = "k"
+    registry["incident_resolvers"] = ["resolver"]
+    registry["ledger_keys"]["resolver"] = {"public_key": str(resolver_public), "can_resolve_incidents": True}
     reg=tmp_path/"registry.json"; reg.write_text(json.dumps(registry))
-    return promote, r, bare, base, head, tree, d, TrustSources(reg,ledger,anchor,heartbeat,freeze), sign(d,str(private))
+    return promote, r, bare, base, head, tree, d, TrustSources(reg,ledger,anchor,heartbeat,freeze,
+        private), sign(d,str(private))
 
 
 def _integrator_identity(name="integrator"):
@@ -954,9 +961,83 @@ def test_integrator_post_publish_divergence_freezes(tmp_path):
     def rewrite():
         path=subprocess.run(["git","--git-dir",str(bare),"rev-parse","refs/heads/main^"],check=True,capture_output=True,text=True).stdout.strip()
         subprocess.run(["git","--git-dir",str(bare),"update-ref","refs/heads/main",path],check=True)
-    with pytest.raises(RuntimeError,match="post-publication divergence"):
+    with pytest.raises(RuntimeError,match="post-publication incident"):
         promote(r,"origin",d,sig,sources,identity_provider=type("I",(),{"__call__":lambda self:"integrator","push_identity":lambda self,*a:True})(),now=lambda: __import__("datetime").datetime(2026,1,1,1,tzinfo=__import__("datetime").timezone.utc),after_push=rewrite)
     assert sources.freeze.exists()
+
+
+def test_integrator_freezes_and_records_incident_when_remote_ref_deleted_after_push(tmp_path):
+    from aao.governance_ledger import verify
+
+    promote, repo, bare, _base, _head, _tree, auth, sources, signature = _git_fixture(tmp_path)
+    def delete_ref():
+        subprocess.run(["git", "--git-dir", str(bare), "update-ref", "-d", "refs/heads/main"],
+                       check=True, capture_output=True)
+    with pytest.raises(RuntimeError, match="post-publication"):
+        promote(repo, "origin", auth, signature, sources, identity_provider=_integrator_identity(),
+                now=lambda: __import__("datetime").datetime(2026, 1, 1, 1,
+                    tzinfo=__import__("datetime").timezone.utc), after_push=delete_ref)
+    registry = json.loads(sources.trust_registry.read_text())
+    rows = verify(sources.ledger, registry["ledger_keys"], sources.ledger_anchor.read_text())
+    assert sources.freeze.exists()
+    assert rows[-1]["type"] == "incident"
+    assert rows[-1]["key_id"] == registry["integrator_key_id"]
+    assert rows[-1]["intended_sha"]
+    assert rows[-1]["observed_sha"] is None
+
+
+def test_integrator_stays_blocked_when_freeze_file_deleted_but_incident_open(tmp_path):
+    from aao.governance_ledger import append
+
+    promote, repo, bare, _base, _head, _tree, auth, sources, signature = _git_fixture(tmp_path)
+    registry = json.loads(sources.trust_registry.read_text())
+    incident = append(sources.ledger, {"type": "incident", "id": "incident-open",
+        "detail": "remote state uncertain", "intended_sha": "a" * 40, "observed_sha": None},
+        registry["integrator_key_id"], str(sources.integrator_private_key), registry["ledger_keys"])
+    sources.ledger_anchor.write_text(incident["hash"])
+    sources.freeze.unlink(missing_ok=True)
+    _assert_integrator_rejects_without_main_change(promote, repo, bare, auth, signature,
+        sources, "open ledger incident")
+
+
+def test_integrator_rejects_incident_resolution_signed_by_unauthorized_key(tmp_path):
+    from aao.governance_ledger import append
+
+    _promote, _repo, _bare, _base, _head, _tree, _auth, sources, _signature = _git_fixture(tmp_path)
+    registry = json.loads(sources.trust_registry.read_text())
+    incident = append(sources.ledger, {"type": "incident", "id": "incident-open",
+        "detail": "remote state uncertain", "intended_sha": "a" * 40, "observed_sha": None},
+        registry["integrator_key_id"], str(sources.integrator_private_key), registry["ledger_keys"])
+    unauthorized_dir = tmp_path / "unauthorized"
+    unauthorized_dir.mkdir()
+    private, public = keypair(unauthorized_dir)
+    registry["ledger_keys"]["unauthorized"] = str(public)
+    sources.trust_registry.write_text(json.dumps(registry))
+    with pytest.raises(ValueError, match="incident-resolution signer"):
+        append(sources.ledger, {"type": "incident-resolution", "target": incident["id"],
+            "incident_hash": incident["hash"], "detail": "resolved"}, "unauthorized",
+            str(private), registry["ledger_keys"])
+
+
+def test_integrator_resumes_after_valid_incident_resolution(tmp_path):
+    from aao.governance_ledger import append
+
+    promote, repo, _bare, _base, _head, _tree, auth, sources, signature = _git_fixture(tmp_path)
+    registry = json.loads(sources.trust_registry.read_text())
+    incident = append(sources.ledger, {"type": "incident", "id": "incident-open",
+        "detail": "remote state uncertain", "intended_sha": "a" * 40, "observed_sha": None},
+        registry["integrator_key_id"], str(sources.integrator_private_key), registry["ledger_keys"])
+    sources.ledger_anchor.write_text(incident["hash"])
+    append(sources.ledger, {"type": "incident-resolution", "target": incident["id"],
+        "incident_hash": incident["hash"], "detail": "verified and cleared"},
+        "resolver", str(tmp_path / "resolver" / "key.pem"), registry["ledger_keys"])
+    sources.ledger_anchor.write_text(__import__("aao.governance_ledger", fromlist=["verify"])
+        .verify(sources.ledger, registry["ledger_keys"])[-1]["hash"])
+    sources.freeze.unlink(missing_ok=True)
+    commit = promote(repo, "origin", auth, signature, sources, identity_provider=_integrator_identity(),
+        now=lambda: __import__("datetime").datetime(2026, 1, 1, 1,
+            tzinfo=__import__("datetime").timezone.utc))
+    assert commit == _remote_main(_bare)
 
 
 # Regression coverage for the signed ledger and persistent notifier boundary.

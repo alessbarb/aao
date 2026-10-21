@@ -57,6 +57,15 @@ def append(path: Path, payload: dict[str, Any], key_id: str, private_key: str,
         target = payload.get("target")
         if not target or not any(r.get("type") == "veto" and r.get("id") == target for r in rows):
             raise ValueError("revocation must reference an exact existing veto")
+    if payload.get("type") == "incident" and not _authority(trusted_keys.get(key_id), "can_record_incidents"):
+        raise ValueError("incident signer is not an enabled authority")
+    if payload.get("type") == "incident-resolution":
+        if not _authority(trusted_keys.get(key_id), "can_resolve_incidents"):
+            raise ValueError("incident-resolution signer is not an enabled authority")
+        incident = next((r for r in rows if r.get("type") == "incident" and
+                         r.get("id") == payload.get("target")), None)
+        if not incident or incident.get("hash") != payload.get("incident_hash"):
+            raise ValueError("incident-resolution must reference an exact existing incident")
     entry = {
         "sequence": len(rows) + 1,
         "previous_hash": rows[-1]["hash"] if rows else "0" * 64,
@@ -103,6 +112,14 @@ def verify(
                 raise ValueError("revocation signer is not an enabled authority")
             if not e.get("target") or not any(r.get("type") == "veto" and r.get("id") == e["target"] for r in rows):
                 raise ValueError("revocation must reference an exact existing veto")
+        if e.get("type") == "incident" and not _authority(key_entry, "can_record_incidents"):
+            raise ValueError("incident signer is not an enabled authority")
+        if e.get("type") == "incident-resolution":
+            incident = next((r for r in rows if r.get("type") == "incident" and
+                             r.get("id") == e.get("target")), None)
+            if (not _authority(key_entry, "can_resolve_incidents") or not incident or
+                    incident.get("hash") != e.get("incident_hash")):
+                raise ValueError("invalid incident-resolution authority or incident reference")
         e["hash"] = digest
         previous = digest
         rows.append(e)
@@ -131,3 +148,13 @@ def active_vetoes(rows: list[dict[str, Any]], trusted_keys: dict[str, Any]) -> l
             continue
         revoked.add(row["target"])
     return [r for r in rows if r.get("type") == "veto" and r.get("id") not in revoked]
+
+
+def _authority(entry: Any, capability: str) -> bool:
+    return isinstance(entry, dict) and entry.get(capability) is True and bool(entry.get("public_key"))
+
+
+def open_incidents(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """Return incidents without a later valid resolution (verified when rows are read)."""
+    resolved = {row.get("incident_hash") for row in rows if row.get("type") == "incident-resolution"}
+    return [row for row in rows if row.get("type") == "incident" and row.get("hash") not in resolved]
