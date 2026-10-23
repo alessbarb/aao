@@ -36,7 +36,7 @@
 
 Añadir **una única operación** al §12.3:
 
-> **Op. 1-bis:** fusionar la PR #35 en su SHA exacto `a3e8e26` (o el que se fije tras la revisión), formado solo por `tests/test_governance_mechanisms.py`. Se exige APPROVE-TECHNICAL de un revisor no recusado (Codex) y CI en verde sobre ese SHA. La ejecuta el integrador designado de D12 con el token actual, mediante merge commit, y después se verifica `main` en verde. No cubre ningún otro archivo ni SHA.
+> **Op. 1-bis:** fusionar la PR #35 en su SHA exacto `3345f10fc03af35f6758839e3fc7ef927dd21800`, formado solo por `tests/test_governance_mechanisms.py`. Se exige APPROVE-TECHNICAL de un revisor no recusado (Codex) y CI en verde sobre ese SHA. La ejecuta el integrador designado de D12 con el token actual, mediante merge commit, y después se verifica `main` en verde. No cubre ningún otro archivo ni SHA.
 
 **Por qué es acotada:**
 
