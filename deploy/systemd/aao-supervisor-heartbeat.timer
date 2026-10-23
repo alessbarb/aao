@@ -1,0 +1,11 @@
+# Heartbeats are valid for validity_seconds (600 in the config); refresh well inside it.
+[Unit]
+Description=AAO supervisor heartbeat every 4 minutes
+
+[Timer]
+OnBootSec=1min
+OnUnitActiveSec=4min
+AccuracySec=10s
+
+[Install]
+WantedBy=timers.target
