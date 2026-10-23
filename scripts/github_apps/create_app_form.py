@@ -38,7 +38,8 @@ def main() -> int:
     page = Path(f"/tmp/aao-create-{name}.html")
     page.write_text(
         "<!doctype html><meta charset=utf-8><title>Create " + html.escape(name) + "</title>"
-        "<p>Creating GitHub App <b>" + html.escape(name) + "</b> under your account. State: "
+        "<p>Creating GitHub App <b>" + html.escape(name) + "</b> under "
+        + html.escape(f"organization {org}" if org else "your account") + ". State: "
         + state + "</p>"
         '<form action="' + target + '?state=' + state + '" method="post">'
         '<input type="hidden" name="manifest" value="' + html.escape(json.dumps(manifest)) + '">'

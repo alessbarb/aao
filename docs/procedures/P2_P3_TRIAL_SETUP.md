@@ -47,7 +47,15 @@ crear_org() {
 for app in aao-impl-codex aao-impl-claude aao-impl-ag aao-probe-noworkflows; do crear_org "$app"; done
 ```
 
-Como el script de canje cambia en esta pasada, instala antes la versión revisada en `/opt/aao-p2/`, igual que en el paso 0.
+El script de canje cambia en esta pasada: ahora rechaza guardar la clave si GitHub devuelve permisos distintos de los del manifiesto revisado. Antes de empezar, instala la versión revisada y los manifiestos:
+
+```bash
+sudo install -o root -g root -m 0755 scripts/github_apps/exchange_manifest_code.py /opt/aao-p2/
+sudo install -d -o root -g root -m 0755 /opt/aao-p2/github-apps
+sudo install -o root -g root -m 0644 docs/proposals/github-apps/*.json /opt/aao-p2/github-apps/
+```
+
+Las Apps de la primera pasada se comprueban a posteriori con `scripts/github_apps/verify_app_permissions.sh <apps...>`; todas deben dar PASS.
 
 ## 2. Instalar las Apps (solo en el repo de ensayo, por ahora)
 
@@ -58,7 +66,7 @@ En la página de cada App, *Install App*, repo `aao-governance-trial` únicament
 
 ## 3. Fork para los implementadores
 
-Crea una organización gratuita (p. ej. `aao-agents`, sin gasto) y haz un fork de `aao-governance-trial` en ella. Instala las 3 Apps de implementador solo en ese fork.
+En la **misma** organización `aao-agents` del §1-bis, haz un fork de `aao-governance-trial` en ella. Instala las 3 Apps de implementador solo en ese fork.
 
 ## 4. Rulesets en el repo de ensayo
 

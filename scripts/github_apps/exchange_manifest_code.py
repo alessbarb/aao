@@ -15,6 +15,8 @@ import urllib.request
 from pathlib import Path
 
 API = os.environ.get("AAO_GITHUB_API", "https://api.github.com")
+# Reviewed manifests, installed root-owned next to this script (procedure step 0).
+MANIFESTS = Path(__file__).resolve().parent / "github-apps"
 ROLE_FOR_APP = {"aao-integrator": "aao-integrator", "aao-auditor": "aao-auditor",
                 "aao-auditor-alt": "aao-auditor-alt", "aao-supervisor": "aao-supervisor",
                 "aao-notifier": "aao-notifier", "aao-pm": "aao-pm", "aao-impl-codex": "aao-impl-codex",
@@ -38,6 +40,13 @@ def main() -> int:
         data = json.loads(response.read())
     if data.get("slug") != app and data.get("name") != app:
         print(f"refusing: GitHub returned app {data.get('slug')!r}, expected {app!r}", file=sys.stderr)
+        return 1
+    expected = json.loads((MANIFESTS / f"{app}.json").read_text(encoding="utf-8"))["default_permissions"]
+    if data.get("permissions") != expected:
+        # The form is a local file and could have been altered: never keep a key for an App whose
+        # permissions differ from the reviewed manifest. The App must be deleted and recreated.
+        print(f"refusing: App permissions {data.get('permissions')} differ from the reviewed manifest "
+              f"{expected}; key NOT stored. Delete the App on GitHub and recreate it.", file=sys.stderr)
         return 1
     directory = Path.home() / ".config" / "aao"
     directory.mkdir(mode=0o700, parents=True, exist_ok=True)
