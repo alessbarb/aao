@@ -176,56 +176,55 @@ def signed_heartbeat(sequence: int, issued_at: str, private_key: str, *, key_id:
         raise ValueError("supervisor requires a ledger path")
     prior: dict[str, Any] = {}
     state_path.parent.mkdir(parents=True, exist_ok=True)
-    lock = (state_path.with_name(state_path.name + ".lock")).open("a")
-    fcntl.flock(lock, fcntl.LOCK_EX)
-    prior = _read_state(state_path, private_key)
-    prior_state_bytes = state_path.read_bytes() if state_path.exists() else canonical({})
-    if not trusted_keys:
-        raise ValueError("supervisor requires trusted ledger keys")
-    if not isinstance(integrator_key_id, str) or not integrator_key_id:
-        raise ValueError("supervisor requires an integrator key id")
-    integrator = trusted_keys.get(integrator_key_id)
-    if not isinstance(integrator, dict) or not integrator.get("public_key"):
-        raise ValueError("integrator key is absent from trusted ledger keys")
-    if isinstance(integrator, dict) and integrator.get("public_key"):
-        if integrator.get("can_resolve_pending") is True or integrator.get("can_authorize") is True:
-            raise ValueError("integrator key has a reserved ledger capability")
-        integrator_der = _public_key_der(integrator["public_key"])
-        for other_id, authority in trusted_keys.items():
-            if (other_id != integrator_key_id and isinstance(authority, dict) and
-                    (authority.get("can_resolve_pending") is True or authority.get("can_authorize") is True) and
-                    authority.get("public_key") and _public_key_der(authority["public_key"]) == integrator_der):
-                raise ValueError("integrator public key is shared with a reserved ledger authority")
-    rows = verify(ledger_path, trusted_keys)
-    previous_head = prior.get("ledger_head", "0" * 64)
-    row_hashes = {row["hash"] for row in rows}
-    if previous_head != "0" * 64 and previous_head not in row_hashes:
-        message = "ledger truncated or rewritten since last heartbeat"
-        incidents = list(prior.get("incidents", []))
-        incidents.append({"type": "incident", "message": message, "issued_at": issued_at})
-        _write_state(state_path, {**prior, "incidents": incidents}, private_key)
-        incident_key = trusted_keys.get(key_id)
-        if isinstance(incident_key, dict) and incident_key.get("can_record_incidents") is True:
-            append(ledger_path, {"type": "incident", "id": f"ledger-continuity-{sequence}",
-                "summary": message, "issued_at": issued_at}, key_id, private_key, trusted_keys)
-        raise ValueError(message)
-    head = rows[-1]["hash"] if rows else "0" * 64
-    resolved = {digest for row in rows if "resolves_pending" in row
-                for digest in row["resolves_pending"]}
-    markers = {key: list(values) for key, values in prior.get("pending_markers", {}).items()}
-    markers = {candidate: [digest for digest in digests if digest not in resolved]
-               for candidate, digests in markers.items()}
-    markers = {candidate: digests for candidate, digests in markers.items() if digests}
-    current = all_pending_vetoes(Path(str(ledger_path) + ".pending-vetoes"), ledger_path.stat().st_uid)
-    for candidate, digests in current.items():
-        markers[candidate] = sorted(set(markers.get(candidate, [])) | set(digests))
-    event = {"sequence": sequence, "key_id": key_id, "issued_at": issued_at,
-             "expires_at": expires_at, "type": "heartbeat", "ledger_head": head,
-             "pending_markers": markers, "state_sha256": hashlib.sha256(prior_state_bytes).hexdigest()}
-    signed = _sign(event, private_key)
-    state = {**prior, "sequence": max(sequence, int(prior.get("sequence", 0))),
-             "ledger_head": head, "pending_markers": markers}
-    _write_state(state_path, state, private_key)
-    fcntl.flock(lock, fcntl.LOCK_UN)
-    lock.close()
+    with (state_path.with_name(state_path.name + ".lock")).open("a") as lock:
+        fcntl.flock(lock, fcntl.LOCK_EX)
+        try:
+        prior = _read_state(state_path, private_key)
+        prior_state_bytes = state_path.read_bytes() if state_path.exists() else canonical({})
+        if not trusted_keys:
+            raise ValueError("supervisor requires trusted ledger keys")
+        if not isinstance(integrator_key_id, str) or not integrator_key_id:
+            raise ValueError("supervisor requires an integrator key id")
+        integrator = trusted_keys.get(integrator_key_id)
+        if isinstance(integrator, dict) and integrator.get("public_key"):
+            if integrator.get("can_resolve_pending") is True or integrator.get("can_authorize") is True:
+                raise ValueError("integrator key has a reserved ledger capability")
+            integrator_der = _public_key_der(integrator["public_key"])
+            for other_id, authority in trusted_keys.items():
+                if (other_id != integrator_key_id and isinstance(authority, dict) and
+                        (authority.get("can_resolve_pending") is True or authority.get("can_authorize") is True) and
+                        authority.get("public_key") and _public_key_der(authority["public_key"]) == integrator_der):
+                    raise ValueError("integrator public key is shared with a reserved ledger authority")
+        rows = verify(ledger_path, trusted_keys)
+        previous_head = prior.get("ledger_head", "0" * 64)
+        row_hashes = {row["hash"] for row in rows}
+        if previous_head != "0" * 64 and previous_head not in row_hashes:
+            message = "ledger truncated or rewritten since last heartbeat"
+            incidents = list(prior.get("incidents", []))
+            incidents.append({"type": "incident", "message": message, "issued_at": issued_at})
+            _write_state(state_path, {**prior, "incidents": incidents}, private_key)
+            incident_key = trusted_keys.get(key_id)
+            if isinstance(incident_key, dict) and incident_key.get("can_record_incidents") is True:
+                append(ledger_path, {"type": "incident", "id": f"ledger-continuity-{sequence}",
+                    "summary": message, "issued_at": issued_at}, key_id, private_key, trusted_keys)
+            raise ValueError(message)
+        head = rows[-1]["hash"] if rows else "0" * 64
+        resolved = {digest for row in rows if "resolves_pending" in row
+                    for digest in row["resolves_pending"]}
+        markers = {key: list(values) for key, values in prior.get("pending_markers", {}).items()}
+        markers = {candidate: [digest for digest in digests if digest not in resolved]
+                   for candidate, digests in markers.items()}
+        markers = {candidate: digests for candidate, digests in markers.items() if digests}
+        current = all_pending_vetoes(Path(str(ledger_path) + ".pending-vetoes"), ledger_path.stat().st_uid)
+        for candidate, digests in current.items():
+            markers[candidate] = sorted(set(markers.get(candidate, [])) | set(digests))
+        event = {"sequence": sequence, "key_id": key_id, "issued_at": issued_at,
+                 "expires_at": expires_at, "type": "heartbeat", "ledger_head": head,
+                 "pending_markers": markers, "state_sha256": hashlib.sha256(prior_state_bytes).hexdigest()}
+        signed = _sign(event, private_key)
+        state = {**prior, "sequence": max(sequence, int(prior.get("sequence", 0))),
+                 "ledger_head": head, "pending_markers": markers}
+        _write_state(state_path, state, private_key)
+        finally:
+            fcntl.flock(lock, fcntl.LOCK_UN)
     return signed
