@@ -303,6 +303,153 @@ def test_git_push_classifies_real_client_and_server_transcripts(monkeypatch, std
     assert result["server_rejected"] is expected
 
 
+@pytest.mark.parametrize(("stderr", "expected"), [
+    (" ! [rejected] main -> main (stale info)\nerror: failed to push some refs", False),
+    (" ! [rejected] main -> main (non-fast-forward)\nerror: failed to push some refs", False),
+    (" ! [remote rejected] main -> main (protected branch hook declined)\nerror: failed to push some refs", True),
+    ("remote: error: GH013: Repository rule violations found for refs/heads/main", True),
+])
+def test_push_rejection_regex_distinguishes_client_and_server(stderr, expected):
+    assert trial._is_server_rejection(stderr) is expected
+
+
+def _push_record(refspec, response, *, code=1, server=True):
+    return {"method": "git push", "refspec": refspec, "exit_code": code,
+            "status": 0 if code == 0 else 1, "server_rejected": server, "response": response}
+
+
+class RefClient(DummyClient):
+    def __init__(self, refs):
+        super().__init__([])
+        self.refs = refs
+
+    def request(self, method, path, body=None):
+        self.calls.append((method, path, body))
+        status, payload = self.refs[path].pop(0)
+        return auth.APIResponse(status, payload, {})
+
+
+def _ref_reply(sha):
+    return (200, {"object": {"sha": sha}})
+
+
+def test_a01_implementer_passes_only_server_push_denial_and_unchanged_main(monkeypatch):
+    before = "a" * 40
+    client = RefClient({"/repos/org/trial/git/ref/heads/main": [_ref_reply(before), _ref_reply(before)]})
+    monkeypatch.setattr(trial, "_git_push", lambda *_a, **_k: _push_record(
+        "HEAD:refs/heads/main", "! [remote rejected] HEAD -> main (protected branch hook declined)"))
+    status, _, evidence = trial.run_test("A-01", "org", "trial", "aao-impl-codex", client)
+    assert status == "PASS"
+    assert evidence[1]["server_rejected"] is True
+
+
+def test_a04_stale_lease_passes_only_server_rejection_and_moved_main_intact(monkeypatch):
+    old, moved = "a" * 40, "b" * 40
+    client = RefClient({"/repos/org/trial/git/ref/heads/main": [
+        _ref_reply(old), _ref_reply(moved), _ref_reply(moved),
+    ]})
+    pushes = iter([
+        _push_record("local:refs/heads/aao-trial/stale-lease", "To github\n * [new branch]", code=0, server=False),
+        _push_record("old:refs/heads/main", "! [remote rejected] old -> main (stale lease rejected)")])
+    monkeypatch.setattr(trial.subprocess, "run", lambda args, **_kw: type(
+        "Result", (), {"stdout": moved + "\n" if args[1:3] == ["rev-parse", "HEAD"] else ""})())
+    monkeypatch.setattr(trial, "_git_push", lambda *_a, **_k: next(pushes))
+    original_api = trial._api
+    monkeypatch.setattr(trial, "_api", lambda c, m, p, b=None: (
+        original_api(c, m, p, b) if m == "GET" else {"method": m, "path": p, "status": 200,
+        "response": {"data": {"updateRefs": {"refs": [{"name": "main"}]}}}}))
+    status, _, evidence = trial.run_test("A-04", "org", "trial", "aao-integrator", client)
+    assert status == "PASS"
+    assert evidence[-2]["server_rejected"] is True
+
+
+def test_p3_01_ceo_ruleset_server_rejection_passes_with_reread(monkeypatch):
+    before = "a" * 40
+    client = RefClient({"/repos/org/trial/git/ref/heads/main": [_ref_reply(before), _ref_reply(before)]})
+    monkeypatch.setattr(trial, "_git_push", lambda *_a, **_k: _push_record(
+        "HEAD:refs/heads/main", "remote: error: GH013: Repository rule violations"))
+    assert trial.run_test("P3-01", "org", "trial", "ceo", client)[0] == "PASS"
+
+
+def test_p3_07_integrator_forces_main_and_staging_and_rereads_both(monkeypatch):
+    main, candidate = "a" * 40, "b" * 40
+    base = "/repos/org/trial/git/ref/heads/"
+    client = RefClient({base + "main": [_ref_reply(main), _ref_reply(main)],
+                        base + "aao-staging/" + candidate[:12]: [(404, {"message": "Not Found"}),
+                                                                (404, {"message": "Not Found"})]})
+    monkeypatch.setattr(trial.subprocess, "run", lambda *_a, **_k: type(
+        "Result", (), {"stdout": candidate + "\n", "returncode": 1})())
+    pushes = []
+    def fake_push(_client, _repo, refspec, **_kwargs):
+        pushes.append(refspec)
+        return _push_record(refspec, "! [remote rejected] main -> main (protected branch hook declined)")
+    monkeypatch.setattr(trial, "_git_push", fake_push)
+    status, _, _ = trial.run_test("P3-07", "org", "trial", "aao-integrator", client)
+    assert status == "PASS"
+    assert pushes == [f"+{candidate}:refs/heads/main",
+                      f"+{candidate}:refs/heads/aao-staging/{candidate[:12]}"]
+
+
+def test_p3_07_implementer_uses_a01_not_p3_07():
+    client = DummyClient([])
+    status, _, evidence = trial.run_test("P3-07", "org", "trial", "aao-impl-codex", client)
+    assert status == "NOT RUN"
+    assert not client.calls and not evidence
+
+
+def test_p3_12_forced_non_fast_forward_must_be_server_rejected(monkeypatch):
+    main, candidate = "a" * 40, "b" * 40
+    client = RefClient({"/repos/org/trial/git/ref/heads/main": [_ref_reply(main), _ref_reply(main)]})
+    monkeypatch.setattr(trial.subprocess, "run", lambda *_a, **_k: type(
+        "Result", (), {"stdout": candidate + "\n", "returncode": 1})())
+    calls = []
+    monkeypatch.setattr(trial, "_git_push", lambda _c, _r, spec, **kw: (
+        calls.append((spec, kw)) or _push_record(spec,
+        "! [remote rejected] HEAD -> main (non-fast-forward update rejected by ruleset)")))
+    status, _, _ = trial.run_test("P3-12", "org", "trial", "aao-integrator", client)
+    assert status == "PASS"
+    assert calls == [("+HEAD:refs/heads/main", {"no_verify": True})]
+
+
+def test_a14_requires_workflows_permission_denial_and_accepted_control(monkeypatch):
+    main, parent = "a" * 40, "b" * 40
+    base = "/repos/org/trial"
+    client = RefClient({base: [(200, {"fork": True, "parent": {"full_name": "org/parent"}})],
+                        base + "/git/ref/heads/main": [_ref_reply(main), _ref_reply(main)]})
+    monkeypatch.setenv("AAO_GITHUB_TRIAL_FORK_PARENT", "org/parent")
+    monkeypatch.setattr(trial.subprocess, "run", lambda args, **_kw: type(
+        "Result", (), {"stdout": ".github/workflows/ci.yml\n" if "diff-tree" in args else parent + "\n"})())
+    pushes = []
+    def fake_push(_client, _repo, spec, **_kw):
+        pushes.append(spec)
+        if spec.endswith("main"):
+            return _push_record(spec, "remote: refusing to allow an OAuth App to create or update workflow without 'workflows' permission")
+        return _push_record(spec, "To github\n * [new branch]", code=0, server=False)
+    monkeypatch.setattr(trial, "_git_push", fake_push)
+    status, _, _ = trial.run_test("A-14", "org", "trial", "aao-probe-noworkflows", client)
+    assert status == "PASS"
+    assert pushes == ["HEAD:refs/heads/main", f"{parent}:refs/heads/aao-trial/no-workflows-{parent[:12]}"]
+
+
+def test_p3_09_ceo_ruleset_rejection_passes_when_pr_remains_open():
+    client = DummyClient([
+        (200, [{"number": 9}]),
+        (403, {"message": "Protected branch update failed: ruleset requires pull request"}),
+        (200, {"merged": False, "state": "open"}),
+    ])
+    status, _, _ = trial.run_test("P3-09", "org", "trial", "ceo", client)
+    assert status == "PASS"
+
+
+@pytest.mark.parametrize("error", [AttributeError("unexpected API shape"), KeyError("head")])
+def test_b6_07_attribute_or_key_error_is_recorded_as_failure(monkeypatch, error):
+    monkeypatch.setattr(trial, "_run_test", lambda *_a, **_k: (_ for _ in ()).throw(error))
+    status, reason, evidence = trial.run_test("A-01", "org", "trial", "aao-impl-codex", DummyClient([]))
+    assert status == "FAIL"
+    assert type(error).__name__ in reason
+    assert evidence[0]["exception"] == type(error).__name__
+
+
 def test_a10_auditor_permissions_pass_on_fork_installation():
     permissions = trial.FORK_PERMISSIONS["aao-auditor"]
     client = DummyClient([(200, {"permissions": permissions})])

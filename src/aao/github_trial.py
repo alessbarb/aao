@@ -128,10 +128,20 @@ def _git_push(client: GitHubAppClient, repo: str, refspec: str, *, force_with_le
     stderr = stderr.replace(token, "[REDACTED]")
     # Client-side [rejected] (non-fast-forward/stale info) is never evidence
     # that GitHub's receive-pack/ruleset rejected an update.
-    server_rejected = bool(re.search(r"(?:^|\n)[^\n]*\[remote rejected\].*(?:\(|:)|(?:^|\n)remote:.*(?:protected branch|permission to .* denied|not permitted|GH\d+:|workflow|non-fast-forward|ruleset)", stderr, re.IGNORECASE))
+    server_rejected = _is_server_rejection(stderr)
     return {"method": "git push", "remote": remote, "refspec": refspec,
             "exit_code": result.returncode, "status": 0 if result.returncode == 0 else 1,
             "server_rejected": server_rejected, "response": stderr}
+
+
+def _is_server_rejection(stderr: str) -> bool:
+    """Distinguish receive-pack rejection from client-side push negotiation."""
+    return bool(re.search(
+        r"(?:^|\n)[^\n]*\[remote rejected\].*(?:\(|:)|"
+        r"(?:^|\n)remote:.*(?:protected branch|permission to .* denied|"
+        r"not permitted|GH\d+:|workflow|non-fast-forward|ruleset)",
+        stderr, re.IGNORECASE,
+    ))
 
 
 def _trial_repo_allowed(owner: str, repo: str) -> bool:
@@ -155,9 +165,39 @@ def _verify_unchanged(client: GitHubAppClient, base: str, before: str, evidence:
     return bool(after and after == before)
 
 
+def _ref_sha(client: GitHubAppClient, base: str, ref: str, evidence: list[dict]) -> tuple[int, str | None]:
+    record = _api(client, "GET", f"{base}/git/ref/heads/{ref}")
+    evidence.append(record)
+    if record["status"] == 404:
+        return 404, None
+    if record["status"] != 200 or not isinstance(record["response"], dict):
+        return record["status"], None
+    return 200, record["response"].get("object", {}).get("sha")
+
+
+def _ref_unchanged(client: GitHubAppClient, base: str, ref: str, before_status: int,
+                   before_sha: str | None, evidence: list[dict]) -> bool:
+    after_status, after_sha = _ref_sha(client, base, ref, evidence)
+    return (after_status, after_sha) == (before_status, before_sha)
+
+
+def _is_ancestor(ancestor: str, descendant: str) -> bool | None:
+    try:
+        result = subprocess.run(["git", "merge-base", "--is-ancestor", ancestor, descendant],
+                                capture_output=True, timeout=10, check=False)
+    except (OSError, subprocess.SubprocessError):
+        return None
+    return result.returncode == 0 if result.returncode in (0, 1) else None
+
+
 def _push_rejection_pass(item: dict, unchanged: bool, expected: str = "protected branch") -> bool:
     response = item.get("response", "").lower()
-    reason_matches = expected.lower() in response or (expected == "protected branch" and "permission to " in response and " denied" in response)
+    reason_matches = expected.lower() in response or (
+        expected == "protected branch" and (
+            ("permission to " in response and " denied" in response)
+            or "ruleset" in response or "gh013:" in response
+        )
+    )
     return item.get("exit_code", 0) != 0 and item.get("server_rejected") is True and reason_matches and unchanged
 
 
@@ -273,7 +313,7 @@ def owner_repo(base: str) -> str:
     return base.removeprefix("/repos/")
 
 
-def run_test(test_id: str, owner: str, repo: str, role: str, client: GitHubAppClient) -> tuple[str, str, list[dict]]:
+def _run_test(test_id: str, owner: str, repo: str, role: str, client: GitHubAppClient) -> tuple[str, str, list[dict]]:
     base = f"/repos/{owner}/{repo}"
     evidence: list[dict] = []
     if not _trial_repo_allowed(owner, repo):
@@ -284,7 +324,7 @@ def run_test(test_id: str, owner: str, repo: str, role: str, client: GitHubAppCl
         "A-04": {"aao-integrator"}, "A-05": {"aao-integrator"}, "A-09": {"aao-notifier"},
         "P3-02": implementers, "P3-03": {"aao-integrator"}, "P3-05": {"aao-integrator"},
         "P3-06": {"aao-integrator"}, "P3-12": {"aao-integrator"},
-        "P3-01": {"aao-integrator", "ceo"}, "P3-07": {"aao-impl-codex", "aao-impl-claude", "aao-impl-ag"},
+        "P3-01": {"aao-integrator", "ceo"}, "P3-07": {"aao-integrator"},
         "P3-09": {"ceo"},
         "A-14": {"aao-probe-noworkflows"},
     }
@@ -378,8 +418,10 @@ def run_test(test_id: str, owner: str, repo: str, role: str, client: GitHubAppCl
         try:
             changed = subprocess.run(["git", "diff-tree", "--root", "--no-commit-id", "--name-only", "-r", "HEAD"],
                                      check=True, capture_output=True, text=True, timeout=10).stdout.splitlines()
+            parent_sha = subprocess.run(["git", "rev-parse", "HEAD^"], check=True, capture_output=True,
+                                        text=True, timeout=10).stdout.strip()
         except (OSError, subprocess.SubprocessError):
-            return "NOT RUN", "Run from a local disposable clone containing the test commit.", evidence
+            return "NOT RUN", "Run from a local disposable clone containing a workflow-changing commit with a parent.", evidence
         if not any(path.startswith(".github/workflows/") for path in changed):
             return "NOT RUN", "Prepare a disposable local commit changing .github/workflows/ and rerun; the harness will attempt that commit's push to main.", evidence
         before = _main_sha(client, base, evidence)
@@ -388,9 +430,16 @@ def run_test(test_id: str, owner: str, repo: str, role: str, client: GitHubAppCl
         item = _git_push(client, f"{owner}/{repo}", "HEAD:refs/heads/main")
         evidence.append(item)
         message = item.get("response", "").lower()
-        expected = item.get("exit_code", 0) != 0 and item.get("server_rejected") and ("workflow" in message or "workflows" in message or "permission" in message)
+        expected = (item.get("exit_code", 0) != 0 and item.get("server_rejected")
+                    and re.search(r"workflows?.{0,12}permission", message) is not None)
         unchanged = _verify_unchanged(client, base, before, evidence)
-        return ("PASS", "server denied workflow-changing push for missing workflow permission; fork main unchanged", evidence) if expected and unchanged else ("FAIL", "workflow push was not rejected for the expected permission or fork main changed", evidence)
+        if not expected or not unchanged:
+            return "FAIL", "workflow push was not rejected for missing workflows permission or fork main changed", evidence
+        branch = f"refs/heads/aao-trial/no-workflows-{parent_sha[:12]}"
+        positive = _git_push(client, f"{owner}/{repo}", f"{parent_sha}:{branch}")
+        evidence.append(positive)
+        accepted = positive.get("exit_code") == 0 and positive.get("status") == 0
+        return ("PASS", "workflow push denied for missing workflows permission; non-workflow control push accepted", evidence) if accepted else ("FAIL", "workflow push denial passed but non-workflow control push was not accepted", evidence)
     if test_id == "P3-09":
         if role != "ceo":
             return "NOT RUN", "Run explicitly with --role ceo to test the CEO identity.", evidence
@@ -469,17 +518,41 @@ def run_test(test_id: str, owner: str, repo: str, role: str, client: GitHubAppCl
         if not before:
             return "FAIL", "could not read main before protected push attempt", evidence
         if test_id == "P3-07":
-            # Force-update an actually divergent candidate; bypass local hooks so
-            # the ruleset, not the client, must decide non_fast_forward.
+            # Force-update main and staging so Git sends both updates to receive-pack.
             try:
-                parent = subprocess.run(["git", "rev-parse", "HEAD^"], check=True, capture_output=True, text=True, timeout=10).stdout.strip()
+                candidate = subprocess.run(["git", "rev-parse", "HEAD"], check=True, capture_output=True,
+                                           text=True, timeout=10).stdout.strip()
             except (OSError, subprocess.SubprocessError):
-                return "NOT RUN", "P3-07 requires a local commit with a parent for a real non-fast-forward attempt", evidence
-            if parent == before:
-                return "NOT RUN", "P3-07 candidate is fast-forward; prepare a divergent candidate commit", evidence
-            item = _git_push(client, f"{owner}/{repo}", "+HEAD:refs/heads/main", force=True, no_verify=True)
+                return "NOT RUN", "P3-07 requires a local candidate commit for a forced non-fast-forward attempt", evidence
+            if not re.fullmatch(r"[0-9a-f]{40,64}", candidate) or candidate == before:
+                return "NOT RUN", "P3-07 requires a candidate SHA distinct from main", evidence
+            stage = f"aao-staging/{candidate[:12]}"
+            stage_status, stage_before = _ref_sha(client, base, stage, evidence)
+            if stage_status not in (200, 404):
+                return "FAIL", "could not read staging ref before forced update", evidence
+            if _is_ancestor(before, candidate) is not False or (
+                stage_status == 200 and _is_ancestor(stage_before or "", candidate) is not False
+            ):
+                return "NOT RUN", "P3-07 candidate must be divergent from both main and the selected staging ref", evidence
+            main_item = _git_push(client, f"{owner}/{repo}", f"+{candidate}:refs/heads/main", no_verify=True)
+            evidence.append(main_item)
+            stage_item = _git_push(client, f"{owner}/{repo}", f"+{candidate}:refs/heads/{stage}", no_verify=True)
+            evidence.append(stage_item)
+            main_unchanged = _verify_unchanged(client, base, before, evidence)
+            stage_unchanged = _ref_unchanged(client, base, stage, stage_status, stage_before, evidence)
+            both_rejected = all(
+                item.get("exit_code", 0) != 0 and item.get("server_rejected") is True
+                and re.search(r"protected branch|ruleset|GH\d+:", item.get("response", ""), re.IGNORECASE)
+                for item in (main_item, stage_item)
+            )
+            passed = both_rejected and main_unchanged and stage_unchanged
+            return ("PASS", "server rejected forced updates to main and staging; both refs unchanged", evidence) if passed else ("FAIL", "forced main/staging updates were not both rejected by protection or a ref changed", evidence)
         else:
-            item = _git_push(client, f"{owner}/{repo}", "HEAD:refs/heads/main")
+            candidate = subprocess.run(["git", "rev-parse", "HEAD"], check=True, capture_output=True,
+                                       text=True, timeout=10).stdout.strip()
+            if _is_ancestor(before, candidate) is not False:
+                return "NOT RUN", "P3-12 requires a candidate that is genuinely non-fast-forward to main", evidence
+            item = _git_push(client, f"{owner}/{repo}", "+HEAD:refs/heads/main", no_verify=True)
         evidence.append(item)
         unchanged = _verify_unchanged(client, base, before, evidence)
         expected = "non-fast-forward" if test_id == "P3-12" else "protected branch"
@@ -532,6 +605,17 @@ def run_test(test_id: str, owner: str, repo: str, role: str, client: GitHubAppCl
     if test_id == "P3-04":
         return "NOT RUN", "Prepare a candidate whose aao-audit check/status was published by a non-auditor App, then run as aao-integrator and attempt the candidate ref update; the auditor app_id is not available cross-uid to this invocation.", evidence
     raise ValueError(f"unsupported test id: {test_id}")
+
+
+def run_test(test_id: str, owner: str, repo: str, role: str,
+             client: GitHubAppClient) -> tuple[str, str, list[dict]]:
+    """Keep malformed API response shapes as explicit, recorded failures."""
+    try:
+        return _run_test(test_id, owner, repo, role, client)
+    except (AttributeError, KeyError) as exc:
+        evidence = [{"method": "trial evaluation", "status": "error",
+                     "exception": type(exc).__name__, "detail": str(exc)[:300]}]
+        return "FAIL", f"trial response handling failed: {type(exc).__name__}", evidence
 
 
 def write_evidence(test_id: str, status: str, reason: str, repo: str, role: str, app_id: int, evidence: list[dict]) -> Path:
