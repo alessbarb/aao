@@ -34,6 +34,8 @@ from aao.independent_audit import (
     parse_policy,
     run_sandboxed,
 )
+from aao.pending_veto import PendingVetoError
+from aao.pending_veto import pending_vetoes as verify_pending_vetoes
 from aao.pr_conformity import _canonical, _sha
 
 ANCHOR_PATH = Path("/etc/aao-audit/trust-anchor.json")
@@ -122,22 +124,10 @@ def record_pending_veto(anchor: dict[str, Any], candidate_sha: str, manifest_sha
 def pending_vetoes(anchor: dict[str, Any], candidate_sha: str) -> list[str]:
     """Digests of pending-veto markers for a candidate. Unreadable or unsafe markers raise (fail closed)."""
     directory = _pending_dir(anchor)
-    if not directory.exists():
-        return []
-    _check_parents(directory / "x", (anchor["auditor_uid"],))
-    info = os.lstat(directory)
-    if stat.S_ISLNK(info.st_mode) or info.st_uid != anchor["auditor_uid"] or stat.S_IMODE(info.st_mode) != 0o700:
-        raise AuditError("pending-veto directory is not private to the auditor uid")
-    digests = []
-    for path in sorted(directory.iterdir()):
-        if not path.name.startswith(candidate_sha + "-"):
-            continue
-        data = read_protected(path, (anchor["auditor_uid"],))
-        marker = json.loads(data)
-        if marker.get("candidate_sha") != candidate_sha or path.name != f"{candidate_sha}-{_sha(data)}.json":
-            raise AuditError(f"pending-veto marker {path.name} is inconsistent")
-        digests.append(_sha(data))
-    return digests
+    try:
+        return verify_pending_vetoes(directory, candidate_sha, anchor["auditor_uid"])
+    except PendingVetoError as error:
+        raise AuditError(str(error)) from error
 
 
 def attributed_implementers(anchor: dict[str, Any], candidate_sha: str) -> list[str]:
@@ -159,7 +149,9 @@ def _ledger_keys(anchor: dict[str, Any], directory: Path) -> dict[str, Any]:
     """Trusted signer registry for the audit ledger: only the anchored auditor key."""
     public = directory / "auditor.pub"
     public.write_text(anchor["auditor_public_key"], encoding="ascii")
-    return {anchor["policy"]["auditor_id"]: {"public_key": str(public)}}
+    return {anchor["policy"]["auditor_id"]: {
+        "public_key": str(public), "can_resolve_pending": True,
+    }}
 
 
 def ledger_rows(anchor: dict[str, Any]) -> list[dict[str, Any]]:

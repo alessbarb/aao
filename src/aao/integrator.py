@@ -12,6 +12,7 @@ from typing import Any
 
 from aao.governance_ledger import active_vetoes, append, open_incidents, verify
 from aao.integration_authorization import canonical, validate
+from aao.pending_veto import PendingVetoError, pending_vetoes
 
 
 @dataclass(frozen=True)
@@ -22,6 +23,37 @@ class TrustSources:
     heartbeat: Path
     freeze: Path
     integrator_private_key: Path
+
+
+def _public_key_der(public_key: str) -> bytes:
+    result = subprocess.run(
+        ["openssl", "pkey", "-pubin", "-in", public_key, "-outform", "DER"],
+        check=False,
+        capture_output=True,
+    )
+    if result.returncode != 0:
+        raise ValueError("trust registry contains an unreadable public key")
+    return result.stdout
+
+
+def _validate_integrator_key_separation(registry: dict[str, Any]) -> None:
+    keys = registry.get("ledger_keys")
+    key_id = registry.get("integrator_key_id")
+    if not isinstance(keys, dict) or not isinstance(key_id, str):
+        raise TypeError("integrator trust registry is incomplete")
+    integrator = keys.get(key_id)
+    if not isinstance(integrator, dict) or not integrator.get("public_key"):
+        raise ValueError("integrator trust registry key is missing")
+    if integrator.get("can_resolve_pending") is True or integrator.get("can_authorize") is True:
+        raise ValueError("integrator key has a reserved ledger capability")
+    integrator_key = _public_key_der(integrator["public_key"])
+    for other_id, entry in keys.items():
+        if other_id == key_id or not isinstance(entry, dict):
+            continue
+        if ((entry.get("can_resolve_pending") is True or entry.get("can_authorize") is True)
+                and entry.get("public_key")
+                and _public_key_der(entry["public_key"]) == integrator_key):
+            raise ValueError("integrator public key is shared with a reserved ledger authority")
 
 
 def _git(repo: Path, *args: str) -> str:
@@ -65,8 +97,26 @@ def promote(repo: Path, remote: str, auth: dict[str, Any], signature: str,
         raise RuntimeError("integrator frozen")
     registry = json.loads(trust_sources.trust_registry.read_text())
     ledger_keys = registry["ledger_keys"]
+    _validate_integrator_key_separation(registry)
     anchor = trust_sources.ledger_anchor.read_text().strip()
     rows = verify(trust_sources.ledger, ledger_keys, anchor)
+    try:
+        markers = pending_vetoes(Path(str(trust_sources.ledger) + ".pending-vetoes"), auth["candidate_sha"],
+                                 trust_sources.ledger.stat().st_uid)
+    except (PendingVetoError, OSError, ValueError) as error:
+        raise ValueError(f"pending vetoes cannot be verified: {error}") from error
+    resolved: set[str] = set()
+    for row in rows:
+        if "resolves_pending" in row:
+            values = row["resolves_pending"]
+            if not isinstance(values, list) or any(not isinstance(value, str) for value in values):
+                raise ValueError("pending vetoes cannot be verified: malformed resolves_pending ledger field")
+            key_entry = ledger_keys.get(row.get("key_id"))
+            if not isinstance(key_entry, dict) or key_entry.get("can_resolve_pending") is not True:
+                raise ValueError("resolves_pending signer is not an enabled authority")
+            resolved.update(values)
+    if any(digest not in resolved for digest in markers):
+        raise ValueError("candidate has an unresolved pending veto")
     incident_resolvers = registry.get("incident_resolvers")
     if not isinstance(incident_resolvers, list) or any(
         row.get("type") == "incident-resolution" and row.get("key_id") not in incident_resolvers
