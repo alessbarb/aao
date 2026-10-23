@@ -57,7 +57,44 @@ crear_org() {
 for app in aao-impl-codex aao-impl-claude aao-impl-ag aao-probe-noworkflows; do crear_org "$app"; done
 ```
 
+> **Registro (2026-10-24):** las nueve Apps ya están creadas e instaladas; sus identificadores no secretos están en `deploy/github-apps/aao-github-apps-registry.json`. La App de Antigravity se llama **`aao-impl-agy`** (manifiesto `docs/proposals/github-apps/aao-impl-agy.json`) y su clave la custodia el usuario Linux **`aao-impl-ag`**. La autenticación API de cada App se comprueba con `scripts/github_apps/verify_app_auth.py` (§1-ter).
+
 Las Apps de la primera pasada se comprueban a posteriori con `scripts/github_apps/verify_app_permissions.sh <apps...>`; todas deben dar PASS.
+
+## 1-ter. Verificar la autenticación API de las nueve Apps
+
+**Quién:** el CEO (sudo, P5 (a)). Cada comprobación corre **como el uid que custodia la clave**; nadie más lee la clave.
+**Qué hace:** con la clave de la App firma un JWT, comprueba `GET /app` (id, slug, permisos frente al manifiesto revisado), la instalación (`app_id`, cuenta, permisos, no suspendida), obtiene un token de instalación, lista los repositorios accesibles y revoca el token. Solo lectura en GitHub. No imprime clave, JWT ni token.
+**Repos esperados:** integrador, auditores, supervisor, notifier y PM solo `autoaiorg/aao` (`selected`). Los implementadores **nunca** el repo canónico (solo su fork, A-10/A-11).
+
+```bash
+REPO=$HOME/workspace/repos/active/aao
+REV=<SHA de main que contiene este script>
+git -C "$REPO" fetch -q origin && git -C "$REPO" cat-file -e "$REV^{commit}"
+sudo install -d -o root -g root -m 0755 /opt/aao-p2 /opt/aao-p2/github-apps
+git -C "$REPO" show "$REV:scripts/github_apps/verify_app_auth.py" | sudo install -o root -g root -m 0755 /dev/stdin /opt/aao-p2/verify_app_auth.py
+git -C "$REPO" show "$REV:deploy/github-apps/aao-github-apps-registry.json" | sudo install -o root -g root -m 0644 /dev/stdin /opt/aao-p2/aao-github-apps-registry.json
+for m in $(git -C "$REPO" ls-tree --name-only "$REV" docs/proposals/github-apps/ | grep '\.json$'); do
+  git -C "$REPO" show "$REV:$m" | sudo install -o root -g root -m 0644 /dev/stdin "/opt/aao-p2/github-apps/$(basename "$m")"
+done
+out=~/aao-p2-app-auth-$(date +%Y%m%dT%H%M%S).jsonl
+while read -r app uid; do
+  sudo -u "$uid" -H /usr/bin/python3 -I /opt/aao-p2/verify_app_auth.py "$app" | tee -a "$out"
+done <<'APPS'
+aao-integrator aao-integrator
+aao-auditor aao-auditor
+aao-auditor-alt aao-auditor-alt
+aao-supervisor aao-supervisor
+aao-notifier aao-notifier
+aao-pm aao-pm
+aao-impl-claude aao-impl-claude
+aao-impl-codex aao-impl-codex
+aao-impl-agy aao-impl-ag
+APPS
+grep -c '"result": "PASS"' "$out"   # debe dar 9
+```
+
+Pega el archivo `$out` completo en el issue de P2. No contiene secretos. Nueve PASS demuestran la autenticación de las Apps; **no** son el ensayo P2/P3: RA sigue en PENDING y el integrador no se activa.
 
 ## 2. Instalar las Apps (solo en el repo de ensayo, por ahora)
 

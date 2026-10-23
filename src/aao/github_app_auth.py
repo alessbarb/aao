@@ -18,9 +18,15 @@ from typing import Any
 API_VERSION = "2022-11-28"
 ROLE_NAMES = {
     "aao-integrator", "aao-auditor", "aao-auditor-alt", "aao-supervisor",
-    "aao-notifier", "aao-pm", "aao-impl-codex", "aao-impl-claude", "aao-impl-ag",
+    "aao-notifier", "aao-pm", "aao-impl-codex", "aao-impl-claude", "aao-impl-agy",
     "aao-probe-noworkflows",
 }
+# App name -> Linux account that holds its key, where they differ (the Antigravity App is aao-impl-agy).
+LINUX_USER = {"aao-impl-agy": "aao-impl-ag"}
+
+
+def linux_user(app: str) -> str:
+    return LINUX_USER.get(app, app)
 
 
 class GitHubAuthError(RuntimeError):
@@ -56,7 +62,7 @@ def load_app(app: str) -> tuple[int, Path]:
     key_path, metadata_path = _paths(app)
     uid = os.getuid()
     try:
-        owner = pwd.getpwnam(app).pw_uid
+        owner = pwd.getpwnam(linux_user(app)).pw_uid
     except KeyError as exc:
         raise GitHubAuthError(f"role account {app} does not exist") from exc
     if owner != uid:

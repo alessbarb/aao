@@ -1,0 +1,16 @@
+{
+  "canonical_repository": "autoaiorg/aao",
+  "recorded_on": "2026-10-24",
+  "verification_status": "IDs reported by account owner; API authentication not yet verified",
+  "apps": [
+    {"name":"aao-integrator","app_id":5447984,"installation_id":174634211,"linux_uid":"aao-integrator","key_file":"/home/aao-integrator/.config/aao/aao-integrator.pem"},
+    {"name":"aao-auditor","app_id":5448107,"installation_id":174636428,"linux_uid":"aao-auditor","key_file":"/home/aao-auditor/.config/aao/aao-auditor.pem"},
+    {"name":"aao-auditor-alt","app_id":5448148,"installation_id":174637282,"linux_uid":"aao-auditor-alt","key_file":"/home/aao-auditor-alt/.config/aao/aao-auditor-alt.pem"},
+    {"name":"aao-supervisor","app_id":5448178,"installation_id":174637714,"linux_uid":"aao-supervisor","key_file":"/home/aao-supervisor/.config/aao/aao-supervisor.pem"},
+    {"name":"aao-notifier","app_id":5448204,"installation_id":174638581,"linux_uid":"aao-notifier","key_file":"/home/aao-notifier/.config/aao/aao-notifier.pem"},
+    {"name":"aao-pm","app_id":5448234,"installation_id":174639276,"linux_uid":"aao-pm","key_file":"/home/aao-pm/.config/aao/aao-pm.pem"},
+    {"name":"aao-impl-claude","app_id":5448259,"installation_id":174640145,"linux_uid":"aao-impl-claude","key_file":"/home/aao-impl-claude/.config/aao/aao-impl-claude.pem"},
+    {"name":"aao-impl-codex","app_id":5448303,"installation_id":174640697,"linux_uid":"aao-impl-codex","key_file":"/home/aao-impl-codex/.config/aao/aao-impl-codex.pem"},
+    {"name":"aao-impl-agy","app_id":5448323,"installation_id":174641093,"linux_uid":"aao-impl-ag","key_file":"/home/aao-impl-ag/.config/aao/aao-impl-agy.pem"}
+  ]
+}

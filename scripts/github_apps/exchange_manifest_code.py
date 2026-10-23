@@ -20,7 +20,7 @@ MANIFESTS = Path(__file__).resolve().parent / "github-apps"
 ROLE_FOR_APP = {"aao-integrator": "aao-integrator", "aao-auditor": "aao-auditor",
                 "aao-auditor-alt": "aao-auditor-alt", "aao-supervisor": "aao-supervisor",
                 "aao-notifier": "aao-notifier", "aao-pm": "aao-pm", "aao-impl-codex": "aao-impl-codex",
-                "aao-impl-claude": "aao-impl-claude", "aao-impl-ag": "aao-impl-ag",
+                "aao-impl-claude": "aao-impl-claude", "aao-impl-agy": "aao-impl-ag",
                 # Disposable A-14 probe: its own uid, created by the CEO only for the trial.
                 "aao-probe-noworkflows": "aao-probe-noworkflows"}
 

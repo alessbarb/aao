@@ -264,7 +264,7 @@ def test_permission_tables_match_p2_manifest_values():
         "issues": "write", "pull_requests": "write", "contents": "read", "metadata": "read",
     }
     expected_fork = {"contents": "write", "workflows": "write", "metadata": "read"}
-    for role in ("aao-impl-codex", "aao-impl-claude", "aao-impl-ag"):
+    for role in ("aao-impl-codex", "aao-impl-claude", "aao-impl-agy"):
         assert trial.EXPECTED_PERMISSIONS[role] == {
             "contents": "write", "pull_requests": "write", "workflows": "write", "metadata": "read",
         }
