@@ -171,7 +171,10 @@ POLKIT_ACTIONS = ("org.freedesktop.systemd1.manage-units", "org.freedesktop.syst
                   "org.freedesktop.systemd1.reload-daemon", "org.freedesktop.machine1.shell",
                   "org.freedesktop.machine1.host-shell")
 POLKIT_DIRS = ("/etc/polkit-1/rules.d", "/usr/share/polkit-1/rules.d", "/usr/local/share/polkit-1/rules.d",
-               "/run/polkit-1/rules.d", "/etc/polkit-1/localauthority", "/var/lib/polkit-1/localauthority")
+               "/run/polkit-1/rules.d", "/etc/polkit-1/localauthority", "/var/lib/polkit-1/localauthority",
+               # AdminIdentities (who satisfies auth_admin) for the legacy local authority; for the JS
+               # backend addAdminRule lives in the rules.d files above. Admins must be E5's groups.
+               "/etc/polkit-1/localauthority.conf.d", "/usr/share/polkit-1/localauthority.conf.d")
 
 
 def _package_pristine(path: Path) -> bool:
