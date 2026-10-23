@@ -48,6 +48,7 @@ _GIT_ENV = {"PATH": "/usr/bin:/bin", "HOME": "/nonexistent", "GIT_CONFIG_NOSYSTE
             "GIT_CONFIG_GLOBAL": "/dev/null", "LANG": "C.UTF-8"}
 _ANCHOR_FIELDS = {"schema", "policy_path", "policy_sha256", "auditor_uid", "auditor_public_key", "ledger_path",
                   "ledger_anchor_path", "attribution_path",
+                  "attribution_writer_uid",
                   "supervisor_public_key", "supervisor_key_id", "supervisor_heartbeat_path",
                   "supervisor_intake_socket"}
 ATTRIBUTION_SCHEMA = "aao.implementer-attribution.v1"
@@ -85,7 +86,8 @@ def load_anchor(anchor_path: Path = ANCHOR_PATH, anchor_owner_uids: tuple[int, .
         anchor = json.loads(raw)
         if not isinstance(anchor, dict) or set(anchor) != _ANCHOR_FIELDS or anchor["schema"] != ANCHOR_SCHEMA:
             raise ValueError("unexpected anchor fields")
-        if not isinstance(anchor["auditor_uid"], int) or not isinstance(anchor["auditor_public_key"], str):
+        if (not isinstance(anchor["auditor_uid"], int) or not isinstance(anchor["auditor_public_key"], str) or
+                not isinstance(anchor["attribution_writer_uid"], int)):
             raise TypeError("malformed anchor identity")
     except (ValueError, TypeError) as error:
         raise AuditError(f"trust anchor is invalid: {error}") from error
@@ -199,7 +201,8 @@ def attributed_implementers(anchor: dict[str, Any], candidate_sha: str) -> list[
     The file is written by the merge authority from authenticated push events (RA-02) and is owned like the
     trust anchor. An absent file, unknown candidate or empty list means attribution is unresolved."""
     try:
-        data = json.loads(read_protected(Path(anchor["attribution_path"]), anchor["anchor_owner_uids"]))
+        owners = tuple(dict.fromkeys((*anchor["anchor_owner_uids"], anchor["attribution_writer_uid"])))
+        data = json.loads(read_protected(Path(anchor["attribution_path"]), owners))
         identities = data["candidates"][candidate_sha] if data.get("schema") == ATTRIBUTION_SCHEMA else None
     except (AuditError, OSError, ValueError, KeyError, TypeError, AttributeError):
         return []

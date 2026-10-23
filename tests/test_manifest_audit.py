@@ -113,6 +113,7 @@ def env(tmp_path, monkeypatch, request):
                   "policy_sha256": hashlib.sha256(_canonical(policy)).hexdigest(), "auditor_uid": UID,
                   "auditor_public_key": public, "ledger_path": str(state / "ledger.jsonl"),
                   "ledger_anchor_path": str(ledger_anchor_path), "attribution_path": str(attribution_path),
+                  "attribution_writer_uid": UID,
                   "supervisor_public_key": supervisor_public, "supervisor_key_id": "supervisor",
                   "supervisor_heartbeat_path": str(heartbeat_path), "supervisor_intake_socket": intake_socket,
                   **anchor_overrides}
