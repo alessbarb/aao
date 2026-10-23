@@ -48,16 +48,26 @@ sudo -u aao-supervisor openssl pkey -in /var/lib/aao-supervisor/keys/supervisor-
 
 ## 3. Ancla, política, configuración del supervisor y registro
 
-Se generan con el script revisado de la misma revisión: `scripts/make_trust_root_files.py`. **[PENDIENTE: se escribe cuando la prueba E2E fije el formato del registro.]** Los archivos son estos:
+Primero se genera la clave de firma del integrador, que custodia su propio uid. Después, los archivos se generan con el script revisado de esta misma revisión:
 
-| Archivo | Propietario | Modo |
-|---|---|---|
-| `/etc/aao-audit/trust-anchor.json` | root | 0644 |
-| `/etc/aao-supervisor/config.json` | root | 0644 |
-| `/srv/aao/trust/registry.json` | aao-trust | 0644 |
-| la política en `policy_path` | aao-auditor | 0644 |
+```bash
+sudo -u aao-integrator openssl genpkey -algorithm ed25519 -out /var/lib/aao-integrator/integrator-ed25519.pem
+sudo -u aao-integrator chmod 0600 /var/lib/aao-integrator/integrator-ed25519.pem
+sudo -u aao-integrator openssl pkey -in /var/lib/aao-integrator/integrator-ed25519.pem -pubout \
+  | sudo install -o aao-trust -g aao-trust -m 0644 /dev/stdin /srv/aao/trust/keys/aao-integrator-ed25519.pub
+G=$(sudo mktemp -d)/out
+sudo /usr/bin/python3 -I /srv/aao/frozen/aao-supervisor/tree/scripts/make_trust_root_files.py --revision "$REV" \
+  --policy-template /srv/aao/frozen/aao-supervisor/tree/docs/audit-runs/20261019-provisional/policy.json --out "$G"
+sudo install -d -o root -g root -m 0755 /etc/aao-audit /etc/aao-supervisor
+sudo install -o root -g root -m 0644 "$G/trust-anchor.json" /etc/aao-audit/trust-anchor.json
+sudo install -o root -g root -m 0644 "$G/supervisor-config.json" /etc/aao-supervisor/config.json
+sudo install -o aao-trust -g aao-trust -m 0644 "$G/registry.json" /srv/aao/trust/registry.json
+sudo install -o aao-auditor -g aao-auditor -m 0644 "$G/policy.json" /var/lib/aao-auditor/policy.json
+echo 0000000000000000000000000000000000000000000000000000000000000000 | sudo install -o root -g root -m 0644 /dev/stdin /etc/aao-audit/ledger.anchor
+echo "$REV" | sudo install -o root -g root -m 0644 /dev/stdin /etc/aao-audit/expected-revision
+```
 
-`trusted_auditor_revisions = ["$REV"]`.
+El registro nace con todos los RA en **PENDING**, así que el integrador falla cerrado. Cuando el ensayo P2/P3 dé PASS (A-01 a A-14, P3-01 a P3-12), el CEO reinstala `registry.json` con esos RA en PASS. Es el último paso manual. A partir de ahí no hay ningún dato por PR en el registro.
 
 ## 4. Arranque y verificación
 

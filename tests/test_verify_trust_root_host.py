@@ -140,3 +140,8 @@ def test_admin_identities_beyond_e5_groups_are_flagged(tmp_path):
                       '  return [identityFor(subject)];\n});')
     _, problems = verifier.admin_identities([hidden])
     assert problems == [f"{hidden}: addAdminRule is not a plain list of literal identities"]
+
+
+def test_verifier_anchor_fields_match_the_auditor():
+    from aao.manifest_audit import _ANCHOR_FIELDS
+    assert verifier.ANCHOR_FIELDS == _ANCHOR_FIELDS

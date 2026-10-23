@@ -24,7 +24,8 @@ def canonical(value: object) -> bytes:
 
 
 def build(revision: str, template: dict, auditor_pub: str, supervisor_pub: str, auditor_uid: int,
-          developer_users: list[str], supervisor_key_id: str = "aao-supervisor") -> dict[str, dict]:
+          developer_users: list[str], supervisor_key_id: str = "aao-supervisor",
+          attribution_writer_uid: int | None = None) -> dict[str, dict]:
     if not re.fullmatch(r"[0-9a-f]{40}", revision):
         raise ValueError("revision must be a full lowercase SHA")
     policy = {**template, "auditor_id": "aao-auditor", "auditor_os_user": "aao-auditor",
@@ -34,7 +35,10 @@ def build(revision: str, template: dict, auditor_pub: str, supervisor_pub: str, 
     anchor = {"schema": "aao.audit-trust-anchor.v1", "policy_path": POLICY_PATH,
               "policy_sha256": hashlib.sha256(canonical(policy)).hexdigest(), "auditor_uid": auditor_uid,
               "auditor_public_key": auditor_pub, "ledger_path": LEDGER,
-              "ledger_anchor_path": "/etc/aao-audit/ledger.anchor", "attribution_path": "/etc/aao-audit/attribution.json",
+              "ledger_anchor_path": "/etc/aao-audit/ledger.anchor",
+              # Written by the supervisor from authenticated push events (RA-02), so no PR needs root.
+              "attribution_path": "/var/lib/aao-supervisor/attribution/attribution.json",
+              "attribution_writer_uid": attribution_writer_uid if attribution_writer_uid is not None else -1,
               "supervisor_public_key": supervisor_pub, "supervisor_key_id": supervisor_key_id,
               "supervisor_heartbeat_path": HEARTBEAT, "supervisor_intake_socket": INTAKE_SOCKET}
     config = {"schema": "aao.supervisor-config.v1", "auditor_uid": auditor_uid, "ledger_path": LEDGER,
@@ -95,7 +99,8 @@ def main() -> int:
     parser.add_argument("--out", type=Path, required=True)
     args = parser.parse_args()
     files = build(args.revision, json.loads(args.policy_template.read_text()), args.auditor_public_key.read_text(),
-                  args.supervisor_public_key.read_text(), pwd.getpwnam("aao-auditor").pw_uid, args.developer)
+                  args.supervisor_public_key.read_text(), pwd.getpwnam("aao-auditor").pw_uid, args.developer,
+                  attribution_writer_uid=pwd.getpwnam("aao-supervisor").pw_uid)
     files["registry.json"] = build_registry(
         files["policy.json"], files["trust-anchor.json"],
         auditor_models={"aao-auditor": "claude", "aao-auditor-alt": "codex"},

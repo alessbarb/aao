@@ -23,7 +23,8 @@ def _pub(tmp_path, name):
 
 def test_generated_anchor_loads_with_the_real_loader(tmp_path):
     template = json.loads((ROOT / "docs/audit-runs/20261019-provisional/policy.json").read_text())
-    files = maker.build(REV, template, _pub(tmp_path, "a"), _pub(tmp_path, "s"), os.getuid(), ["alessbarb"])
+    files = maker.build(REV, template, _pub(tmp_path, "a"), _pub(tmp_path, "s"), os.getuid(), ["alessbarb"],
+                        attribution_writer_uid=os.getuid())
     trust = tmp_path / "trust"
     trust.mkdir(mode=0o755)
     policy = trust / "policy.json"

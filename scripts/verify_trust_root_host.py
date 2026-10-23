@@ -34,7 +34,8 @@ from pathlib import Path
 AUDITOR, SUPERVISOR, TRUST = "aao-auditor", "aao-supervisor", "aao-trust"
 ANCHOR = Path("/etc/aao-audit/trust-anchor.json")
 ANCHOR_FIELDS = {"schema", "policy_path", "policy_sha256", "auditor_uid", "auditor_public_key", "ledger_path",
-                 "ledger_anchor_path", "attribution_path", "supervisor_public_key", "supervisor_key_id",
+                 "ledger_anchor_path", "attribution_path", "attribution_writer_uid",
+                 "supervisor_public_key", "supervisor_key_id",
                  "supervisor_heartbeat_path", "supervisor_intake_socket"}
 INTAKE_DIR = Path("/run/aao-veto-intake")
 INTAKE_SOCKET = INTAKE_DIR / "veto.sock"
@@ -392,8 +393,9 @@ def anchor(expected_revision: str) -> None:
                  and not ancestors_safe(ANCHOR, set()), "T1 trust anchor is root-owned and protected"):
         return
     data = json.loads(ANCHOR.read_bytes())
-    check(set(data) == ANCHOR_FIELDS, "T2 anchor has exactly the 12 fields of manifest_audit._ANCHOR_FIELDS")
+    check(set(data) == ANCHOR_FIELDS, "T2 anchor has exactly the fields of manifest_audit._ANCHOR_FIELDS")
     check(data.get("auditor_uid") == uid(AUDITOR), "T3 anchor auditor_uid is aao-auditor")
+    check(data.get("attribution_writer_uid") == uid(SUPERVISOR), "T3b attribution writer is aao-supervisor")
     check(data.get("supervisor_intake_socket") == str(INTAKE_SOCKET) and
           data.get("supervisor_heartbeat_path") == str(HEARTBEAT), "T4 anchor points at the verified socket/heartbeat")
     policy_path = Path(data.get("policy_path", "/nonexistent"))
