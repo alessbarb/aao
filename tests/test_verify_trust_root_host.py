@@ -135,8 +135,8 @@ def test_admin_identities_beyond_e5_groups_are_flagged(tmp_path):
                      '  return ["unix-group:sudo", "unix-user:" + subject.user];\n});')
     _, problems = verifier.admin_identities([mixed])
     assert problems == [f"{mixed}: addAdminRule is not a plain list of literal identities"]
-    comment = tmp_path / "62-comment.rules"
-    comment.write_text('// polkit.addAdminRule(function(a, s) { return [x]; });\n'
-                       'polkit.addAdminRule(function(a, s) { return ["unix-group:sudo"]; });')
-    identities, problems = verifier.admin_identities([comment])
-    assert identities == {"unix-group:sudo"} and problems == []
+    hidden = tmp_path / "62-hidden.rules"
+    hidden.write_text('var marker = "//"; polkit.addAdminRule(function(action, subject) {\n'
+                      '  return [identityFor(subject)];\n});')
+    _, problems = verifier.admin_identities([hidden])
+    assert problems == [f"{hidden}: addAdminRule is not a plain list of literal identities"]

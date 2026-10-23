@@ -235,7 +235,9 @@ def admin_identities(paths: list[Path]) -> tuple[set[str], list[str]]:
     identities: set[str] = set()
     problems = []
     for path in paths:
-        text = re.sub(r"/\*.*?\*/|//[^\n]*", "", path.read_text(errors="replace"), flags=re.DOTALL)
+        # No comment/string stripping (that needs a JS parser): any occurrence of addAdminRule, even in a
+        # comment or a string, must be a strict match, otherwise the file FAILs.
+        text = path.read_text(errors="replace")
         strict = _STRICT_ADMIN_RULE.findall(text)
         if text.count("addAdminRule") != len(strict):
             problems.append(f"{path}: addAdminRule is not a plain list of literal identities")
