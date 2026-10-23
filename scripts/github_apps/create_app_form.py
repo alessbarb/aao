@@ -9,7 +9,7 @@ their forks in the organization) and the probe App must be owned by the organiza
 Open the printed file in the browser and click "Create GitHub App".
 GitHub then redirects to http://127.0.0.1:9/?code=...  (nothing listens there):
 copy the `code` value from the address bar and give it to the role account:
-    sudo -u aao-integrator -H python3 /opt/aao-p2/exchange_manifest_code.py aao-integrator <code>
+    sudo -u aao-integrator -H python3 /opt/aao-p2/exchange_manifest_code.py aao-integrator   (paste <code> on stdin)
 The private key is returned only to that call, so it never touches the CEO account.
 The code expires after one hour and can be used once.
 """

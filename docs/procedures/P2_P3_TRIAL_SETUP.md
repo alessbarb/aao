@@ -27,7 +27,7 @@ python3 scripts/github_apps/create_app_form.py aao-integrator      # escribe /tm
 xdg-open /tmp/aao-create-aao-integrator.html                       # pulsa "Create GitHub App"
 # GitHub redirige a http://127.0.0.1:9/?code=XXXX&state=YYYY (la página no carga; es normal).
 # Comprueba que state coincide con el impreso y copia el valor de code:
-sudo -u aao-integrator -H python3 /opt/aao-p2/exchange_manifest_code.py aao-integrator XXXX
+sudo -u aao-integrator -H python3 /opt/aao-p2/exchange_manifest_code.py aao-integrator   # pega XXXX y pulsa Enter (stdin, no argv)
 ```
 
 - La clave privada solo la recibe el uid del rol (`~/.config/aao/<app>.pem`, en `0600`). Nunca pasa por tu cuenta ni por otra.
@@ -52,7 +52,7 @@ sudo useradd --system --create-home --shell /usr/sbin/nologin aao-probe-noworkfl
 crear_org() {
   python3 scripts/github_apps/create_app_form.py "$1" --org aao-agents && xdg-open "/tmp/aao-create-$1.html"
   read -r -p "code: " code
-  sudo -u "$1" -H python3 /opt/aao-p2/exchange_manifest_code.py "$1" "$code"
+  sudo -u "$1" -H python3 /opt/aao-p2/exchange_manifest_code.py "$1" <<<"$code"
 }
 for app in aao-impl-codex aao-impl-claude aao-impl-ag aao-probe-noworkflows; do crear_org "$app"; done
 ```
