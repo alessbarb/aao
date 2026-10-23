@@ -2,8 +2,9 @@
 """Verify one GitHub App's API authentication as its own Linux account (P2). Read-only on GitHub.
 
 Run once per App, as the App's uid, from the root-owned copy installed in /opt/aao-p2:
-    sudo -u <linux_uid> -H /usr/bin/python3 -I /opt/aao-p2/verify_app_auth.py <app> [--fork OWNER/REPO]
-Implementer Apps need --fork: the one repository (a fork of the canonical repo) they may reach.
+    sudo -u <linux_uid> -H /usr/bin/python3 -I /opt/aao-p2/verify_app_auth.py <app> [--fork OWNER/REPO]...
+Implementer Apps need --fork for each repository they may reach: forks of the canonical repo or of its
+trial repo (<owner>/aao-governance-trial). Their accessible repos must equal that set exactly.
 Reads app_id, installation_id, linux_uid and key_file from the reviewed registry next to this script,
 and the expected permissions from the reviewed manifest in ./github-apps/. Prints one JSON record.
 Never prints the private key, the JWT or the installation token; the token is revoked before exit.
@@ -96,7 +97,7 @@ def _read_key(path: Path, uid: int, home: Path) -> bytes:
         os.close(fd)
 
 
-def verify(app: str, fork: str | None = None) -> tuple[bool, dict]:
+def verify(app: str, forks: list[str] | None = None) -> tuple[bool, dict]:
     manifest = MANIFESTS / f"{app}.json"
     if not all(_trusted(p) for p in (HERE, REGISTRY, MANIFESTS, manifest)):
         return False, {"app": app, "error": "registry/manifests must be root-owned and not group/other-writable"}
@@ -148,7 +149,8 @@ def verify(app: str, fork: str | None = None) -> tuple[bool, dict]:
         return False, rec | {"error": "access_tokens " + _err(status, tok)}
     repos: list[str] = []
     canonical = registry["canonical_repository"]
-    forks_of_canonical: list[bool] = []
+    parents = {canonical, canonical.split("/")[0] + "/aao-governance-trial"}
+    forks_ok: list[bool] = []
     try:
         page = 1
         while True:
@@ -165,10 +167,10 @@ def verify(app: str, fork: str | None = None) -> tuple[bool, dict]:
                 break
             page += 1
         if app not in CANONICAL_ONLY and "error" not in rec:
-            for name in repos:  # each implementer repo must be a fork whose parent is the canonical repo
+            for name in repos:  # each implementer repo must be a fork of the canonical repo or of its trial
                 status, body = _call("GET", f"/repos/{name}", token)
-                forks_of_canonical.append(status == 200 and isinstance(body, dict) and body.get("fork") is True
-                                          and (body.get("parent") or {}).get("full_name") == canonical)
+                forks_ok.append(status == 200 and isinstance(body, dict) and body.get("fork") is True
+                                and (body.get("parent") or {}).get("full_name") in parents)
     finally:
         revoke, _ = _call("DELETE", "/installation/token", token)
         del token
@@ -179,18 +181,19 @@ def verify(app: str, fork: str | None = None) -> tuple[bool, dict]:
             and rec["repository_selection"] == "selected"
     else:
         checks["implementer_cannot_reach_canonical"] = canonical not in rec["accessible_repositories"]
-        rec["expected_fork"] = fork
-        checks["implementer_only_its_fork"] = fork is not None and repos == [fork] \
-            and rec["repository_selection"] == "selected" and forks_of_canonical == [True]
+        rec["expected_forks"] = sorted(forks or [])
+        checks["implementer_only_its_forks"] = bool(forks) and sorted(repos) == sorted(set(forks)) \
+            and len(repos) == len(set(repos)) and rec["repository_selection"] == "selected" \
+            and len(forks_ok) == len(repos) and all(forks_ok)
     return "error" not in rec and all(checks.values()), rec
 
 
 def main() -> int:
     args = sys.argv[1:]
-    if len(args) not in (1, 3) or (len(args) == 3 and args[1] != "--fork"):
+    if not args or len(args) % 2 != 1 or any(flag != "--fork" for flag in args[1::2]):
         print(__doc__, file=sys.stderr)
         return 2
-    ok, rec = verify(args[0], args[2] if len(args) == 3 else None)
+    ok, rec = verify(args[0], args[2::2] or None)
     rec["result"] = "PASS" if ok else "FAIL"
     rec["checked_at"] = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
     print(json.dumps(rec, sort_keys=True))

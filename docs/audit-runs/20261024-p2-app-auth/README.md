@@ -24,7 +24,7 @@ Las Apps tienen `installation_id` en `autoaiorg/aao` antes de existir el repo de
 | `GET /app` con JWT | `id` = `app_id` del registro; `slug` = nombre; permisos = manifiesto revisado |
 | `GET /app/installations/<id>` | pertenece a la App, no suspendida, permisos = manifiesto |
 | token de instalación | se emite y se revoca (`DELETE /installation/token` → 204) |
-| repos accesibles | integrador, auditores, supervisor, notifier, PM: solo `autoaiorg/aao` (`selected`). Implementadores: exactamente su fork (`--fork`), que es fork de `autoaiorg/aao`; nunca el canónico |
+| repos accesibles | integrador, auditores, supervisor, notifier, PM: solo `autoaiorg/aao` (`selected`). Implementadores: exactamente los forks indicados (`--fork`), de `autoaiorg/aao` o de su repo de ensayo; nunca el canónico |
 
 ## Resultados
 

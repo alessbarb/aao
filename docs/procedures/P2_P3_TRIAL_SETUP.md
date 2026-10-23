@@ -65,7 +65,7 @@ Las Apps de la primera pasada se comprueban a posteriori con `scripts/github_app
 
 **Quién:** el CEO (sudo, P5 (a)). Cada comprobación corre **como el uid que custodia la clave**; nadie más lee la clave.
 **Qué hace:** con la clave de la App firma un JWT, comprueba `GET /app` (id, slug, permisos frente al manifiesto revisado), la instalación (`app_id`, cuenta, permisos, no suspendida), obtiene un token de instalación, lista los repositorios accesibles y revoca el token. Solo lectura en GitHub. No imprime clave, JWT ni token.
-**Repos esperados:** integrador, auditores, supervisor, notifier y PM solo `autoaiorg/aao` (`selected`). Los implementadores: exactamente su fork de `autoaiorg/aao` (`--fork`), nunca el canónico (A-10/A-11).
+**Repos esperados:** integrador, auditores, supervisor, notifier y PM solo `autoaiorg/aao` (`selected`). Los implementadores: exactamente los forks indicados con `--fork` (de `autoaiorg/aao` o de su repo de ensayo), nunca el canónico (A-10/A-11).
 
 ```bash
 REPO=$HOME/workspace/repos/active/aao
@@ -78,14 +78,15 @@ for m in $(git -C "$REPO" ls-tree --name-only "$REV" docs/proposals/github-apps/
   git -C "$REPO" show "$REV:$m" | sudo install -o root -g root -m 0644 /dev/stdin "/opt/aao-p2/github-apps/$(basename "$m")"
 done
 out=~/aao-p2-app-auth-$(date +%Y%m%dT%H%M%S).jsonl
-# Tercera columna: solo implementadores. Sustituye cada <fork-...> por el OWNER/REPO de su fork de
-# PRODUCCIÓN, cuyo padre es autoaiorg/aao (las Apps están instaladas en el canónico). No sirven los
-# forks de ensayo del paso 3, cuyo padre es aao-governance-trial: esos se comprueban en el ensayo (A-11).
-# Si el fork aún no existe, pon "-": la autenticación se registra igual, pero esa fila da FAIL
-# (alcance no demostrado) y el total no llegará a 9.
-while read -r app uid fork; do
-  extra=(); [[ $fork != - ]] && extra=(--fork "$fork")
-  sudo -u "$uid" -H /usr/bin/python3 -I /opt/aao-p2/verify_app_auth.py "$app" "${extra[@]}" | tee -a "$out"
+# Tercera columna: solo implementadores. Sustituye cada <forks-...> por TODOS los repos en los que está
+# instalada esa App, separados por comas: su fork de producción (padre autoaiorg/aao) y, si ya existe,
+# su fork de ensayo del paso 3 (padre autoaiorg/aao-governance-trial). Sus repos accesibles deben
+# coincidir exactamente con esa lista. Si aún no hay fork, pon "-": la autenticación se registra igual,
+# pero esa fila da FAIL (alcance no demostrado) y el total no llegará a 9.
+set -o pipefail; rc=0
+while read -r app uid forks; do
+  extra=(); [[ $forks != - ]] && for f in ${forks//,/ }; do extra+=(--fork "$f"); done
+  sudo -u "$uid" -H /usr/bin/python3 -I /opt/aao-p2/verify_app_auth.py "$app" "${extra[@]}" | tee -a "$out" || rc=1
 done <<'APPS'
 aao-integrator aao-integrator -
 aao-auditor aao-auditor -
@@ -93,13 +94,13 @@ aao-auditor-alt aao-auditor-alt -
 aao-supervisor aao-supervisor -
 aao-notifier aao-notifier -
 aao-pm aao-pm -
-aao-impl-claude aao-impl-claude <fork-claude>
-aao-impl-codex aao-impl-codex <fork-codex>
-aao-impl-agy aao-impl-ag <fork-agy>
+aao-impl-claude aao-impl-claude <forks-claude>
+aao-impl-codex aao-impl-codex <forks-codex>
+aao-impl-agy aao-impl-ag <forks-agy>
 APPS
 pass=$(grep -c '"result": "PASS"' "$out" || true)
-# Una ejecución que falle o aborte no imprime "PASS", así que también baja el recuento.
-echo "PASS: $pass/9"; if [[ $pass == 9 ]]; then echo "RESULT: PASS"; else echo "RESULT: FAIL"; false; fi
+# Hacen falta las dos cosas: nueve registros PASS y que ninguna ejecución (ni su tubería) haya fallado.
+echo "PASS: $pass/9 rc=$rc"; if [[ $pass == 9 && $rc == 0 ]]; then echo "RESULT: PASS"; else echo "RESULT: FAIL"; false; fi
 ```
 
 Pega el archivo `$out` completo en el issue de P2. No contiene secretos. Solo `RESULT: PASS` (9/9) demuestra la autenticación y el alcance de las nueve Apps; con forks en `-`, las filas de implementadores dan FAIL, y sus `checks` individuales (`jwt_app_id`, `installation_token_issued`, `token_revoked`…) muestran si la autenticación pasó, pero no demuestran el alcance. Nueve PASS **no** son el ensayo P2/P3: RA sigue en PENDING y el integrador no se activa.
