@@ -247,17 +247,37 @@ def test_p3_03_wrong_http_reason_is_fail(monkeypatch):
 
 
 def test_a10_wrong_installation_permissions_is_fail():
-    client = DummyClient([(200, {"permissions": {"contents": "write", "metadata": "read", "administration": "write"}})])
+    client = DummyClient([(200, {"fork": False}),
+                          (200, {"permissions": {"contents": "write", "metadata": "read", "administration": "write"}})])
     status, _, _ = trial.run_test("A-10", "org", "trial", "aao-impl-codex", client)
     assert status == "FAIL"
 
 
-def test_a10_implementer_canonical_permissions_are_pr_only(monkeypatch):
-    monkeypatch.setenv("AAO_GITHUB_TRIAL_REPOS", "alessbarb/aao")
-    client = DummyClient([(200, {"permissions": {"contents": "read", "pull_requests": "write", "metadata": "read"}})])
-    status, _, _ = trial.run_test("A-10", "alessbarb", "aao", "aao-impl-codex", client)
-    assert status == "NOT RUN"  # the canonical repository is never an eligible trial target
-    assert not client.calls
+def test_permission_tables_match_p2_manifest_values():
+    """Pin corrected P2 manifest defaults and the narrower implementer fork scope offline."""
+    assert trial.EXPECTED_PERMISSIONS["aao-auditor"] == {
+        "contents": "read", "pull_requests": "read", "checks": "write",
+        "statuses": "write", "metadata": "read",
+    }
+    assert trial.EXPECTED_PERMISSIONS["aao-auditor-alt"] == trial.EXPECTED_PERMISSIONS["aao-auditor"]
+    assert trial.EXPECTED_PERMISSIONS["aao-pm"] == {
+        "issues": "write", "pull_requests": "write", "contents": "read", "metadata": "read",
+    }
+    expected_fork = {"contents": "write", "workflows": "write", "metadata": "read"}
+    for role in ("aao-impl-codex", "aao-impl-claude", "aao-impl-ag"):
+        assert trial.EXPECTED_PERMISSIONS[role] == {
+            "contents": "write", "pull_requests": "write", "workflows": "write", "metadata": "read",
+        }
+        assert trial.FORK_PERMISSIONS[role] == expected_fork
+        assert "pull_requests" not in trial.FORK_PERMISSIONS[role]
+
+
+def test_a10_implementer_on_trial_canonical_fails_even_with_read_only_permissions():
+    """P2 §4 makes the trial repo canonical: implementers must be absent, not merely read-only."""
+    client = DummyClient([(200, {"fork": False})])
+    status, _, _ = trial.run_test("A-10", "org", "trial", "aao-impl-codex", client)
+    assert status == "FAIL"
+    assert [call[1] for call in client.calls] == ["/repos/org/trial"]
 
 
 def test_default_branch_delete_is_not_run():
@@ -363,15 +383,41 @@ def test_a04_stale_lease_passes_only_server_rejection_and_moved_main_intact(monk
     assert evidence[-2]["server_rejected"] is True
 
 
-def test_p3_01_ceo_ruleset_server_rejection_passes_with_reread(monkeypatch):
+def test_p3_01_ceo_pass_requires_restrict_updates_attribution(monkeypatch):
+    """Generic GH013 can be caused by required checks; only explicit Restrict updates proves P3-01."""
+    before = "a" * 40
+    client = RefClient({"/repos/org/trial/git/ref/heads/main": [_ref_reply(before), _ref_reply(before)]})
+    monkeypatch.setattr(trial, "_git_push", lambda *_a, **_k: _push_record(
+        "HEAD:refs/heads/main", "remote: error: GH013: Restrict updates rule violation"))
+    assert trial.run_test("P3-01", "org", "trial", "ceo", client)[0] == "PASS"
+
+
+def test_p3_01_generic_gh013_is_inconclusive(monkeypatch):
     before = "a" * 40
     client = RefClient({"/repos/org/trial/git/ref/heads/main": [_ref_reply(before), _ref_reply(before)]})
     monkeypatch.setattr(trial, "_git_push", lambda *_a, **_k: _push_record(
         "HEAD:refs/heads/main", "remote: error: GH013: Repository rule violations"))
-    assert trial.run_test("P3-01", "org", "trial", "ceo", client)[0] == "PASS"
+    assert trial.run_test("P3-01", "org", "trial", "ceo", client)[0] == "INCONCLUSIVE"
 
 
-def test_p3_07_integrator_forces_main_and_staging_and_rereads_both(monkeypatch):
+def test_p3_01_permission_denied_is_not_ruleset_evidence(monkeypatch):
+    before = "a" * 40
+    client = RefClient({"/repos/org/trial/git/ref/heads/main": [_ref_reply(before), _ref_reply(before)]})
+    monkeypatch.setattr(trial, "_git_push", lambda *_a, **_k: _push_record(
+        "HEAD:refs/heads/main", "remote: Permission to org/trial.git denied to app"))
+    assert trial.run_test("P3-01", "org", "trial", "ceo", client)[0] == "INCONCLUSIVE"
+
+
+def test_p3_01_ruleset_name_does_not_override_failed_required_checks(monkeypatch):
+    before = "a" * 40
+    client = RefClient({"/repos/org/trial/git/ref/heads/main": [_ref_reply(before), _ref_reply(before)]})
+    monkeypatch.setattr(trial, "_git_push", lambda *_a, **_k: _push_record(
+        "HEAD:refs/heads/main", "remote: GH013: Restrict updates and required status checks aao-audit failed"))
+    assert trial.run_test("P3-01", "org", "trial", "ceo", client)[0] == "INCONCLUSIVE"
+
+
+def test_p3_07_integrator_requires_non_fast_forward_rule_for_both_refs(monkeypatch):
+    """P3-07 is PASS only when both server denials name non_fast_forward, not required checks."""
     main, candidate = "a" * 40, "b" * 40
     base = "/repos/org/trial/git/ref/heads/"
     client = RefClient({base + "main": [_ref_reply(main), _ref_reply(main)],
@@ -382,12 +428,38 @@ def test_p3_07_integrator_forces_main_and_staging_and_rereads_both(monkeypatch):
     pushes = []
     def fake_push(_client, _repo, refspec, **_kwargs):
         pushes.append(refspec)
-        return _push_record(refspec, "! [remote rejected] main -> main (protected branch hook declined)")
+        return _push_record(refspec, "remote: GH013: non_fast_forward rule violation")
     monkeypatch.setattr(trial, "_git_push", fake_push)
     status, _, _ = trial.run_test("P3-07", "org", "trial", "aao-integrator", client)
     assert status == "PASS"
     assert pushes == [f"+{candidate}:refs/heads/main",
                       f"+{candidate}:refs/heads/aao-staging/{candidate[:12]}"]
+
+
+def test_p3_07_generic_ruleset_denial_is_inconclusive(monkeypatch):
+    main, candidate = "a" * 40, "b" * 40
+    base = "/repos/org/trial/git/ref/heads/"
+    client = RefClient({base + "main": [_ref_reply(main), _ref_reply(main)],
+                        base + "aao-staging/" + candidate[:12]: [(404, {"message": "Not Found"}),
+                                                                (404, {"message": "Not Found"})]})
+    monkeypatch.setattr(trial.subprocess, "run", lambda *_a, **_k: type(
+        "Result", (), {"stdout": candidate + "\n", "returncode": 1})())
+    monkeypatch.setattr(trial, "_git_push", lambda *_a, **_k: _push_record(
+        "forced", "remote: GH013: Repository rule violations"))
+    assert trial.run_test("P3-07", "org", "trial", "aao-integrator", client)[0] == "INCONCLUSIVE"
+
+
+def test_p3_07_non_fast_forward_name_does_not_override_failed_checks(monkeypatch):
+    main, candidate = "a" * 40, "b" * 40
+    base = "/repos/org/trial/git/ref/heads/"
+    client = RefClient({base + "main": [_ref_reply(main), _ref_reply(main)],
+                        base + "aao-staging/" + candidate[:12]: [(404, {"message": "Not Found"}),
+                                                                (404, {"message": "Not Found"})]})
+    monkeypatch.setattr(trial.subprocess, "run", lambda *_a, **_k: type(
+        "Result", (), {"stdout": candidate + "\n", "returncode": 1})())
+    monkeypatch.setattr(trial, "_git_push", lambda *_a, **_k: _push_record(
+        "forced", "remote: GH013: non_fast_forward; required checks aao-audit failed"))
+    assert trial.run_test("P3-07", "org", "trial", "aao-integrator", client)[0] == "INCONCLUSIVE"
 
 
 def test_p3_07_implementer_uses_a01_not_p3_07():
@@ -431,14 +503,33 @@ def test_a14_requires_workflows_permission_denial_and_accepted_control(monkeypat
     assert pushes == ["HEAD:refs/heads/main", f"{parent}:refs/heads/aao-trial/no-workflows-{parent[:12]}"]
 
 
-def test_p3_09_ceo_ruleset_rejection_passes_when_pr_remains_open():
+def test_p3_09_ceo_pass_requires_restrict_updates_attribution():
+    """A still-open PR plus generic denial is insufficient; the API message must name Restrict updates."""
     client = DummyClient([
         (200, [{"number": 9}]),
-        (403, {"message": "Protected branch update failed: ruleset requires pull request"}),
+        (403, {"message": "Protected branch update failed: Restrict updates rule"}),
         (200, {"merged": False, "state": "open"}),
     ])
     status, _, _ = trial.run_test("P3-09", "org", "trial", "ceo", client)
     assert status == "PASS"
+
+
+def test_p3_09_generic_rule_violation_is_inconclusive():
+    client = DummyClient([
+        (200, [{"number": 9}]),
+        (403, {"message": "Protected branch update failed: rule violations"}),
+        (200, {"merged": False, "state": "open"}),
+    ])
+    assert trial.run_test("P3-09", "org", "trial", "ceo", client)[0] == "INCONCLUSIVE"
+
+
+def test_p3_09_rule_name_does_not_override_failed_required_checks():
+    client = DummyClient([
+        (200, [{"number": 9}]),
+        (403, {"message": "Restrict updates and required status checks are failing"}),
+        (200, {"merged": False, "state": "open"}),
+    ])
+    assert trial.run_test("P3-09", "org", "trial", "ceo", client)[0] == "INCONCLUSIVE"
 
 
 @pytest.mark.parametrize("error", [AttributeError("unexpected API shape"), KeyError("head")])
@@ -450,10 +541,25 @@ def test_b6_07_attribute_or_key_error_is_recorded_as_failure(monkeypatch, error)
     assert evidence[0]["exception"] == type(error).__name__
 
 
-def test_a10_auditor_permissions_pass_on_fork_installation():
+def test_a10_auditor_permissions_pass_on_fork_installation(monkeypatch):
+    """Fork permissions apply only after API parent identity matches the configured canonical repo."""
+    monkeypatch.setenv("AAO_GITHUB_TRIAL_FORK_PARENT", "org/parent")
     permissions = trial.FORK_PERMISSIONS["aao-auditor"]
-    client = DummyClient([(200, {"permissions": permissions})])
+    client = DummyClient([(200, {"fork": True, "parent": {"full_name": "org/parent"}}),
+                          (200, {"permissions": permissions})])
     status, _, _ = trial.run_test("A-10", "org", "trial", "aao-auditor", client)
+    assert status == "PASS"
+
+
+@pytest.mark.parametrize("role", [
+    "aao-integrator", "aao-auditor", "aao-auditor-alt", "aao-supervisor",
+    "aao-notifier", "aao-pm",
+])
+def test_a10_non_implementer_roles_are_checked_against_canonical_column(role):
+    """Every non-implementer role is evaluated against its explicit P2 permissions."""
+    permissions = trial.EXPECTED_PERMISSIONS[role]
+    client = DummyClient([(200, {"fork": False}), (200, {"permissions": permissions})])
+    status, _, _ = trial.run_test("A-10", "org", "trial", role, client)
     assert status == "PASS"
 
 

@@ -33,6 +33,8 @@ EXPECTED_PERMISSIONS = {
     "aao-supervisor": {"contents": "read", "pull_requests": "read", "checks": "read", "actions": "read", "metadata": "read"},
     "aao-notifier": {"issues": "write", "metadata": "read"},
     "aao-pm": {"issues": "write", "pull_requests": "write", "contents": "read", "metadata": "read"},
+    # Implementer app defaults describe the manifest, but A-10 rejects installing
+    # these Apps on the canonical repository. Their fork installation is narrower.
     "aao-impl-codex": {"contents": "write", "pull_requests": "write", "workflows": "write", "metadata": "read"},
     "aao-impl-claude": {"contents": "write", "pull_requests": "write", "workflows": "write", "metadata": "read"},
     "aao-impl-ag": {"contents": "write", "pull_requests": "write", "workflows": "write", "metadata": "read"},
@@ -199,6 +201,28 @@ def _push_rejection_pass(item: dict, unchanged: bool, expected: str = "protected
         )
     )
     return item.get("exit_code", 0) != 0 and item.get("server_rejected") is True and reason_matches and unchanged
+
+
+def _rejection_attributable(item: dict, rule: str) -> bool:
+    """Require explicit server text naming the rule under test, not generic GH013."""
+    response = item.get("response", "").lower()
+    if re.search(r"required (?:status )?checks?|status checks?|aao-audit|\btest\b", response):
+        return False
+    if rule == "restrict updates":
+        return "restrict updates" in response or "restrict_updates" in response
+    if rule == "non-fast-forward":
+        return "non-fast-forward" in response or "non_fast_forward" in response
+    return rule.lower() in response
+
+
+def _denial_outcome(item: dict, unchanged: bool, rule: str, label: str) -> tuple[str, str]:
+    if item.get("exit_code", 0) == 0 or not unchanged:
+        return "FAIL", f"{label} was accepted or changed the protected ref"
+    if item.get("server_rejected") is not True:
+        return "FAIL", f"{label} did not receive a server-side rejection"
+    if not _rejection_attributable(item, rule):
+        return "INCONCLUSIVE", f"server rejection was not attributable to {rule}"
+    return "PASS", f"server rejected {label} specifically for {rule}; protected ref unchanged"
 
 
 def _merge_trial_pr(client: GitHubAppClient, base: str, evidence: list[dict]) -> tuple[str, str, list[dict]]:
@@ -386,15 +410,28 @@ def _run_test(test_id: str, owner: str, repo: str, role: str, client: GitHubAppC
         unchanged = _verify_unchanged(client, base, before, evidence)
         return ("PASS", "issue created; server denied protected-branch push; main unchanged", evidence) if _push_rejection_pass(push, unchanged) else ("FAIL", "issue created but push failure cause or remote state did not match", evidence)
     if test_id == "A-10":
+        target = _api(client, "GET", base)
+        evidence.append(target)
+        if target["status"] != 200 or not isinstance(target["response"], dict):
+            return "INCONCLUSIVE", "could not identify whether the trial repository is the configured canonical repo or its fork", evidence
+        repo_info = target["response"]
+        is_fork = repo_info.get("fork") is True
+        parent = repo_info.get("parent", {}).get("full_name", "").lower() if isinstance(repo_info.get("parent"), dict) else ""
+        expected_parent = os.environ.get("AAO_GITHUB_TRIAL_FORK_PARENT", "").lower()
+        target_repo = f"{owner}/{repo}".lower()
+        is_configured_canonical = bool(expected_parent) and target_repo == expected_parent
+        is_trial_fork = is_fork and bool(expected_parent) and parent == expected_parent and not is_configured_canonical
+        if is_fork and not (is_trial_fork or is_configured_canonical):
+            return "INCONCLUSIVE", "target is a fork but its configured canonical parent was not established", evidence
+        if role in {"aao-impl-codex", "aao-impl-claude", "aao-impl-ag"} and not is_trial_fork:
+            return "FAIL", "implementer App is installed on the trial canonical repository; it must be installed only on its verified fork", evidence
         item = _api(client, "GET", "/installation")
         evidence.append(item)
         actual = item["response"].get("permissions", {}) if isinstance(item["response"], dict) else {}
-        expected = EXPECTED_PERMISSIONS[role]
-        is_trial_fork = f"{owner}/{repo}".lower() != CANONICAL_REPO
-        if is_trial_fork and role in FORK_PERMISSIONS:
-            expected = FORK_PERMISSIONS[role]
-        elif is_trial_fork:
-            return "NOT RUN", "this App is specified only for the canonical repository", evidence
+        expected_table = FORK_PERMISSIONS if is_trial_fork else EXPECTED_PERMISSIONS
+        if role not in expected_table:
+            return "NOT RUN", "this App has no permission column for the verified repository class in P2 §4", evidence
+        expected = expected_table[role]
         clean = {k: v for k, v in actual.items() if v not in (None, "none")}
         return ("PASS", "installation permissions match role manifest", evidence) if clean == expected else ("FAIL", f"installation permissions differ from expected table: expected {expected}, got {clean}", evidence)
     if test_id == "A-12":
@@ -455,9 +492,11 @@ def _run_test(test_id: str, owner: str, repo: str, role: str, client: GitHubAppC
         after = _api(client, "GET", f"{base}/pulls/{number}")
         evidence.append(after)
         message = item.get("response", {}).get("message", "").lower() if isinstance(item.get("response"), dict) else ""
-        expected = item["status"] == 403 and any(term in message for term in ("ruleset", "protected branch", "rule violations", "required pull request"))
+        expected = item["status"] in (403, 405) and _rejection_attributable({"response": message}, "restrict updates")
         unchanged = after["status"] == 200 and after["response"].get("merged") is False and after["response"].get("state") == "open"
-        return ("PASS", "CEO merge denied by ruleset with HTTP 403; PR remains open", evidence) if expected and unchanged else ("FAIL", "CEO merge attempt was not denied by ruleset or PR state changed", evidence)
+        if unchanged and item["status"] in (403, 405) and not expected:
+            return "INCONCLUSIVE", "merge was denied but response did not attribute it to Restrict updates", evidence
+        return ("PASS", "CEO merge denied by Restrict updates; PR remains open", evidence) if expected and unchanged else ("FAIL", "CEO merge attempt was not denied by Restrict updates or PR state changed", evidence)
     if test_id == "A-02":
         pulls = _api(client, "GET", f"{base}/pulls?state=open&per_page=1")
         evidence.append(pulls)
@@ -509,7 +548,8 @@ def _run_test(test_id: str, owner: str, repo: str, role: str, client: GitHubAppC
             item = _git_push(client, f"{owner}/{repo}", "HEAD:refs/heads/main")
             evidence.append(item)
             unchanged = _verify_unchanged(client, base, before, evidence)
-            return ("PASS", "CEO push rejected by ruleset; main unchanged", evidence) if _push_rejection_pass(item, unchanged) else ("FAIL", "CEO push was accepted or rejection was not attributable to ruleset", evidence)
+            status, reason = _denial_outcome(item, unchanged, "restrict updates", "CEO push")
+            return status, reason, evidence
         if test_id == "P3-02" and role not in ("aao-impl-codex", "aao-impl-claude", "aao-impl-ag"):
             return "NOT RUN", "Run with one of the implementer App roles to test its denial on canonical main.", evidence
         if test_id == "P3-12" and role != "aao-integrator":
@@ -540,13 +580,11 @@ def _run_test(test_id: str, owner: str, repo: str, role: str, client: GitHubAppC
             evidence.append(stage_item)
             main_unchanged = _verify_unchanged(client, base, before, evidence)
             stage_unchanged = _ref_unchanged(client, base, stage, stage_status, stage_before, evidence)
-            both_rejected = all(
-                item.get("exit_code", 0) != 0 and item.get("server_rejected") is True
-                and re.search(r"protected branch|ruleset|GH\d+:", item.get("response", ""), re.IGNORECASE)
-                for item in (main_item, stage_item)
-            )
-            passed = both_rejected and main_unchanged and stage_unchanged
-            return ("PASS", "server rejected forced updates to main and staging; both refs unchanged", evidence) if passed else ("FAIL", "forced main/staging updates were not both rejected by protection or a ref changed", evidence)
+            if main_unchanged and stage_unchanged and all(item.get("exit_code", 0) != 0 and item.get("server_rejected") is True for item in (main_item, stage_item)):
+                if not all(_rejection_attributable(item, "non-fast-forward") for item in (main_item, stage_item)):
+                    return "INCONCLUSIVE", "server rejected forced updates but did not attribute both to non_fast_forward", evidence
+                return "PASS", "server rejected forced updates specifically for non_fast_forward; both refs unchanged", evidence
+            return "FAIL", "forced main/staging updates were accepted, not server-rejected, or a ref changed", evidence
         else:
             candidate = subprocess.run(["git", "rev-parse", "HEAD"], check=True, capture_output=True,
                                        text=True, timeout=10).stdout.strip()
