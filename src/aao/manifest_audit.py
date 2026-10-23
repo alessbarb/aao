@@ -34,6 +34,8 @@ from aao.independent_audit import (
     parse_policy,
     run_sandboxed,
 )
+from aao.pending_veto import PendingVetoError
+from aao.pending_veto import pending_vetoes as verify_pending_vetoes
 from aao.pr_conformity import _canonical, _sha
 
 ANCHOR_PATH = Path("/etc/aao-audit/trust-anchor.json")
@@ -45,7 +47,10 @@ _MANIFEST_FIELDS = {"schema", "repository", "target_ref", "target_sha", "candida
 _GIT_ENV = {"PATH": "/usr/bin:/bin", "HOME": "/nonexistent", "GIT_CONFIG_NOSYSTEM": "1",
             "GIT_CONFIG_GLOBAL": "/dev/null", "LANG": "C.UTF-8"}
 _ANCHOR_FIELDS = {"schema", "policy_path", "policy_sha256", "auditor_uid", "auditor_public_key", "ledger_path",
-                  "ledger_anchor_path", "attribution_path"}
+                  "ledger_anchor_path", "attribution_path",
+                  "attribution_writer_uid",
+                  "supervisor_public_key", "supervisor_key_id", "supervisor_heartbeat_path",
+                  "supervisor_intake_socket"}
 ATTRIBUTION_SCHEMA = "aao.implementer-attribution.v1"
 
 
@@ -81,7 +86,8 @@ def load_anchor(anchor_path: Path = ANCHOR_PATH, anchor_owner_uids: tuple[int, .
         anchor = json.loads(raw)
         if not isinstance(anchor, dict) or set(anchor) != _ANCHOR_FIELDS or anchor["schema"] != ANCHOR_SCHEMA:
             raise ValueError("unexpected anchor fields")
-        if not isinstance(anchor["auditor_uid"], int) or not isinstance(anchor["auditor_public_key"], str):
+        if (not isinstance(anchor["auditor_uid"], int) or not isinstance(anchor["auditor_public_key"], str) or
+                not isinstance(anchor["attribution_writer_uid"], int)):
             raise TypeError("malformed anchor identity")
     except (ValueError, TypeError) as error:
         raise AuditError(f"trust anchor is invalid: {error}") from error
@@ -92,13 +98,111 @@ def load_anchor(anchor_path: Path = ANCHOR_PATH, anchor_owner_uids: tuple[int, .
     return {**anchor, "policy": policy, "anchor_sha256": _sha(raw), "anchor_owner_uids": anchor_owner_uids}
 
 
+def _pending_dir(anchor: dict[str, Any]) -> Path:
+    """Pending-veto markers live next to the ledger, with the ledger's custody (auditor uid, no group/other write)."""
+    return Path(anchor["ledger_path"] + ".pending-vetoes")
+
+
+def record_pending_veto(anchor: dict[str, Any], candidate_sha: str, manifest_sha256: str, reason: str) -> str:
+    """F4-02: every --veto leaves a marker, signed or not. Failing to write it is an error, never a silent pass."""
+    directory = _pending_dir(anchor)
+    try:
+        if not directory.exists():
+            _check_parents(directory, (anchor["auditor_uid"],))
+            directory.mkdir(mode=0o750)
+            directory.chmod(0o750)
+        marker = {"schema": "aao.pending-veto.v1", "candidate_sha": candidate_sha,
+                  "manifest_sha256": manifest_sha256, "reason": reason}
+        data = _canonical(marker)
+        digest = _sha(data)
+        path = directory / f"{candidate_sha}-{digest}.json"
+        descriptor = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW, 0o640)
+        os.fchmod(descriptor, 0o640)
+        with os.fdopen(descriptor, "wb") as handle:
+            handle.write(data)
+    except FileExistsError:
+        return digest
+    except OSError as error:
+        raise AuditError(f"cannot record pending veto marker: {error}") from error
+    return digest
+
+
+def pending_vetoes(anchor: dict[str, Any], candidate_sha: str) -> list[str]:
+    """Digests of pending-veto markers for a candidate. Unreadable or unsafe markers raise (fail closed)."""
+    directory = _pending_dir(anchor)
+    try:
+        return verify_pending_vetoes(directory, candidate_sha, anchor["auditor_uid"])
+    except PendingVetoError as error:
+        raise AuditError(str(error)) from error
+
+
+def _report_veto_to_supervisor(anchor: dict[str, Any], candidate_sha: str, digest: str) -> None:
+    """F4-03: hand the veto to the supervisor's custody before analysis continues; no ack, no audit."""
+    import socket
+
+    try:
+        with socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as client:
+            client.settimeout(30)
+            client.connect(anchor["supervisor_intake_socket"])
+            client.sendall(json.dumps({"candidate_sha": candidate_sha, "marker_digest": digest}).encode() + b"\n")
+            answer = b""
+            while not answer.endswith(b"\n"):
+                chunk = client.recv(4096)
+                if not chunk:
+                    break
+                answer += chunk
+        reply = json.loads(answer)
+    except (OSError, ValueError) as error:
+        raise AuditError(f"supervisor did not acknowledge the veto (marker kept, run aborted): {error}") from error
+    if reply.get("ok") is not True:
+        raise AuditError(f"supervisor refused the veto report (marker kept, run aborted): {reply.get('error')}")
+    # The acknowledgement itself is unauthenticated; the proof is the supervisor-signed heartbeat that must
+    # now list this marker (a spoofed socket cannot produce it without the supervisor key).
+    from aao.supervisor import verify_heartbeat
+
+    try:
+        with tempfile.TemporaryDirectory(prefix="aao-supervisor-key-") as temporary:
+            public = Path(temporary) / "supervisor.pub"
+            public.write_text(anchor["supervisor_public_key"], encoding="ascii")
+            heartbeat = verify_heartbeat(json.loads(Path(anchor["supervisor_heartbeat_path"]).read_bytes()),
+                                         str(public), anchor["supervisor_key_id"], datetime.now(UTC))
+    except (OSError, ValueError) as error:
+        raise AuditError(f"supervisor acknowledgement not backed by a signed heartbeat: {error}") from error
+    if digest not in heartbeat["pending_markers"].get(candidate_sha, []):
+        raise AuditError("supervisor acknowledgement not backed by a signed heartbeat listing the marker")
+
+
+def _supervisor_custody(anchor: dict[str, Any], candidate_sha: str, rows: list[dict[str, Any]],
+                        markers: list[str]) -> None:
+    """F4-01b: the ledger terminal must equal the head the supervisor signed, and no marker the supervisor
+    has seen for this candidate may have disappeared without an authorized resolution."""
+    from aao.supervisor import verify_heartbeat
+
+    raw = Path(anchor["supervisor_heartbeat_path"]).read_bytes()
+    with tempfile.TemporaryDirectory(prefix="aao-supervisor-key-") as temporary:
+        public = Path(temporary) / "supervisor.pub"
+        public.write_text(anchor["supervisor_public_key"], encoding="ascii")
+        heartbeat = verify_heartbeat(json.loads(raw), str(public), anchor["supervisor_key_id"], datetime.now(UTC))
+    terminal = rows[-1]["hash"] if rows else "0" * 64
+    if terminal != heartbeat["ledger_head"]:
+        if heartbeat["ledger_head"] == "0" * 64 or heartbeat["ledger_head"] in {r["hash"] for r in rows}:
+            raise AuditError("ledger not yet anchored by the supervisor")
+        raise AuditError("ledger truncated or rewritten since the supervisor anchored it")
+    resolved = {d for r in rows for d in r.get("resolves_pending") or []}
+    present = set(markers)
+    seen = set(heartbeat["pending_markers"].get(candidate_sha, []))
+    if seen - present - resolved:
+        raise AuditError("pending veto marker deleted after the supervisor recorded it")
+
+
 def attributed_implementers(anchor: dict[str, Any], candidate_sha: str) -> list[str]:
     """Implementer identities from the anchored attribution source, never from the manifest or Git metadata.
 
     The file is written by the merge authority from authenticated push events (RA-02) and is owned like the
     trust anchor. An absent file, unknown candidate or empty list means attribution is unresolved."""
     try:
-        data = json.loads(read_protected(Path(anchor["attribution_path"]), anchor["anchor_owner_uids"]))
+        owners = tuple(dict.fromkeys((*anchor["anchor_owner_uids"], anchor["attribution_writer_uid"])))
+        data = json.loads(read_protected(Path(anchor["attribution_path"]), owners))
         identities = data["candidates"][candidate_sha] if data.get("schema") == ATTRIBUTION_SCHEMA else None
     except (AuditError, OSError, ValueError, KeyError, TypeError, AttributeError):
         return []
@@ -111,7 +215,9 @@ def _ledger_keys(anchor: dict[str, Any], directory: Path) -> dict[str, Any]:
     """Trusted signer registry for the audit ledger: only the anchored auditor key."""
     public = directory / "auditor.pub"
     public.write_text(anchor["auditor_public_key"], encoding="ascii")
-    return {anchor["policy"]["auditor_id"]: {"public_key": str(public)}}
+    return {anchor["policy"]["auditor_id"]: {
+        "public_key": str(public), "can_resolve_pending": True,
+    }}
 
 
 def ledger_rows(anchor: dict[str, Any]) -> list[dict[str, Any]]:
@@ -235,10 +341,15 @@ def _ledger(anchor: dict[str, Any]) -> Path:
 def audit_manifest(
     manifest_path: Path, output: Path, key_path: Path | None, veto_reason: str | None = None, *,
     anchor_path: Path = ANCHOR_PATH, anchor_owner_uids: tuple[int, ...] = (0,), runner=run_sandboxed,
+    resolve_pending_vetoes: bool = False,
 ) -> dict[str, Any]:
     anchor = load_anchor(anchor_path, anchor_owner_uids)
     policy = anchor["policy"]
     manifest, manifest_digest = parse_manifest(manifest_path)
+    if veto_reason:
+        # A-1: the marker exists before any analysis, so no gate can run in a window where the veto is unseen.
+        digest = record_pending_veto(anchor, manifest["candidate_sha"], manifest_digest, veto_reason)
+        _report_veto_to_supervisor(anchor, manifest["candidate_sha"], digest)
     for secret in (key_path, output, Path(anchor["ledger_path"]), Path(anchor["policy_path"])):
         if secret is not None and _visible_in_sandbox(secret):
             raise AuditError(f"{secret} would be readable by candidate code inside the sandbox")
@@ -306,6 +417,8 @@ def audit_manifest(
                 ledger, {"type": "veto" if verdict == "veto" else "audit-verdict",
                          "candidate_sha": manifest["candidate_sha"], "result_tree": manifest["result_tree"],
                          "report_sha256": _sha(report_bytes), "verdict": verdict, "veto": verdict == "veto",
+                         "resolves_pending": pending_vetoes(anchor, manifest["candidate_sha"])
+                         if resolve_pending_vetoes or verdict == "veto" else [],
                          "recorded_at": report["created_at"]},
                 policy["auditor_id"], str(key_path), _ledger_keys(anchor, Path(temporary)))
     return report
@@ -314,13 +427,14 @@ def audit_manifest(
 def verify_promotion(
     manifest_path: Path, report_path: Path, signature_path: Path | None, promoted_sha: str | None = None, *,
     anchor_path: Path = ANCHOR_PATH, anchor_owner_uids: tuple[int, ...] = (0,),
+    report_bytes: bytes | None = None,
 ) -> tuple[bool, tuple[str, ...]]:
     """Fail-closed decision for the controller; run immediately before a compare-and-swap ref update."""
     reasons: list[str] = []
     try:
         anchor = load_anchor(anchor_path, anchor_owner_uids)
         manifest, manifest_digest = parse_manifest(manifest_path)
-        raw = report_path.read_bytes()
+        raw = report_bytes if report_bytes is not None else report_path.read_bytes()
         report = json.loads(raw)
     except (AuditError, OSError, ValueError) as error:
         return False, (f"cannot evaluate promotion: {error}",)
@@ -343,8 +457,10 @@ def verify_promotion(
                 signature.write_bytes(base64.b64decode(signature_path.read_text(encoding="ascii").strip(), validate=True))
             except ValueError:
                 signature.write_bytes(b"")
+            signed_report = Path(temporary) / "report.json"
+            signed_report.write_bytes(raw)
             if subprocess.run(["openssl", "pkeyutl", "-verify", "-pubin", "-inkey", str(public), "-rawin", "-in",
-                               str(report_path), "-sigfile", str(signature)], check=False,
+                               str(signed_report), "-sigfile", str(signature)], check=False,
                               capture_output=True).returncode:
                 reasons.append("report signature does not verify against the anchored auditor key")
     for digest, path in (report.get("evidence_files") or {}).items():
@@ -355,14 +471,34 @@ def verify_promotion(
             reasons.append(f"evidence {path} is unavailable or not auditor-owned")
     if not report.get("evidence_files"):
         reasons.append("report has no evidence")
+    # A-3: one snapshot of the ledger and the markers feeds every check, so a marker or row removed
+    # between two reads cannot pass one check and vanish from the next.
+    rows: list[dict[str, Any]] | None = None
+    markers: list[str] | None = None
     try:
-        entries = [e for e in ledger_rows(anchor) if e.get("candidate_sha") == manifest["candidate_sha"]]
+        rows = ledger_rows(anchor)
+    except AuditError as error:
+        reasons.append(f"audit ledger is not trustworthy: {error}")
+    try:
+        markers = pending_vetoes(anchor, manifest["candidate_sha"])
+    except (AuditError, OSError, ValueError) as error:
+        reasons.append(f"pending vetoes cannot be verified: {error}")
+    if rows is not None and markers is not None:
+        try:
+            _supervisor_custody(anchor, manifest["candidate_sha"], rows, markers)
+        except (AuditError, OSError, ValueError) as error:
+            reasons.append(f"supervisor custody check failed: {error}")
+        resolved = {d for e in rows for d in e.get("resolves_pending") or []}
+        if [d for d in markers if d not in resolved]:
+            reasons.append("candidate has an unresolved pending veto (recorded without custody)")
+    else:
+        reasons.append("supervisor custody check failed: ledger or markers unavailable")
+    if rows is not None:
+        entries = [e for e in rows if e.get("candidate_sha") == manifest["candidate_sha"]]
         if any(e.get("veto") for e in entries):
             reasons.append("candidate has a recorded audit veto")
         if not entries or entries[-1].get("report_sha256") != _sha(raw):
             reasons.append("report is not the latest recorded decision for this candidate")
-    except AuditError as error:
-        reasons.append(f"audit ledger is not trustworthy: {error}")
     with tempfile.TemporaryDirectory(prefix="aao-manifest-gate-") as temporary:
         try:
             clone = Path(temporary) / "repo"
@@ -401,6 +537,8 @@ def main() -> int:
     audit.add_argument("--output", type=Path, required=True)
     audit.add_argument("--key", type=Path)
     audit.add_argument("--veto", metavar="REASON")
+    audit.add_argument("--resolve-pending-vetoes", action="store_true",
+                       help="custody-valid run explicitly resolves this candidate's pending-veto markers")
     gate = commands.add_parser("gate")
     gate.add_argument("--manifest", type=Path, required=True)
     gate.add_argument("--report", type=Path, required=True)
@@ -412,7 +550,8 @@ def main() -> int:
         print(json.dumps({"conformant": conformant, "reasons": reasons}, sort_keys=True))
         return 0 if conformant else 1
     try:
-        report = audit_manifest(args.manifest, args.output, args.key, args.veto)
+        report = audit_manifest(args.manifest, args.output, args.key, args.veto,
+                                resolve_pending_vetoes=args.resolve_pending_vetoes)
     except (AuditError, OSError, subprocess.SubprocessError) as error:
         print(json.dumps({"error": str(error)}))
         return 2

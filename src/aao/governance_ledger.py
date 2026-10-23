@@ -50,6 +50,12 @@ def append(path: Path, payload: dict[str, Any], key_id: str, private_key: str,
         raise ValueError("payload collides with ledger control fields")
     if key_id not in trusted_keys:
         raise ValueError("ledger signing key is not trusted")
+    if "resolves_pending" in payload:
+        values = payload["resolves_pending"]
+        if not isinstance(values, list) or any(not isinstance(value, str) for value in values):
+            raise ValueError("malformed resolves_pending ledger field")
+        if not _authority(trusted_keys.get(key_id), "can_resolve_pending"):
+            raise ValueError("resolves_pending signer is not an enabled authority")
     if payload.get("type") == "revocation":
         authority = trusted_keys[key_id]
         if not isinstance(authority, dict) or not authority.get("can_revoke"):
@@ -107,6 +113,12 @@ def verify(
         key = key_entry.get("public_key") if isinstance(key_entry, dict) else key_entry
         if not key or not _verify(e, key):
             raise ValueError("ledger signature invalid or key unknown")
+        if "resolves_pending" in e:
+            values = e["resolves_pending"]
+            if not isinstance(values, list) or any(not isinstance(value, str) for value in values):
+                raise ValueError("malformed resolves_pending ledger field")
+            if not _authority(key_entry, "can_resolve_pending"):
+                raise ValueError("resolves_pending signer is not an enabled authority")
         if e.get("type") == "revocation":
             if not isinstance(key_entry, dict) or not key_entry.get("can_revoke"):
                 raise ValueError("revocation signer is not an enabled authority")

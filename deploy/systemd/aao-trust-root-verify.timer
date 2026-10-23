@@ -1,0 +1,9 @@
+[Unit]
+Description=Re-verify the trust-root host preconditions daily
+
+[Timer]
+OnBootSec=5min
+OnUnitActiveSec=1d
+
+[Install]
+WantedBy=timers.target

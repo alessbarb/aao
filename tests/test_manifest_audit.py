@@ -5,6 +5,7 @@ import os
 import pwd
 import shutil
 import subprocess
+import tempfile
 
 import pytest
 
@@ -41,7 +42,7 @@ def ok_runner(tree, argv):
 
 
 @pytest.fixture
-def env(tmp_path, monkeypatch):
+def env(tmp_path, monkeypatch, request):
     if not shutil.which("openssl"):
         pytest.skip("openssl is required for auditor signatures")
     monkeypatch.setattr(manifest_audit, "auditor_revision", lambda: REVIEWED)
@@ -84,6 +85,15 @@ def env(tmp_path, monkeypatch):
                                                     "candidates": attributed}))
 
     write_private(attribution_path, json.dumps({"schema": "aao.implementer-attribution.v1", "candidates": {}}))
+    supervisor_key = state / "supervisor.pem"
+    subprocess.run(["openssl", "genpkey", "-algorithm", "ED25519", "-out", str(supervisor_key)], check=True)
+    supervisor_key.chmod(0o600)
+    supervisor_public = subprocess.run(["openssl", "pkey", "-in", str(supervisor_key), "-pubout"], check=True,
+                                       capture_output=True, text=True).stdout
+    heartbeat_path = state / "heartbeat.json"
+    intake_dir = tempfile.mkdtemp(prefix="aaoi", dir="/tmp")
+    intake_socket = os.path.join(intake_dir, "s")
+    _start_intake(request, intake_socket, state, supervisor_key, heartbeat_path, public)
     write_private(ledger_anchor_path, "0" * 64)
 
     def configure(policy_overrides=None, **anchor_overrides):
@@ -103,6 +113,9 @@ def env(tmp_path, monkeypatch):
                   "policy_sha256": hashlib.sha256(_canonical(policy)).hexdigest(), "auditor_uid": UID,
                   "auditor_public_key": public, "ledger_path": str(state / "ledger.jsonl"),
                   "ledger_anchor_path": str(ledger_anchor_path), "attribution_path": str(attribution_path),
+                  "attribution_writer_uid": UID,
+                  "supervisor_public_key": supervisor_public, "supervisor_key_id": "supervisor",
+                  "supervisor_heartbeat_path": str(heartbeat_path), "supervisor_intake_socket": intake_socket,
                   **anchor_overrides}
         anchor_path.write_text(json.dumps(anchor), encoding="utf-8")
         anchor_path.chmod(0o600)
@@ -110,7 +123,9 @@ def env(tmp_path, monkeypatch):
     configure()
     return {"tmp": tmp_path, "repo": repo, "key": key, "state": state, "anchor": anchor_path,
             "policy": policy_path, "configure": configure, "attribute": attribute,
-            "ledger_anchor": ledger_anchor_path, "write_private": write_private}
+            "ledger_anchor": ledger_anchor_path, "write_private": write_private,
+            "heartbeat": lambda: _supervisor_heartbeat(state, supervisor_key, heartbeat_path, public),
+            "heartbeat_path": heartbeat_path}
 
 
 def manifest(env, name="manifest.json", candidate="candidate", attribute=True, **overrides):
@@ -135,7 +150,80 @@ def audit(env, path, run="run", **kwargs):
                           anchor_owner_uids=(UID,), runner=kwargs.pop("runner", ok_runner), **kwargs)
 
 
-def gate(env, path, run="run", promoted=None):
+_HEARTBEAT_SEQUENCE = [0]
+
+
+def _start_intake(request, socket_path, state, supervisor_key, heartbeat_path, auditor_public, uid=None):
+    """Real supervisor veto intake (aao.supervisor.handle_veto_report) served from a thread."""
+    import socket as socket_module
+    import threading
+
+    from aao.supervisor import handle_veto_report
+
+    auditor_pub = state / "auditor-for-supervisor.pub"
+    auditor_pub.write_text(auditor_public, encoding="ascii")
+    ledger = state / "ledger.jsonl"
+    if not ledger.exists():
+        ledger.touch(mode=0o600)
+    server = socket_module.socket(socket_module.AF_UNIX, socket_module.SOCK_STREAM)
+    server.bind(socket_path)
+    server.listen(4)
+    stop = threading.Event()
+
+    def loop():
+        while not stop.is_set():
+            try:
+                conn, _ = server.accept()
+            except OSError:
+                return
+            with conn:
+                handle_veto_report(conn, auditor_uid=UID if uid is None else uid,
+                                   state_path=state / "supervisor-state.json", private_key=str(supervisor_key),
+                                   key_id="supervisor", ledger_path=ledger, integrator_key_id="integrator",
+                                   trusted_keys={"aao-auditor": {"public_key": str(auditor_pub),
+                                                                 "can_resolve_pending": True}},
+                                   heartbeat_path=heartbeat_path)
+
+    thread = threading.Thread(target=loop, daemon=True)
+    thread.start()
+
+    def close():
+        stop.set()
+        server.close()
+        shutil.rmtree(os.path.dirname(socket_path), ignore_errors=True)
+
+    request.addfinalizer(close)
+
+
+def _supervisor_heartbeat(state, supervisor_key, heartbeat_path, auditor_public):
+    """Run the real supervisor (aao.supervisor.signed_heartbeat) over the current ledger and markers."""
+    from datetime import UTC, datetime, timedelta
+
+    from aao.supervisor import signed_heartbeat
+
+    ledger = state / "ledger.jsonl"
+    if not ledger.exists():
+        ledger.touch(mode=0o600)
+    auditor_pub = state / "auditor-for-supervisor.pub"
+    auditor_pub.write_text(auditor_public, encoding="ascii")
+    import time
+
+    sequence = time.time_ns() // 1000   # monotonic across helper and intake publications
+    now = datetime.now(UTC)
+    event = signed_heartbeat(sequence, now.isoformat(), str(supervisor_key), key_id="supervisor",
+                             expires_at=(now + timedelta(minutes=10)).isoformat(), ledger_path=ledger,
+                             state_path=state / "supervisor-state.json", integrator_key_id="integrator",
+                             trusted_keys={"aao-auditor": {"public_key": str(auditor_pub), "can_resolve_pending": True}},
+                             heartbeat_path=heartbeat_path)
+    return event
+
+
+def gate(env, path, run="run", promoted=None, refresh=True):
+    if refresh:
+        try:
+            env["heartbeat"]()
+        except (ValueError, OSError):
+            pass  # the real supervisor refuses to sign a tampered state: the previous heartbeat stays in place
     out = env["state"] / run
     return verify_promotion(path, out / "report.json", out / "report.sig", promoted,
                             anchor_path=env["anchor"], anchor_owner_uids=(UID,))
@@ -404,3 +492,265 @@ def test_provisional_and_custody_less_veto_write_a_report_but_record_nothing(env
     veto = audit(env, path, run="veto", veto_reason="unsafe")  # veto without resolved attribution = no custody
     assert veto["verdict"] == "veto" and veto["custody_problems"]
     assert ledger.read_bytes() == b""  # an unsigned veto is not a recorded decision
+
+
+# --- F4-02: a veto without custody must never allow an improper integration -------------------------------
+
+def _rogue_key(env):
+    other = env["state"] / "rogue-veto.pem"
+    if not other.exists():
+        subprocess.run(["openssl", "genpkey", "-algorithm", "ED25519", "-out", str(other)], check=True)
+        other.chmod(0o600)
+    return other
+
+
+def test_custodyless_veto_after_recorded_approval_blocks_integration(env):
+    path, _ = manifest(env)
+    assert audit(env, path)["verdict"] == "approve"
+    assert gate(env, path) == (True, ())
+    veto = audit(env, path, run="veto", key_path=_rogue_key(env), veto_reason="unsafe")
+    assert veto["verdict"] == "veto" and veto["custody_problems"]
+    conformant, reasons = gate(env, path)  # the earlier signed approval is still the latest ledger decision
+    assert not conformant
+    assert "candidate has an unresolved pending veto (recorded without custody)" in reasons
+
+
+def test_later_signed_approval_does_not_lift_a_pending_veto_unless_explicit(env):
+    path, _ = manifest(env)
+    audit(env, path, run="veto", key_path=_rogue_key(env), veto_reason="unsafe")
+    audit(env, path, run="again")
+    assert not gate(env, path, run="again")[0]
+    audit(env, path, run="resolved", resolve_pending_vetoes=True)
+    assert gate(env, path, run="resolved") == (True, ())
+
+
+def test_tampered_or_exposed_pending_veto_marker_fails_closed(env):
+    path, _ = manifest(env)
+    audit(env, path, run="veto", key_path=_rogue_key(env), veto_reason="unsafe")
+    audit(env, path, run="resolved", resolve_pending_vetoes=True)
+    directory = env["state"] / "ledger.jsonl.pending-vetoes"
+    marker = next(directory.iterdir())
+    marker.chmod(0o600)
+    marker.write_bytes(marker.read_bytes().replace(b"unsafe", b"safe!!"))
+    assert any("pending vetoes cannot be verified" in r for r in gate(env, path, run="resolved")[1])
+    marker.unlink()
+    directory.chmod(0o770)
+    assert any("pending vetoes cannot be verified" in r for r in gate(env, path, run="resolved")[1])
+
+
+def test_veto_that_cannot_record_its_marker_raises(env):
+    path, _ = manifest(env)
+    directory = env["state"] / "ledger.jsonl.pending-vetoes"
+    directory.mkdir(mode=0o500)
+    with pytest.raises(AuditError, match="cannot record pending veto marker"):
+        audit(env, path, run="veto", key_path=_rogue_key(env), veto_reason="unsafe")
+    directory.chmod(0o700)
+
+
+def test_pending_veto_marker_is_written_before_any_analysis(env, monkeypatch):
+    # A-1 (Codex review of #30): the marker must exist even if the run fails during analysis.
+    path, _ = manifest(env)
+    monkeypatch.setattr("aao.manifest_audit._check_parents", lambda _path, _owners: None)
+    monkeypatch.setattr("aao.pending_veto._check_parents", lambda _path, _owners: None)
+    assert audit(env, path)["verdict"] == "approve"
+
+    def exploding_derive(_manifest, _clone):
+        assert list((env["state"] / "ledger.jsonl.pending-vetoes").glob("*.json"))
+        raise RuntimeError("analysis interrupted")
+
+    with pytest.MonkeyPatch.context() as local_monkeypatch:
+        local_monkeypatch.setattr(manifest_audit, "_derive", exploding_derive)
+        with pytest.raises(RuntimeError, match="analysis interrupted"):
+            audit(env, path, run="veto", key_path=_rogue_key(env), veto_reason="unsafe")
+    assert "candidate has an unresolved pending veto (recorded without custody)" in gate(env, path)[1]
+
+
+def test_pending_veto_marker_uses_supervisor_readable_modes(env):
+    path, _ = manifest(env)
+    audit(env, path, run="veto", key_path=_rogue_key(env), veto_reason="unsafe")
+    directory = env["state"] / "ledger.jsonl.pending-vetoes"
+    marker = next(directory.iterdir())
+    assert directory.stat().st_mode & 0o777 == 0o750
+    assert marker.stat().st_mode & 0o777 == 0o640
+
+
+def test_pending_veto_modes_ignore_restrictive_umask(env, monkeypatch):
+    monkeypatch.setattr("aao.manifest_audit._check_parents", lambda path, owners: None)
+    path, _ = manifest(env)
+    previous = os.umask(0o077)
+    try:
+        audit(env, path, run="veto", key_path=_rogue_key(env), veto_reason="unsafe")
+    finally:
+        os.umask(previous)
+    directory = env["state"] / "ledger.jsonl.pending-vetoes"
+    marker = next(directory.iterdir())
+    assert directory.stat().st_mode & 0o777 == 0o750
+    assert marker.stat().st_mode & 0o777 == 0o640
+
+
+# --- F4-01b: supervisor custody on the manifest gate path ---------------------------------------------------
+
+def test_gate_rejects_ledger_truncated_and_marker_removed_after_supervisor_anchor(env):
+    path, _ = manifest(env)
+    audit(env, path)
+    audit(env, path, run="veto", veto_reason="unsafe")   # custody-valid veto: marker + signed ledger row
+    env["heartbeat"]()                                    # the supervisor anchors head and the marker
+    ledger = env["state"] / "ledger.jsonl"
+    ledger.write_bytes(ledger.read_bytes().splitlines(keepends=True)[0])   # drop the veto row
+    for marker in (env["state"] / "ledger.jsonl.pending-vetoes").iterdir():
+        marker.unlink()                                   # and the marker: without F4-01b the gate would pass
+    conformant, reasons = gate(env, path)
+    assert not conformant
+    assert any("ledger truncated or rewritten since the supervisor anchored it" in r for r in reasons)
+
+
+def test_gate_rejects_marker_deleted_after_supervisor_saw_it(env):
+    path, _ = manifest(env)
+    audit(env, path)
+    audit(env, path, run="veto", key_path=_rogue_key(env), veto_reason="unsafe")   # marker only, no ledger row
+    env["heartbeat"]()
+    for marker in (env["state"] / "ledger.jsonl.pending-vetoes").iterdir():
+        marker.unlink()
+    conformant, reasons = gate(env, path, refresh=False)
+    assert not conformant
+    assert any("pending veto marker deleted after the supervisor recorded it" in r for r in reasons)
+
+
+def test_gate_requires_a_valid_supervisor_heartbeat(env):
+    path, _ = manifest(env)
+    audit(env, path)
+    env["heartbeat_path"].unlink(missing_ok=True)
+    assert any("supervisor custody check failed" in r for r in gate(env, path, refresh=False)[1])
+    event = env["heartbeat"]()
+    env["heartbeat_path"].write_text(json.dumps({**event, "ledger_head": "f" * 64}), encoding="utf-8")
+    assert any("signature does not verify" in r for r in gate(env, path, refresh=False)[1])
+
+
+def test_gate_waits_for_entries_not_yet_anchored_by_the_supervisor(env):
+    path, _ = manifest(env)
+    env["heartbeat"]()            # anchors the empty ledger
+    audit(env, path)              # new signed entry, not anchored yet
+    assert any("ledger not yet anchored by the supervisor" in r for r in gate(env, path, refresh=False)[1])
+    assert gate(env, path) == (True, ())
+
+
+def test_gate_uses_one_snapshot_so_a_marker_deleted_between_reads_still_blocks(env, monkeypatch):
+    # A-3 (Codex second-line review of F4-01b): delete the marker right after the gate reads it.
+    path, _ = manifest(env)
+    audit(env, path)
+    audit(env, path, run="veto", key_path=_rogue_key(env), veto_reason="unsafe")
+    env["heartbeat"]()
+    real = manifest_audit.pending_vetoes
+    calls = []
+
+    def read_then_delete(anchor, candidate_sha):
+        result = real(anchor, candidate_sha)
+        calls.append(len(result))
+        for marker in (env["state"] / "ledger.jsonl.pending-vetoes").iterdir():
+            marker.unlink()
+        return result
+
+    monkeypatch.setattr(manifest_audit, "pending_vetoes", read_then_delete)
+    conformant, reasons = gate(env, path, refresh=False)
+    assert not conformant
+    assert calls == [1]  # a single read of the markers per gate decision
+    assert "candidate has an unresolved pending veto (recorded without custody)" in reasons
+
+
+# --- F4-03: synchronous veto hand-off to the supervisor --------------------------------------------------
+
+def test_veto_marker_deleted_before_any_scheduled_heartbeat_is_still_detected(env):
+    # Closes the pre-heartbeat window of A-2: the veto run itself hands the marker to the supervisor.
+    path, _ = manifest(env)
+    audit(env, path)
+    audit(env, path, run="veto", key_path=_rogue_key(env), veto_reason="unsafe")
+    for marker in (env["state"] / "ledger.jsonl.pending-vetoes").iterdir():
+        marker.unlink()          # another process of the auditor uid removes it right away
+    conformant, reasons = gate(env, path, refresh=False)
+    assert not conformant
+    assert any("pending veto marker deleted after the supervisor recorded it" in r for r in reasons)
+
+
+def test_veto_run_aborts_when_the_supervisor_is_unreachable_and_the_marker_still_blocks(env):
+    path, _ = manifest(env)
+    audit(env, path)
+    env["configure"](supervisor_intake_socket="/nonexistent/aao-intake.sock")
+    with pytest.raises(AuditError, match="supervisor did not acknowledge the veto"):
+        audit(env, path, run="veto", key_path=_rogue_key(env), veto_reason="unsafe")
+    assert any("unresolved pending veto" in r for r in gate(env, path)[1])
+
+
+def test_supervisor_intake_rejects_a_peer_that_is_not_the_auditor_uid(env, request):
+    path, _ = manifest(env)
+    other = os.path.join(tempfile.mkdtemp(prefix="aaoj", dir="/tmp"), "s")
+    _start_intake(request, other, env["state"], env["state"] / "supervisor.pem", env["heartbeat_path"],
+                  subprocess.run(["openssl", "pkey", "-in", str(env["key"]), "-pubout"], check=True,
+                                 capture_output=True, text=True).stdout, uid=UID + 4242)
+    env["configure"](supervisor_intake_socket=other)
+    with pytest.raises(AuditError, match="peer is not the auditor uid"):
+        audit(env, path, run="veto", key_path=_rogue_key(env), veto_reason="unsafe")
+
+
+
+def test_periodic_heartbeat_computed_before_the_intake_cannot_overwrite_it(env):
+    # F4-03 r1 A (Codex): publication is serialized with the state and never moves backwards.
+    from datetime import UTC, datetime, timedelta
+
+    from aao.supervisor import signed_heartbeat
+
+    path, _ = manifest(env)
+    audit(env, path)
+    audit(env, path, run="veto", key_path=_rogue_key(env), veto_reason="unsafe")
+    published = json.loads(env["heartbeat_path"].read_text())
+    candidate = next(iter(published["pending_markers"]))
+    now = datetime.now(UTC)
+    auditor_pub = env["state"] / "auditor-for-supervisor.pub"
+    with pytest.raises(ValueError, match="equal or newer sequence is already published"):
+        signed_heartbeat(1, now.isoformat(), str(env["state"] / "supervisor.pem"), key_id="supervisor",
+                         expires_at=(now + timedelta(minutes=10)).isoformat(),
+                         ledger_path=env["state"] / "ledger.jsonl", state_path=env["state"] / "supervisor-state.json",
+                         integrator_key_id="integrator",
+                         trusted_keys={"aao-auditor": {"public_key": str(auditor_pub), "can_resolve_pending": True}},
+                         heartbeat_path=env["heartbeat_path"])
+    assert json.loads(env["heartbeat_path"].read_text())["pending_markers"][candidate]  # the veto is still there
+
+
+def test_spoofed_intake_acknowledgement_without_a_signed_heartbeat_is_rejected(env, request):
+    import socket as socket_module
+    import threading
+
+    path, _ = manifest(env)
+    fake = os.path.join(tempfile.mkdtemp(prefix="aaok", dir="/tmp"), "s")
+    server = socket_module.socket(socket_module.AF_UNIX, socket_module.SOCK_STREAM)
+    server.bind(fake)
+    server.listen(1)
+
+    def lie():
+        conn, _ = server.accept()
+        with conn:
+            conn.recv(4096)
+            conn.sendall(b'{"ok": true, "heartbeat_sequence": 99}\n')
+
+    threading.Thread(target=lie, daemon=True).start()
+    request.addfinalizer(server.close)
+    env["configure"](supervisor_intake_socket=fake)
+    with pytest.raises(AuditError, match="not backed by a signed heartbeat"):
+        audit(env, path, run="veto", key_path=_rogue_key(env), veto_reason="unsafe")
+
+
+def test_supervisor_intake_rejects_oversized_or_unexpected_reports(env):
+    import socket as socket_module
+
+    from aao.supervisor import handle_veto_report
+
+    for payload in (b'{"candidate_sha": "' + b"a" * 5000 + b'"}\n',
+                    b'{"candidate_sha": "' + b"a" * 40 + b'", "marker_digest": "' + b"b" * 64 + b'", "x": 1}\n'):
+        left, right = socket_module.socketpair(socket_module.AF_UNIX, socket_module.SOCK_STREAM)
+        with left, right:
+            left.sendall(payload)
+            left.shutdown(socket_module.SHUT_WR)
+            reply = handle_veto_report(right, auditor_uid=UID, state_path=env["state"] / "supervisor-state.json",
+                                       private_key=str(env["state"] / "supervisor.pem"), key_id="supervisor",
+                                       ledger_path=env["state"] / "ledger.jsonl", trusted_keys={"x": "y"},
+                                       integrator_key_id="integrator", heartbeat_path=env["heartbeat_path"])
+        assert reply["ok"] is False

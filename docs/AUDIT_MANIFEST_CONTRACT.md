@@ -37,7 +37,7 @@ Git versions.
 Fixed path `/etc/aao-audit/trust-anchor.json`, `aao.audit-trust-anchor.v1`:
 `policy_path`, `policy_sha256` (canonical JSON digest), `auditor_uid`,
 `auditor_public_key` (PEM), `ledger_path`, `ledger_anchor_path`,
-`attribution_path`. There is no CLI option or environment variable that
+`attribution_path`, `attribution_writer_uid`. There is no CLI option or environment variable that
 overrides it.
 
 | Object | Required custody (checked with `O_NOFOLLOW` + `fstat`) |
@@ -46,7 +46,7 @@ overrides it.
 | Policy | owned by `auditor_uid`, same rules; digest must equal the anchor pin |
 | Ledger and its directory | owned by `auditor_uid`, no group/other write; created `0600`. Format: F3a `governance_ledger`, every entry signed by the anchored auditor key (`audit-verdict` / `veto`) |
 | Ledger anchor (`ledger_anchor_path`) | owned like the trust anchor; holds a terminal hash that must still be part of the verified chain (`0`×64 = genesis) |
-| Attribution (`attribution_path`) | owned like the trust anchor; `aao.implementer-attribution.v1`, `candidates: {sha: [identity…]}` written by the merge authority from authenticated push events (RA-02). Absent, unknown or empty → `provisional` |
+| Attribution (`attribution_path`) | owned by either an `anchor_owner_uids` principal or the anchored `attribution_writer_uid` (the `aao-supervisor` uid); `aao.implementer-attribution.v1`, `candidates: {sha: [identity…]}` written by the supervisor from authenticated push events (RA-02). This writer exception applies only to this file. Absent, unknown or empty → `provisional` |
 | Evidence | owned by `auditor_uid`, `0444`, re-hashed at gate time |
 | Signing key | owned by `auditor_uid`, no group/other bits, public key equal to the anchor's |
 
@@ -67,8 +67,60 @@ written to the output directory. Only a custody-valid run signs the report
 and appends a signed ledger entry (`audit-verdict` for `approve`/`reject`,
 `veto` for a veto). A `provisional` run, and a `--veto` run without valid
 custody, write an unsigned report but **append nothing to the ledger**. They are
-not decisions: the gate ignores them, and an unsigned veto has no effect. A
-veto counts only when the anchored auditor records it with valid custody.
+not ledger decisions, and the gate never treats their report as an approval.
+A veto without custody **does** block, through its pending-veto marker (below).
+
+**Migration note.** Every ledger row containing `resolves_pending` requires
+`can_resolve_pending` on its signing key, including rows where the value is an
+empty list (`[]`). Before sharing a ledger containing such rows, update the
+trust registry to grant that capability to the anchored auditor key; otherwise
+ledger verification fails closed.
+
+**Pending vetoes (F4-02).** Every `--veto` run, with or without custody, first
+writes a pending-veto marker to `<ledger_path>.pending-vetoes/`, **before any
+analysis**, so the analysis window is covered. There is no mutual exclusion
+between the gate and the start of an audit run. The directory
+is owned by the auditor uid, mode `0750` (group read for the supervisor, never group write), markers `0640`, file
+name bound to the marker digest. If the marker cannot be written, the run fails.
+The gate denies any candidate with a marker that no verified ledger entry
+lists in `resolves_pending`. It also denies when the markers cannot be
+verified: tampering, unsafe permissions or an inconsistent name. Only a
+custody-valid run resolves markers: a recorded veto (which still blocks), or
+an explicit `--resolve-pending-vetoes` run. An ordinary later approval does
+not lift a pending veto. Fake markers can only cause a denial of service,
+which is the safe direction.
+**Open finding A-2 (Codex review of #30, held as class A):** any process
+running as the auditor uid, or root, can delete markers. If that uid is shared
+by more than one actor, a party other than the vetoing one can remove a veto,
+and the gate reads a missing marker as no veto. File permissions alone cannot
+close this. F4-01a only narrows A-2 to pending markers observed by the
+supervisor and a verified ledger head captured in its signed heartbeat. Before
+signing a later heartbeat, the supervisor requires its previous non-genesis
+head to remain in the current verified chain; otherwise it records a
+continuity incident and refuses to sign. Resolution rows are accepted only
+from verified `can_resolve_pending` keys, excluding the integrator key. A
+marker removed before the next heartbeat is outside that snapshot; the
+exposure window is bounded by the heartbeat validity period. This depends on
+exclusive custody of the supervisor uid. P1's
+execution does not by itself close the logic gap. The integrator path uses this
+signed snapshot, and since F4-01b the manifest gate does too (section 9).
+**Remaining A-2 window (stack review, 2026-10-23):** a marker written and then
+deleted by another process of the auditor uid **before** the next heartbeat is
+never observed. Two conditions close it:
+- runtime exclusivity of the auditor uid, so only the auditor service runs as
+  `aao-auditor`;
+- a synchronous hand-off of every veto to the supervisor's custody before the
+  veto run continues (F4-03; implemented, see section 10).
+
+Runtime exclusivity of the auditor uid is an operational precondition. P1
+created the uid, but the auditor still has to run only as that service. It
+must be verified on the host before any revision becomes a candidate for
+`trusted_auditor_revisions`.
+
+**Supervisor-state migration:** legacy `state.json` files without a valid
+signature fail closed. They are not automatically imported, repaired, or
+deleted; preserve them for investigation and use an authorized migration
+procedure before initializing replacement signed state.
 
 ## 4. Gate (`python -m aao.manifest_audit gate --manifest M --report R --signature S [--promoted-sha P]`)
 
@@ -165,3 +217,69 @@ host/VM.
   evidence comes from P1 and the F2 verifier.
 - **SL-06 (tamper tests):** added rewrite-with-recomputed-chain, forged-key and
   truncation-below-anchor tests; each validated by mutation.
+
+
+## 9. Supervisor custody on the gate path (F4-01b, 2026-10-23)
+
+The trust anchor also pins `supervisor_public_key`, `supervisor_key_id` and
+`supervisor_heartbeat_path`. Before deciding, `verify_promotion` checks the
+following:
+
+1. The supervisor heartbeat is valid:
+   - signed by the anchored supervisor key;
+   - of type `heartbeat`;
+   - not expired, not older than 1 h and not issued in the future;
+   - `ledger_head` and `state_sha256` are 64 lowercase hex characters; `pending_markers` maps 40-hex
+     candidate SHAs to lists of 64-hex digests.
+2. The verified ledger terminal hash equals the heartbeat `ledger_head`:
+   - if the head is an earlier row or genesis, the result is "not yet anchored";
+   - otherwise, "truncated or rewritten".
+3. No marker that the supervisor recorded for the candidate has disappeared
+   without a resolution in a verified row signed by a `can_resolve_pending` key.
+
+Any failure denies promotion. The gate reads the ledger and the markers **once** per decision, and every check uses that snapshot (A-3).
+
+**Limitations (B):**
+
+- The gate keeps no sequence file, so an older heartbeat that is still valid
+  is accepted within its validity window.
+- Entries and markers written after the last heartbeat and removed before the
+  next one are not seen.
+- This depends on the custody of the supervisor uid and its key (P1 created
+  the uid; the runtime services are pending).
+
+
+## 10. Synchronous veto hand-off (F4-03, 2026-10-23)
+
+Right after writing its pending-veto marker and before any analysis, a
+`--veto` run sends `{candidate_sha, marker_digest}` to the supervisor's Unix
+socket (`supervisor_intake_socket` in the trust anchor). The supervisor then:
+
+1. checks the peer uid with `SO_PEERCRED` (it must be the auditor uid);
+2. adds the digest to its signed state;
+3. emits a new signed heartbeat that includes the digest;
+4. acknowledges only after all of the above.
+
+Without an acknowledgement the run fails, and the marker stays and blocks.
+
+**Two points about the acknowledgement:**
+
+- **Not trusted on its own.** After an `ok`, the auditor reads the published
+  heartbeat, verifies it with the anchored supervisor key and requires it to
+  list the marker. A spoofed socket cannot forge that.
+- **Publication is serialized with the state.** The supervisor publishes every
+  heartbeat (intake or periodic) under the same lock as its state, and never
+  publishes a sequence lower than or equal to the one already published. A
+  periodic heartbeat computed before the intake can therefore not overwrite it.
+Deleting the marker file afterwards, from any process, is detected by the gate
+and the integrator, because the digest already sits in the supervisor's signed
+heartbeat. The supervisor receives the digest from the vetoing process itself,
+not from the file.
+
+**Remaining limits (B):**
+
+- The auditor process itself can choose not to veto. That is a decision of the
+  authorized actor, not a bypass.
+- Root.
+- Custody of the supervisor uid, state and key.
+- The supervisor service must be running, or vetoes fail closed.

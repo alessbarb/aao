@@ -1,0 +1,47 @@
+Unable to find image 'ubuntu:24.04' locally
+24.04: Pulling from library/ubuntu
+f2b4ef06ff01: Pulling fs layer
+f2b4ef06ff01: Download complete
+5486761bbbdb: Download complete
+f2b4ef06ff01: Pull complete
+Digest: sha256:68ee22004a9109b44973313b02ff7b1de250f1de0f5ecb628d73f579aaff33ac
+Status: Downloaded newer image for ubuntu:24.04
+== second apply actions:
+26
+== impl-codex groups after: aao-impl-codex
+total 8
+-rw-r--r-- 1 aao-trust aao-trust 113 Oct 21 08:51 aao-auditor-alt-ed25519.pub
+-rw-r--r-- 1 aao-trust aao-trust 113 Oct 21 08:51 aao-auditor-ed25519.pub
+600 aao-auditor:aao-auditor /var/lib/aao-auditor/keys/auditor-ed25519.pem
+750 aao-auditor:aao-ledger-read /var/lib/aao-auditor/ledger
+755 aao-trust:aao-trust /srv/aao/trust
+# Managed by scripts/identity_separation.sh
+alessbarb ALL=(aao-pm,aao-impl-codex,aao-impl-claude,aao-impl-ag,aao-auditor,aao-auditor-alt) ALL
+===== aao-pm
+# identity: uid=1003(aao-pm) gid=1004(aao-pm) groups=1004(aao-pm)
+# all checks PASSED for aao-pm
+===== aao-impl-codex
+# identity: uid=1002(aao-impl-codex) gid=1003(aao-impl-codex) groups=1003(aao-impl-codex)
+# all checks PASSED for aao-impl-codex
+===== aao-impl-claude
+# identity: uid=1004(aao-impl-claude) gid=1005(aao-impl-claude) groups=1005(aao-impl-claude)
+# all checks PASSED for aao-impl-claude
+===== aao-impl-ag
+# identity: uid=1005(aao-impl-ag) gid=1006(aao-impl-ag) groups=1006(aao-impl-ag)
+# all checks PASSED for aao-impl-ag
+===== aao-auditor
+# identity: uid=1006(aao-auditor) gid=1007(aao-auditor) groups=1007(aao-auditor)
+# all checks PASSED for aao-auditor
+===== aao-auditor-alt
+# identity: uid=1007(aao-auditor-alt) gid=1008(aao-auditor-alt) groups=1008(aao-auditor-alt)
+# all checks PASSED for aao-auditor-alt
+===== aao-integrator
+# identity: uid=1008(aao-integrator) gid=1009(aao-integrator) groups=1009(aao-integrator),999(aao-ledger-read)
+# all checks PASSED for aao-integrator
+===== aao-supervisor
+# identity: uid=1009(aao-supervisor) gid=1010(aao-supervisor) groups=1010(aao-supervisor),999(aao-ledger-read)
+# all checks PASSED for aao-supervisor
+===== aao-notifier
+# identity: uid=1010(aao-notifier) gid=1011(aao-notifier) groups=1011(aao-notifier),998(aao-events)
+# all checks PASSED for aao-notifier
+overall rc=0

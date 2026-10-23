@@ -8,6 +8,8 @@ import subprocess
 from datetime import datetime, timedelta
 from typing import Any
 
+from aao.git_paths import path_matches_prefix
+
 FIELDS = (
     "repo",
     "pr_number",
@@ -142,8 +144,7 @@ def validate(document: dict[str, Any], signature: str, state: dict[str, Any]) ->
         if isinstance(entry, dict) and isinstance(entry.get("principal"), str) and entry["principal"].strip()
     }
     attribution_resolved = (
-        state.get("attribution_resolved") is True
-        and bool(attribution_entries)
+        bool(attribution_entries)
         and all(
             isinstance(entry, dict)
             and isinstance(entry.get("principal"), str)
@@ -234,7 +235,7 @@ def validate(document: dict[str, Any], signature: str, state: dict[str, Any]) ->
         changed_paths = []
     for path in changed_paths:
         for rule, minimum in (protected or {}).items():
-            if (path == rule or (rule.endswith("/") and path.startswith(rule))) and order.get(
+            if path_matches_prefix(path, rule) and order.get(
                 document.get("risk_class"), 0
             ) < order.get(minimum, 4):
                 reasons.append("protected path risk class insufficient")

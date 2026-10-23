@@ -1,0 +1,19 @@
+# identity: uid=1000(alessbarb) gid=1000(alessbarb) groups=1000(alessbarb),4(adm),24(cdrom),27(sudo),30(dip),46(plugdev),100(users),114(lpadmin),983(ollama),984(docker)
+PASS     no passwordless sudo
+FAIL     member of privileged group sudo
+FAIL     member of privileged group docker
+FAIL     member of privileged group adm
+FAIL     member of privileged group alessbarb
+FAIL     docker socket
+FAIL     enter CEO home
+FAIL     list CEO home
+NOT RUN  write trust registry (not visible: /srv/aao/trust)
+NOT RUN  write trust keys (not visible: /srv/aao/trust/keys)
+NOT RUN  write frozen checkouts (not visible: /srv/aao/frozen)
+NOT RUN  write /srv/aao/frozen/* (not visible: /srv/aao/frozen/*)
+NOT RUN  enter /var/lib/aao-auditor (not visible: /var/lib/aao-auditor)
+NOT RUN  enter /var/lib/aao-auditor-alt (not visible: /var/lib/aao-auditor-alt)
+NOT RUN  enter /var/lib/aao-supervisor (not visible: /var/lib/aao-supervisor)
+PASS     ptrace_scope=1
+NOT RUN  role homes (none exist)
+# 15 check(s) FAILED for alessbarb
