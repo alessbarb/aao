@@ -792,7 +792,7 @@ def _git_fixture(tmp_path):
          "target_ref":"refs/heads/main", "merge_method":"merge-commit", "merge_result_tree_sha":tree,
          "risk_class":"R2", "assurance_level":"A", "policy_id":"p", "policy_sha256":"h",
          "protected_paths_sha256":hashlib.sha256(canonical([])).hexdigest(), "expected_parents":[base,head], "git_version":GIT_VERSION,
-         "auditor_id":"a", "auditor_key_id":"k", "auditor_code_revision":"rev",
+         "auditor_id":"a", "auditor_key_id":"k", "auditor_code_revision":"a" * 40,
          "attribution":[{"sha":head,"principal":"author","source":"ledger","evidence_sha256":"a"}],
          "checks_executed":[{"name":"unit","cmd":"pytest","result":"PASS","evidence_sha256":"e"}],
          "scope":"scope", "known_limitations":[], "residual_risks":[], "permitted_operations":[],
@@ -800,7 +800,7 @@ def _git_fixture(tmp_path):
          "issued_at":"2026-01-01T00:00:00+00:00", "expires_at":"2026-01-02T00:00:00+00:00"}
     state = {"target_ref":d["target_ref"], "target_sha":base,
          "merge_tree_sha":tree, "policy_sha256":"h", "trusted_keys":{"k":str(auditor_public)},
-         "trusted_auditors":{"a":["k"]}, "trusted_auditor_revisions":["rev"], "required_checks_by_risk_class":{"R2":["unit"]},
+         "trusted_auditors":{"a":["k"]}, "trusted_auditor_revisions":["a" * 40], "required_checks_by_risk_class":{"R2":["unit"]},
          "enabled_risk_classes":["R2"], "policy_id":"p",
          "protected_paths":{}, "changed_paths":[], "git_version":git(r,"--version").removeprefix("git version "), "auditor_models":{"a":"auditor-model"},
          "author_models":{"author":"author-model"}, "ra03_pass":True, "ra09_pass":True}
@@ -824,7 +824,18 @@ def _git_fixture(tmp_path):
     registry["incident_resolvers"] = ["resolver"]
     registry["ledger_keys"]["resolver"] = {"public_key": str(resolver_public), "can_resolve_incidents": True}
     reg=tmp_path/"registry.json"; reg.write_text(json.dumps(registry))
-    sources = TrustSources(reg, ledger, anchor, heartbeat, freeze, integrator_private)
+    verification_dir = tmp_path / "trust-verification"
+    verification_dir.mkdir(mode=0o755)
+    verification_path = verification_dir / "status.json"
+    verification_path.write_text(json.dumps({
+        "schema": "aao.trust-root-verification.v1", "result": "PASS",
+        "expected_revision": "a" * 40, "verified_at": "2026-01-01T00:00:00Z",
+        "failed": [], "verifier_sha256": "b" * 64,
+    }))
+    verification_path.chmod(0o644)
+    verification_dir.chmod(0o755)
+    sources = TrustSources(reg, ledger, anchor, heartbeat, freeze, integrator_private,
+                           verification_path, verification_dir, os.getuid())
     # Existing focused integrator cases exercise downstream gates with the
     # fixture's observed PR identity; dedicated coverage passes explicit
     # mismatching identities to the production entry point.
@@ -850,6 +861,30 @@ def _remote_main(bare):
         capture_output=True,
         text=True,
     ).stdout.strip()
+
+
+@pytest.mark.parametrize("case", ["missing", "fail", "stale", "revision", "owner"])
+def test_integrator_rejects_unverified_trust_root_without_promoting(tmp_path, case):
+    from dataclasses import replace
+
+    promote, repo, bare, _base, _head, _tree, auth, sources, signature = _git_fixture(tmp_path)
+    status_path = sources.trust_verification
+    if case == "missing":
+        status_path.unlink()
+    else:
+        status = json.loads(status_path.read_text())
+        if case == "fail":
+            status["result"] = "FAIL"
+        elif case == "stale":
+            status["verified_at"] = "2025-12-30T22:59:59Z"
+        elif case == "revision":
+            status["expected_revision"] = "c" * 40
+        status_path.write_text(json.dumps(status))
+        if case == "owner":
+            sources = replace(sources, trust_verification_owner_uid=os.getuid() + 1)
+    _assert_integrator_rejects_without_main_change(
+        promote, repo, bare, auth, signature, sources, "trust root not verified:"
+    )
 
 
 def _assert_integrator_rejects_without_main_change(
