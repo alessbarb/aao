@@ -49,10 +49,12 @@ done
 Para el paquete de la cadena R1 y la raíz inicial, Antigravity actúa como auditor no recusado bajo el uid **`aao-auditor-alt`**. Nunca bajo `aao-impl-ag`, nunca bajo tu cuenta, y sin copiar `~/.antigravity`, `~/.gemini` ni ninguna sesión.
 
 ```bash
+# 0. Copia root del CLI (el de ~/.local/bin es tuyo y otra cuenta podría modificarlo):
+sudo install -o root -g root -m 0755 ~/.local/bin/agy /usr/local/bin/agy
 # 1. Una vez: inicia sesión de agy COMO el auditor alternativo. `sudo -u ... -H agy` lanza agy directamente,
 #    sin shell de login (la cuenta sigue con nologin). El navegador o el código de dispositivo los completas tú;
 #    las credenciales quedan solo en el home de ese uid (el ejecutor comprueba que no hay nada ajeno ahí).
-sudo -u aao-auditor-alt -H env -i HOME=/home/aao-auditor-alt PATH=/usr/bin:/bin:/usr/local/bin agy
+sudo -u aao-auditor-alt -H env -i HOME=/home/aao-auditor-alt PATH=/usr/bin:/bin:/usr/local/bin /usr/local/bin/agy
 # 2. Instala el ejecutor revisado (root, solo lectura para el rol).
 sudo install -d -o root -g root -m 0755 /opt/aao-audit
 sudo install -o root -g root -m 0755 scripts/audit/run_agy_audit.sh /opt/aao-audit/
