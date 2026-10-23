@@ -53,7 +53,7 @@ g -C "$work/repo" -c advice.detachedHead=false checkout -q "$head"
 sed -e "s/{{BASE}}/$base/g" -e "s/{{HEAD}}/$head/g" "$PROMPT" > "$out/prompt.txt"
 # agy with a clean environment: only this uid's HOME; nothing inherited from the caller.
 ( cd "$work/repo" && env -i PATH=/usr/bin:/bin:/usr/local/bin HOME="$home" USER="$me" LOGNAME="$me" LANG=C.UTF-8 \
-    "$AGY" -p --mode plan --sandbox --effort high --print-timeout 0 < "$out/prompt.txt" ) > "$out/report.md"
+    "$AGY" --mode plan --sandbox --effort high --print-timeout 0 -p="$(cat "$out/prompt.txt")" < /dev/null ) > "$out/report.md"
 cat > "$out/attestation.json" <<JSON
 {"auditor":"antigravity","os_user":"$me","uid":$(id -u),"base":"$base","head":"$head",
  "checked_out_head":"$(g -C "$work/repo" rev-parse HEAD)","prompt_template_sha256":"$PROMPT_SHA256",
