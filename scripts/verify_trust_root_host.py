@@ -214,9 +214,37 @@ def polkit_grants(target: str) -> list[str]:
         except OSError as error:
             found.append(f"{directory}: cannot list ({error})")
             continue
-        found += [f"{path} (local or modified rule)" for path in paths
-                  if not path.is_dir() and not _package_pristine(path)]
+        files = [path for path in paths if not path.is_dir()]
+        found += [f"{path} (local or modified rule)" for path in files if not _package_pristine(path)]
+        identities, problems = admin_identities([path for path in files if path.is_file()])
+        found += problems
+        found += [f"{directory}: admin identity {identity} is not root or an E5 group"
+                  for identity in admin_identities_ok(identities)]
     return found
+
+
+def admin_identities(paths: list[Path]) -> tuple[set[str], list[str]]:
+    """Identities that can satisfy auth_admin: AdminIdentities= in local-authority .conf files and every
+    unix-user/unix-group literal in addAdminRule files. A file that defines admins without parseable
+    literals (computed identities) is returned as a problem: it cannot be evaluated."""
+    identities: set[str] = set()
+    problems = []
+    for path in paths:
+        text = path.read_text(errors="replace")
+        if "addAdminRule" in text:
+            found = re.findall(r"unix-(?:user|group|netgroup):[\w.$-]+", text)
+            if not found:
+                problems.append(f"{path}: addAdminRule without literal identities")
+            identities.update(found)
+        for line in text.splitlines():
+            if line.strip().startswith("AdminIdentities"):
+                identities.update(i.strip() for i in line.split("=", 1)[1].split(";") if i.strip())
+    return identities, problems
+
+
+def admin_identities_ok(identities: set[str]) -> list[str]:
+    allowed = {"unix-user:0", "unix-user:root", *(f"unix-group:{g}" for g in ROOT_EQUIVALENT_GROUPS)}
+    return sorted(identities - allowed)
 
 
 UNIT_DIRS = ("/etc/systemd/system", "/run/systemd/system", "/run/systemd/transient", "/run/systemd/generator",

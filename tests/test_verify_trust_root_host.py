@@ -116,3 +116,17 @@ def test_pkaction_failure_fails_closed(monkeypatch):
     monkeypatch.setattr(verifier, "POLKIT_DIRS", ())
     monkeypatch.setattr(verifier.subprocess, "run", lambda *a, **k: Failed())
     assert verifier.polkit_grants("aao-auditor")
+
+
+def test_admin_identities_beyond_e5_groups_are_flagged(tmp_path):
+    stock = tmp_path / "49-ubuntu-admin.rules"
+    stock.write_text('polkit.addAdminRule(function(a, s) { return ["unix-group:sudo", "unix-group:admin"]; });')
+    conf = tmp_path / "51-extra.conf"
+    conf.write_text("[Configuration]\nAdminIdentities=unix-group:sudo;unix-user:eve\n")
+    computed = tmp_path / "60-computed.rules"
+    computed.write_text('polkit.addAdminRule(function(a, s) { return [pick()]; });')
+    identities, problems = verifier.admin_identities([stock])
+    assert verifier.admin_identities_ok(identities) == [] and problems == []
+    identities, problems = verifier.admin_identities([stock, conf, computed])
+    assert verifier.admin_identities_ok(identities) == ["unix-user:eve"]
+    assert problems == [f"{computed}: addAdminRule without literal identities"]
