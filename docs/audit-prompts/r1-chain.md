@@ -19,7 +19,9 @@ Eres el AUDITOR INDEPENDIENTE de AAO (Antigravity), autorizado por la resolució
 4. ¿Hay datos por PR en el registro estático, o algún paso que requiera root por PR?
 5. ¿Cada prueba negativa fallaría si se revierte su control?
 
-**Ejecución:** ejecuta tú las pruebas si tu entorno lo permite (`python -m pytest -q -W error`) e informa la salida literal. Si no puedes, dilo.
+**Herramientas (obligatorio):** solo puedes usar estos comandos: `git diff`, `git show`, `git log`, `git ls-files` y `git grep`. Usa **un único comando git por llamada**, sin `|`, `&&`, `;`, redirecciones ni `$(...)`. Cualquier otro comando se deniega y corta la auditoría. Para leer un archivo, usa `git show {{HEAD}}:<ruta>`. Para buscar, usa `git grep -n <patrón> {{HEAD}} -- <ruta>`.
+
+**Ejecución:** no ejecutes pruebas: `pytest` no está permitido en este entorno. Indica en el dictamen que no se ejecutaron pruebas. El CI del repositorio las ejecuta aparte.
 
 **Formato del dictamen:**
 - Clasifica los hallazgos en A (un control eludible, compromiso de custodia o fuga de credenciales), B y C.
