@@ -4,6 +4,7 @@ from __future__ import annotations
 import argparse
 import hashlib
 import json
+import stat
 import subprocess
 import tempfile
 from datetime import UTC, datetime, timedelta
@@ -11,8 +12,9 @@ from pathlib import Path
 from typing import Any
 
 from aao import integration_authorization as authorization
+from aao.git_paths import changed_paths, path_matches_prefix
 from aao.independent_audit import AuditError
-from aao.manifest_audit import ANCHOR_PATH, load_anchor, verify_promotion
+from aao.manifest_audit import ANCHOR_PATH, load_anchor, read_protected, verify_promotion
 from aao.pr_conformity import _canonical
 
 
@@ -21,17 +23,14 @@ def _git(repository: str, *args: str) -> str:
                           text=True).stdout.strip()
 
 
-def _changed_paths(repository: str, base: str, candidate: str) -> list[str]:
-    return subprocess.run(["git", "-C", repository, "diff", "--no-renames", "--name-only",
-                           f"{base}..{candidate}"], check=True, capture_output=True,
-                          text=True).stdout.splitlines()
-
-
-def _checks(report: dict[str, Any], report_dir: Path) -> list[dict[str, str]]:
+def _checks(report: dict[str, Any], report_dir: Path, auditor_uid: int) -> list[dict[str, str]]:
     evidence_by_check: dict[str, str] = {}
     for digest, relative in report.get("evidence_files", {}).items():
         try:
-            artifact = json.loads((report_dir / relative).read_text(encoding="utf-8"))
+            raw = read_protected(report_dir / relative, (auditor_uid,))
+            if hashlib.sha256(raw).hexdigest() != digest:
+                raise AuditError("audit evidence digest mismatch")
+            artifact = json.loads(raw)
         except (OSError, ValueError, TypeError):
             continue
         if artifact.get("check"):
@@ -55,7 +54,11 @@ def issue_authorization(
     """Verify the signed audit and emit an exact §6.1 authorization document."""
     anchor = load_anchor(anchor_path, anchor_owner_uids)
     report_path, signature_path = report_dir / "report.json", report_dir / "report.sig"
-    raw = report_path.read_bytes()
+    report_info = report_dir.lstat()
+    if (not stat.S_ISDIR(report_info.st_mode) or report_info.st_uid != anchor["auditor_uid"]
+            or report_info.st_mode & 0o022):
+        raise AuditError("report directory is not auditor-owned or is group/other writable")
+    raw = read_protected(report_path, (anchor["auditor_uid"],))
     report = json.loads(raw)
     if not isinstance(report, dict) or not isinstance(report.get("manifest"), dict):
         raise AuditError("signed report has no manifest")
@@ -64,7 +67,8 @@ def issue_authorization(
         manifest_path = Path(temporary) / "manifest.json"
         manifest_path.write_bytes(_canonical(manifest))
         valid, reasons = verify_promotion(manifest_path, report_path, signature_path,
-                                          anchor_path=anchor_path, anchor_owner_uids=anchor_owner_uids)
+                                          anchor_path=anchor_path, anchor_owner_uids=anchor_owner_uids,
+                                          report_bytes=raw)
     if not valid:
         raise AuditError("audit report is not promotion-valid: " + "; ".join(reasons))
     if report.get("verdict") != "approve" or report.get("veto") is not False or report.get("blocking_findings") or report.get("custody_problems"):
@@ -78,9 +82,9 @@ def issue_authorization(
         raise AuditError("implementer attribution is unresolved")
     if auditor_id in implementers:
         raise AuditError("auditor is recused because they are an implementer")
-    paths = _changed_paths(manifest["repository"], base, candidate)
+    paths = changed_paths(manifest["repository"], base, candidate)
     protected_prefixes = policy["protected_paths"]
-    risk_class = "R2" if any(path == prefix or path.startswith(prefix.rstrip("/" ) + "/")
+    risk_class = "R2" if any(path_matches_prefix(path, prefix)
                               for path in paths for prefix in protected_prefixes) else "R1"
     enabled = policy.get("enabled_risk_classes", ["R1"])
     if not isinstance(enabled, list) or any(not isinstance(item, str) for item in enabled):
@@ -99,7 +103,7 @@ def issue_authorization(
         raise ValueError("issuer clock must be timezone-aware")
     issued = issued.astimezone(UTC)
     attribution = [{"sha": candidate, "principal": identity, "source": "anchored-audit-attribution",
-                    "evidence_sha256": hashlib.sha256(_canonical(implementers)).hexdigest()}
+                    "evidence_sha256": hashlib.sha256(raw).hexdigest()}
                    for identity in sorted(set(implementers))]
     auditor_key_id = policy["auditors"].get(auditor_id)
     if not isinstance(auditor_key_id, str) or not auditor_key_id:
@@ -115,11 +119,15 @@ def issue_authorization(
         "git_version": report["git_version"].removeprefix("git version "),
         "auditor_id": auditor_id, "auditor_key_id": auditor_key_id,
         "auditor_code_revision": report["auditor_revision"], "attribution": attribution,
-        "checks_executed": _checks(report, report_dir), "scope": "exact audited candidate and merge result",
+        "checks_executed": _checks(report, report_dir, anchor["auditor_uid"]),
+        "scope": "exact audited candidate and merge result",
         "known_limitations": report.get("limitations", []), "residual_risks": report.get("limitations", []),
         "permitted_operations": ["merge-commit to the authorized target ref"],
         "prohibited_operations": ["fast-forward", "squash", "rebase", "R3 promotion"],
-        "findings": report.get("findings", []), "expediente_sha256": hashlib.sha256(raw).hexdigest(),
+        "findings": [{**finding, "severity": "CRITICAL" if finding["id"] in report.get("blocking_findings", [])
+                      else "HIGH", "disposition": "OPEN" if finding["id"] in report.get("blocking_findings", [])
+                      else "RESOLVED"} for finding in report.get("findings", [])],
+        "expediente_sha256": hashlib.sha256(raw).hexdigest(),
         "verdict": "APPROVE", "issued_at": issued.isoformat(timespec="seconds"),
         "expires_at": (issued + timedelta(hours=1)).isoformat(timespec="seconds"),
     }

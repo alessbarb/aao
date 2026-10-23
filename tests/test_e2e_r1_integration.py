@@ -48,8 +48,13 @@ def _bare_chain(env, data, output, tmp_path):
     policy = json.loads(env["policy"].read_text())
     repo = env["repo"]
     bare = tmp_path / "remote.git"
-    subprocess.run(["git", "init", "--bare", str(bare)], check=True, capture_output=True)
-    _git(repo, "remote", "add", "origin", str(bare))
+    if not bare.exists():
+        subprocess.run(["git", "init", "--bare", str(bare)], check=True, capture_output=True)
+    existing_remotes = _git(repo, "remote").splitlines()
+    if "origin" in existing_remotes:
+        _git(repo, "remote", "set-url", "origin", str(bare))
+    else:
+        _git(repo, "remote", "add", "origin", str(bare))
     _git(repo, "push", "origin", f"{data['target_sha']}:refs/heads/main")
     _git(repo, "push", "origin", f"{data['candidate_sha']}:refs/heads/candidate")
     keydir = tmp_path / "integrator-keys"
@@ -156,6 +161,33 @@ def test_r1_signed_audit_issues_exact_authorization(audit_setup, tmp_path):
     _assert_bare(bare, commit, data["target_sha"], data["candidate_sha"], data["result_tree"])
 
 
+@pytest.mark.parametrize("mismatch", ["tree", "parents"])
+def test_integrator_rejects_staged_commit_mismatch(audit_setup, tmp_path, mismatch):
+    env = audit_setup
+    env["configure"](policy_overrides={"auditors": {"aao-auditor": "auditor-key"},
+                                       "enabled_risk_classes": ["R1"]})
+    manifest_path, data = make_manifest(env)
+    run_audit(env, manifest_path, f"e2e-staged-{mismatch}")
+    env["heartbeat"]()  # issue_authorization verifies supervisor custody as well as the report signature
+    output = tmp_path / "authorization"
+    issue_authorization(env["state"] / f"e2e-staged-{mismatch}", "example/project", 17,
+                        env["key"], output, anchor_path=env["anchor"],
+                        anchor_owner_uids=(env["anchor"].stat().st_uid,))
+    _bare, sources, doc, sig = _bare_chain(env, data, output, tmp_path)
+    tree = data["result_tree"] if mismatch == "parents" else _git(env["repo"], "rev-parse", f"{data['candidate_sha']}^{{tree}}")
+    parents = [data["target_sha"], data["candidate_sha"]]
+    if mismatch == "parents":
+        parents = [data["candidate_sha"]]
+    staged = subprocess.run(["git", "-C", str(env["repo"]), "commit-tree", tree,
+                             *[arg for parent in parents for arg in ("-p", parent)]],
+                            input="staged mismatch\n", check=True, capture_output=True,
+                            text=True).stdout.strip()
+    with pytest.raises(ValueError, match=f"staged commit {mismatch}"):
+        promote(env["repo"], "origin", doc, sig, sources, identity_provider=_identity(),
+                observed_repo=doc["repo"], observed_pr_number=doc["pr_number"],
+                staged_commit=staged, now=lambda: datetime.now(UTC))
+
+
 def test_issuer_rejects_tampered_report_signature(audit_setup):
     env = audit_setup
     env["configure"](policy_overrides={"auditors": {"aao-auditor": "auditor-key"}})
@@ -171,13 +203,14 @@ def test_issuer_rejects_tampered_report_signature(audit_setup):
 
 def test_protected_path_does_not_emit_when_r2_is_disabled(audit_setup):
     env = audit_setup
+    manifest_path, data = make_manifest(env)
     env["configure"](policy_overrides={"auditors": {"aao-auditor": "auditor-key"},
-                                       "protected_paths": ["src/app.py"],
+                                       "protected_paths": ["src/app"],
+                                       "dispositions": {f"{data['candidate_sha']}:{data['result_tree']}:protected-path:src/app.py": "reviewed"},
                                        "enabled_risk_classes": ["R1"]})
-    manifest_path, _ = make_manifest(env)
     run_audit(env, manifest_path, "e2e-protected")
     env["heartbeat"]()
-    with pytest.raises(AuditError, match="not promotion-valid"):
+    with pytest.raises(AuditError, match="R2 is not enabled"):
         issue_authorization(env["state"] / "e2e-protected", "example/project", 17,
                             env["key"], env["tmp"] / "must-not-exist",
                             anchor_path=env["anchor"], anchor_owner_uids=(env["anchor"].stat().st_uid,))
@@ -220,10 +253,11 @@ def test_supervisor_record_attribution_is_atomic_and_keeps_other_entries(tmp_pat
     path = tmp_path / "attribution.json"
     first, second = "a" * 40, "b" * 40
     record_attribution(path, first, ["push:alice"])
+    record_attribution(path, first, ["push:carol"])
     record_attribution(path, second, ["push:bob", "push:bob"])
     assert json.loads(path.read_text()) == {
         "schema": "aao.implementer-attribution.v1",
-        "candidates": {first: ["push:alice"], second: ["push:bob"]},
+        "candidates": {first: ["push:alice", "push:carol"], second: ["push:bob"]},
     }
     assert path.stat().st_mode & 0o777 == 0o644
     with pytest.raises(ValueError, match="candidate_sha"):

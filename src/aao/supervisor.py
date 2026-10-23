@@ -83,35 +83,45 @@ def _write_state(path: Path, state: dict[str, Any], private_key: str) -> None:
 
 
 def record_attribution(path: Path, candidate_sha: str, principals: list[str]) -> None:
-    """Atomically record one authenticated-push attribution entry, preserving other candidates."""
+    """Atomically and monotonically union authenticated-push principals for a candidate."""
     if not isinstance(candidate_sha, str) or not re.fullmatch(r"[0-9a-f]{40}", candidate_sha):
         raise ValueError("candidate_sha must be a full lowercase Git SHA")
     if (not isinstance(principals, list) or not principals or
             any(not isinstance(item, str) or not item.strip() for item in principals)):
         raise ValueError("principals must be a non-empty list of non-empty strings")
     path = Path(path)
-    try:
-        existing = json.loads(path.read_text(encoding="utf-8"))
-    except FileNotFoundError:
-        existing = {"schema": "aao.implementer-attribution.v1", "candidates": {}}
-    if (not isinstance(existing, dict) or existing.get("schema") != "aao.implementer-attribution.v1" or
-            not isinstance(existing.get("candidates"), dict)):
-        raise ValueError("attribution file has an invalid schema")
-    updated = {**existing, "candidates": {**existing["candidates"],
-                                          candidate_sha: sorted(set(principals))}}
     path.parent.mkdir(parents=True, exist_ok=True)
-    fd, temporary = tempfile.mkstemp(prefix=path.name + ".", dir=path.parent)
-    try:
-        os.fchmod(fd, 0o644)
-        with os.fdopen(fd, "w", encoding="utf-8") as handle:
-            json.dump(updated, handle, sort_keys=True)
-            handle.write("\n")
-            handle.flush()
-            os.fsync(handle.fileno())
-        os.replace(temporary, path)
-    finally:
-        if os.path.exists(temporary):
-            os.unlink(temporary)
+    with (path.with_name(path.name + ".lock")).open("a") as lock:
+        fcntl.flock(lock, fcntl.LOCK_EX)
+        try:
+            existing = json.loads(path.read_text(encoding="utf-8"))
+        except FileNotFoundError:
+            existing = {"schema": "aao.implementer-attribution.v1", "candidates": {}}
+        if (not isinstance(existing, dict) or existing.get("schema") != "aao.implementer-attribution.v1" or
+                not isinstance(existing.get("candidates"), dict)):
+            raise ValueError("attribution file has an invalid schema")
+        current = existing["candidates"].get(candidate_sha, [])
+        if not isinstance(current, list) or any(not isinstance(item, str) or not item.strip() for item in current):
+            raise ValueError("attribution entry has an invalid schema")
+        updated = {**existing, "candidates": {**existing["candidates"],
+                    candidate_sha: sorted(set(current) | set(principals))}}
+        fd, temporary = tempfile.mkstemp(prefix=path.name + ".", dir=path.parent)
+        try:
+            os.fchmod(fd, 0o644)
+            with os.fdopen(fd, "w", encoding="utf-8") as handle:
+                json.dump(updated, handle, sort_keys=True)
+                handle.write("\n")
+                handle.flush()
+                os.fsync(handle.fileno())
+            os.replace(temporary, path)
+            directory = os.open(path.parent, os.O_RDONLY | os.O_DIRECTORY)
+            try:
+                os.fsync(directory)
+            finally:
+                os.close(directory)
+        finally:
+            if os.path.exists(temporary):
+                os.unlink(temporary)
 
 
 def _sequence(path: Path, private_key: str) -> int:

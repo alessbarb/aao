@@ -11,6 +11,7 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
+from aao.git_paths import changed_paths as git_changed_paths
 from aao.governance_ledger import active_vetoes, append, open_incidents, verify
 from aao.integration_authorization import canonical, validate
 from aao.pending_veto import PendingVetoError, pending_vetoes
@@ -94,6 +95,8 @@ def promote(repo: Path, remote: str, auth: dict[str, Any], signature: str,
             before_push=None, identity_provider=None, after_push=None,
             after_recheck=None,
             observed_repo: str | None = None, observed_pr_number: int | None = None,
+            staged_commit: str | None = None,
+            candidate_ref: str | None = None,
             now: Callable[[], datetime] = lambda: datetime.now(UTC)) -> str:
     if identity_provider is None:
         raise RuntimeError("identity provider is mandatory")
@@ -170,12 +173,16 @@ def promote(repo: Path, remote: str, auth: dict[str, Any], signature: str,
     identity = identity_provider() if callable(identity_provider) else identity_provider
     if identity != registry["integrator_identity"]:
         raise RuntimeError("integrator identity mismatch")
-    remote_url = _git(repo, "remote", "get-url", remote)
+    # R1 callers pass the authoritative remote URL directly. Legacy callers may
+    # still pass a configured remote name; resolve only that form through the
+    # repository config so a mirror's implicit `origin` is never substituted.
+    is_explicit_url = (Path(remote).is_absolute() or "://" in remote or remote.startswith("git@"))
+    remote_url = remote if is_explicit_url else _git(repo, "remote", "get-url", remote)
     remote_refs = subprocess.run(["git", "ls-remote", remote_url, ref],
                                  check=True, capture_output=True, text=True).stdout.splitlines()
     base = next((parts[0] for line in remote_refs
                  if len(parts := line.split()) == 2 and parts[1] == ref), None)
-    head_ref = auth.get("candidate_ref") or "refs/heads/candidate"
+    head_ref = candidate_ref or auth.get("candidate_ref") or "refs/heads/candidate"
     candidates = subprocess.run(["git", "ls-remote", remote_url, head_ref], check=True,
                                 capture_output=True, text=True).stdout.splitlines()
     head = next((line.split()[0] for line in candidates if len(line.split()) == 2 and line.split()[1] == head_ref), None)
@@ -193,10 +200,7 @@ def promote(repo: Path, remote: str, auth: dict[str, Any], signature: str,
     if not has_base:
         raise ValueError("changed paths unavailable: local base commit missing")
     try:
-        changed_paths = subprocess.run(
-            ["git", "-C", str(repo), "diff", "--no-renames", "--name-only", f"{base}...{head}"],
-            check=True, capture_output=True, text=True,
-        ).stdout.splitlines()
+        changed = git_changed_paths(repo, base, head)
     except (subprocess.CalledProcessError, OSError) as error:
         raise ValueError(f"changed paths unavailable: {error}") from error
     state = {**registry, "repo": observed_repo, "pr_number": observed_pr_number,
@@ -204,7 +208,7 @@ def promote(repo: Path, remote: str, auth: dict[str, Any], signature: str,
         "merge_tree_sha": auth["merge_result_tree_sha"], "now": current_time.isoformat(),
         "heartbeat_valid": heartbeat_ok, "ra03_pass": ra03, "ra09_pass": ra09,
         "ra02_pass": ra02, "ledger": {"veto": bool(active_vetoes(rows, ledger_keys))},
-        "git_version": version, "changed_paths": changed_paths}
+        "git_version": version, "changed_paths": changed}
     reasons = validate(auth, signature, state)
     if not all((ra01, ra02, ra03, ra07, ra09)):
         reasons.append("required RA status pending")
@@ -214,9 +218,21 @@ def promote(repo: Path, remote: str, auth: dict[str, Any], signature: str,
     if tree != auth["merge_result_tree_sha"]:
         raise ValueError("computed merge tree differs from authorization")
     expected_parents = auth["expected_parents"]
-    commit = subprocess.run(["git", "-C", str(repo), "commit-tree", tree,
-        *[arg for parent in expected_parents for arg in ("-p", parent)]],
-        input=message + "\n", check=True, capture_output=True, text=True).stdout.strip()
+    if staged_commit is None:
+        commit = subprocess.run(["git", "-C", str(repo), "commit-tree", tree,
+            *[arg for parent in expected_parents for arg in ("-p", parent)]],
+            input=message + "\n", check=True, capture_output=True, text=True).stdout.strip()
+    else:
+        try:
+            staged_tree = _git(repo, "show", "-s", "--format=%T", staged_commit)
+            staged_parents = _git(repo, "show", "-s", "--format=%P", staged_commit).split()
+        except (subprocess.CalledProcessError, OSError) as error:
+            raise ValueError("staged commit is unavailable") from error
+        if staged_tree != tree:
+            raise ValueError("staged commit tree differs from authorized merge tree")
+        if staged_parents != expected_parents:
+            raise ValueError("staged commit parents differ from authorized parents")
+        commit = staged_commit
     if not identity_provider.push_identity(ref, base, commit):
         raise RuntimeError("unattributed push")
     if before_push:

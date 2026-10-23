@@ -427,13 +427,14 @@ def audit_manifest(
 def verify_promotion(
     manifest_path: Path, report_path: Path, signature_path: Path | None, promoted_sha: str | None = None, *,
     anchor_path: Path = ANCHOR_PATH, anchor_owner_uids: tuple[int, ...] = (0,),
+    report_bytes: bytes | None = None,
 ) -> tuple[bool, tuple[str, ...]]:
     """Fail-closed decision for the controller; run immediately before a compare-and-swap ref update."""
     reasons: list[str] = []
     try:
         anchor = load_anchor(anchor_path, anchor_owner_uids)
         manifest, manifest_digest = parse_manifest(manifest_path)
-        raw = report_path.read_bytes()
+        raw = report_bytes if report_bytes is not None else report_path.read_bytes()
         report = json.loads(raw)
     except (AuditError, OSError, ValueError) as error:
         return False, (f"cannot evaluate promotion: {error}",)
@@ -456,8 +457,10 @@ def verify_promotion(
                 signature.write_bytes(base64.b64decode(signature_path.read_text(encoding="ascii").strip(), validate=True))
             except ValueError:
                 signature.write_bytes(b"")
+            signed_report = Path(temporary) / "report.json"
+            signed_report.write_bytes(raw)
             if subprocess.run(["openssl", "pkeyutl", "-verify", "-pubin", "-inkey", str(public), "-rawin", "-in",
-                               str(report_path), "-sigfile", str(signature)], check=False,
+                               str(signed_report), "-sigfile", str(signature)], check=False,
                               capture_output=True).returncode:
                 reasons.append("report signature does not verify against the anchored auditor key")
     for digest, path in (report.get("evidence_files") or {}).items():
