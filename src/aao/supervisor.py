@@ -11,6 +11,7 @@ from typing import Any
 
 from aao.governance_ledger import verify
 from aao.integration_authorization import canonical
+from aao.pending_veto import all_pending_vetoes
 
 
 def _sign(event: dict[str, Any], private_key: str) -> dict[str, Any]:
@@ -33,8 +34,10 @@ def _sequence(path: Path) -> int:
 
 def _persist_sequence(path: Path, sequence: int) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
+    state = json.loads(path.read_text()) if path.exists() else {}
+    state["sequence"] = sequence
     temporary = path.with_name(path.name + ".tmp")
-    temporary.write_text(json.dumps({"sequence": sequence}))
+    temporary.write_text(json.dumps(state, sort_keys=True))
     temporary.replace(path)
 
 
@@ -113,7 +116,40 @@ def inspect(
 
 
 def signed_heartbeat(sequence: int, issued_at: str, private_key: str, *, key_id: str,
-                     expires_at: str) -> dict[str, Any]:
+                     expires_at: str, ledger_path: Path | None = None,
+                     trusted_keys: dict[str, Any] | None = None, state_path: Path | None = None,
+                     ledger_head: str | None = None,
+                     pending_markers: dict[str, list[str]] | None = None) -> dict[str, Any]:
+    """Sign supervisor state; when given custody inputs, refresh the durable registry."""
+    prior: dict[str, Any] = {}
+    if state_path and state_path.exists():
+        prior = json.loads(state_path.read_text())
+    markers = {key: list(values) for key, values in prior.get("pending_markers", {}).items()}
+    head = ledger_head or "0" * 64
+    if ledger_path is not None:
+        if not trusted_keys:
+            raise ValueError("supervisor requires trusted ledger keys")
+        rows = verify(ledger_path, trusted_keys)
+        head = rows[-1]["hash"] if rows else "0" * 64
+        resolved = {digest for row in rows if "resolves_pending" in row
+                    for digest in row["resolves_pending"]}
+        markers = {candidate: [digest for digest in digests if digest not in resolved]
+                   for candidate, digests in markers.items()}
+        markers = {candidate: digests for candidate, digests in markers.items() if digests}
+        current = all_pending_vetoes(Path(str(ledger_path) + ".pending-vetoes"), ledger_path.stat().st_uid)
+        for candidate, digests in current.items():
+            markers[candidate] = sorted(set(markers.get(candidate, [])) | set(digests))
+    elif pending_markers is not None:
+        markers = pending_markers
     event = {"sequence": sequence, "key_id": key_id, "issued_at": issued_at,
-             "expires_at": expires_at, "type": "heartbeat"}
-    return _sign(event, private_key)
+             "expires_at": expires_at, "type": "heartbeat", "ledger_head": head,
+             "pending_markers": markers}
+    signed = _sign(event, private_key)
+    if state_path:
+        state_path.parent.mkdir(parents=True, exist_ok=True)
+        state = {**prior, "sequence": max(sequence, int(prior.get("sequence", 0))),
+                 "ledger_head": head, "pending_markers": markers}
+        temporary = state_path.with_name(state_path.name + ".tmp")
+        temporary.write_text(json.dumps(state, sort_keys=True))
+        temporary.replace(state_path)
+    return signed

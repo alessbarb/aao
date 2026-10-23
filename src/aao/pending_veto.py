@@ -32,8 +32,8 @@ def _read_marker(path: Path, owner_uid: int) -> bytes:
     with os.fdopen(descriptor, "rb") as handle:
         info = os.fstat(handle.fileno())
         if (not stat.S_ISREG(info.st_mode) or info.st_uid != owner_uid or
-                stat.S_IMODE(info.st_mode) != 0o600):
-            raise PendingVetoError(f"{path} is not a mode-0600 regular file owned by the ledger uid")
+                stat.S_IMODE(info.st_mode) not in (0o600, 0o640)):
+            raise PendingVetoError(f"{path} is not a mode-0600/0640 regular file owned by the ledger uid")
         _check_parents(path, owner_uid)
         return handle.read()
 
@@ -47,8 +47,8 @@ def pending_vetoes(directory: Path, candidate_sha: str, owner_uid: int) -> list[
     except OSError as error:
         raise PendingVetoError(f"cannot inspect pending-veto directory: {error}") from error
     if (stat.S_ISLNK(info.st_mode) or not stat.S_ISDIR(info.st_mode) or
-            info.st_uid != owner_uid or stat.S_IMODE(info.st_mode) != 0o700):
-        raise PendingVetoError("pending-veto directory is not private to the ledger uid")
+            info.st_uid != owner_uid or stat.S_IMODE(info.st_mode) not in (0o700, 0o750)):
+        raise PendingVetoError("pending-veto directory must be mode 0700/0750 and owned by the ledger uid")
     _check_parents(directory / "x", owner_uid)
     digests = []
     try:
@@ -70,3 +70,24 @@ def pending_vetoes(directory: Path, candidate_sha: str, owner_uid: int) -> list[
             raise PendingVetoError(f"pending-veto marker {path.name} is inconsistent")
         digests.append(digest)
     return digests
+
+
+def all_pending_vetoes(directory: Path, owner_uid: int) -> dict[str, list[str]]:
+    """Return every verified candidate marker currently present in the directory."""
+    try:
+        info = os.lstat(directory)
+    except FileNotFoundError:
+        return {}
+    if (stat.S_ISLNK(info.st_mode) or not stat.S_ISDIR(info.st_mode) or info.st_uid != owner_uid or
+            stat.S_IMODE(info.st_mode) not in (0o700, 0o750)):
+        raise PendingVetoError("pending-veto directory must be mode 0700/0750 and owned by the ledger uid")
+    _check_parents(directory / "x", owner_uid)
+    candidates: dict[str, list[str]] = {}
+    for marker_path in sorted(directory.iterdir()):
+        candidate = marker_path.name.split("-", 1)[0]
+        if not candidate:
+            raise PendingVetoError(f"invalid pending-veto marker name: {marker_path.name}")
+        digest = pending_vetoes(directory, candidate, owner_uid)
+        if digest:
+            candidates[candidate] = digest
+    return candidates
