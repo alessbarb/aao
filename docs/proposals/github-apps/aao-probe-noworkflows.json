@@ -1,0 +1,14 @@
+{
+  "url": "https://github.com/alessbarb/aao",
+  "hook_attributes": {
+    "active": false
+  },
+  "public": false,
+  "default_events": [],
+  "name": "aao-probe-noworkflows",
+  "default_permissions": {
+    "contents": "write",
+    "metadata": "read"
+  },
+  "description": "DISPOSABLE probe for test A-14 only: contents write WITHOUT workflows. Install only on the trial repository; uninstall and delete after the trial. Never install on the canonical repository."
+}

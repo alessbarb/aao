@@ -66,7 +66,7 @@ Cada implementador tiene **su propia App**. Así la atribución distingue a Code
   - La **autoría** sigue siendo verificable: los commits y los eventos de push del fork los hace la App del implementador, y el supervisor la atribuye con RA-02.
   - El PM **no** puede escribir código en el canónico.
 - **Auditores:** `checks: write` **y `statuses: write`**. P3 §4 prevalece, porque el ruleset exige que la App fuente del check obligatorio tenga `statuses: write`. P3-04 comprueba que un status de otra App no satisface el check.
-- **A-14 (`workflows`)** se prueba **en el fork**, con la App del implementador, y en el canónico con `aao-integrator`. Ninguna otra App puede probarlo.
+- **A-14 (`workflows`)** necesita una identidad con `contents: write` **y sin** `workflows: write`; ninguna de las 9 Apps cumple las dos condiciones (B8-07 de la auditoría del harness). Se usa una **App de sondeo desechable**, `aao-probe-noworkflows`, con `contents: write` y `metadata: read`, instalada **solo en el repo de ensayo** y desinstalada después de las pruebas. PASS = el push de un cambio en `.github/workflows/` se rechaza con el mensaje de GitHub sobre el permiso `workflows`, y el mismo push sin cambios en workflows se acepta (control). La App de sondeo nunca se instala en el canónico.
 - **A-10** compara los permisos de cada instalación con esta tabla corregida, según el repositorio en el que esté instalada la App.
 
 ## 5. Modelo de fork (prevención sin plan de pago)
