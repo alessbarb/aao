@@ -8,7 +8,13 @@ from pathlib import Path
 import pytest
 
 from aao import independent_audit
-from aao.independent_audit import AuditError, audit_candidate, promotion_decision, run_sandboxed
+from aao.independent_audit import (
+    LEGACY_RETIRED,
+    AuditError,
+    audit_candidate,
+    promotion_decision,
+    run_sandboxed,
+)
 
 USER = pwd.getpwuid(os.geteuid()).pw_name
 
@@ -95,14 +101,17 @@ def gate(env, sha, name="run", implementer="implementer", checkout_name=None, ba
                               env["auditor"] / "ledger.jsonl", current_base_sha=base or env["base"])
 
 
-def test_clean_candidate_is_approved_signed_and_promotable(env):
+def test_legacy_path_never_approves_signs_or_promotes(env):
+    # SL-01 (second-line review): replaces the former "approved, signed and promotable" test. The legacy path
+    # takes policy, key and ledger from its caller, so a clean candidate with full custody must still not pass.
     sha = commit(env["repo"], {"src/app.py": "X = 2\n"}, "change")
     report = run_audit(env, sha)
-    assert report["verdict"] == "approve" and not report["blocking_findings"]
+    assert report["verdict"] == "provisional" and not report["blocking_findings"]
+    assert LEGACY_RETIRED in report["custody_problems"]
     assert report["candidate_sha"] == sha and report["base_sha"] == env["base"]
-    assert (env["auditor"] / "run" / "report.sig").exists()
+    assert not (env["auditor"] / "run" / "report.sig").exists()
     result = gate(env, sha)
-    assert result.conformant, result.reasons
+    assert not result.conformant and LEGACY_RETIRED in result.reasons
 
 
 def test_protected_path_blocks_until_exact_sha_disposition(env):
@@ -113,8 +122,8 @@ def test_protected_path_blocks_until_exact_sha_disposition(env):
     assert not gate(env, sha).conformant
     disposed = env["policy"](dispositions={f"{sha}:protected-path:src/aao/pr_conformity.py": "reviewed"})
     report = run_audit(env, sha, name="disposed", policy_path=disposed)
-    assert report["verdict"] == "approve"
-    assert gate(env, sha, name="disposed").conformant
+    assert report["verdict"] == "provisional" and not report["blocking_findings"]  # SL-01: never "approve"
+    assert not gate(env, sha, name="disposed").conformant
 
 
 def test_test_weakening_is_a_blocking_finding(env):
@@ -143,7 +152,7 @@ def test_head_moving_before_verdict_records_nothing(env):
 def test_veto_is_sticky_over_an_earlier_approval(env):
     sha = commit(env["repo"], {"src/app.py": "X = 5\n"}, "change")
     run_audit(env, sha)
-    assert gate(env, sha).conformant
+    assert not gate(env, sha).conformant  # SL-01: the legacy gate always denies
     veto = run_audit(env, sha, name="veto", veto_reason="unsafe design")
     assert veto["verdict"] == "veto" and veto["veto"] is True
     reasons = gate(env, sha, checkout_name="again").reasons
@@ -215,7 +224,7 @@ def test_base_moving_invalidates_the_verdict(env):
     with pytest.raises(AuditError, match="base moved"):
         run_audit(env, sha, name="moving", current_base=lambda: "f" * 40)
     run_audit(env, sha)
-    assert gate(env, sha).conformant
+    assert not gate(env, sha).conformant  # SL-01: the legacy gate always denies
     reasons = gate(env, sha, checkout_name="newbase", base="e" * 40).reasons
     assert "audit report targets a different base than the current pull request base" in reasons
 

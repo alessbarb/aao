@@ -1,0 +1,121 @@
+[
+ {
+  "headRefOid": "48a05f55a6b4b6b423c70dedb5aff1d55c4aca09",
+  "mergeCommit": {
+   "oid": "c08a64044c92ba501ad402f163814fbe2078c3f7"
+  },
+  "mergedAt": "2026-10-20T06:05:22Z",
+  "mergedBy": {
+   "id": "MDQ6VXNlcjI2MzY2NzA1",
+   "is_bot": false,
+   "login": "alessbarb",
+   "name": "Alessandro Barbagallo"
+  },
+  "number": 10,
+  "reviewRequests": [],
+  "reviews": [],
+  "title": "feat: add project-local capability registry"
+ },
+ {
+  "headRefOid": "0ca311b7a787696b75c710cc6b165e926b1f990a",
+  "mergeCommit": {
+   "oid": "8a4fca1cff98aa4c8b9a5cf3f46e9610a3b45b18"
+  },
+  "mergedAt": "2026-10-20T06:05:45Z",
+  "mergedBy": {
+   "id": "MDQ6VXNlcjI2MzY2NzA1",
+   "is_bot": false,
+   "login": "alessbarb",
+   "name": "Alessandro Barbagallo"
+  },
+  "number": 11,
+  "reviewRequests": [],
+  "reviews": [],
+  "title": "feat: execute registered repository checks through the AAO queue"
+ },
+ {
+  "headRefOid": "8e342c72d2d85cb432eca1e17dee4d161f6b8acb",
+  "mergeCommit": {
+   "oid": "681f40c2d30037a8fff7eccedc66d78a3f0f159c"
+  },
+  "mergedAt": "2026-10-20T06:07:46Z",
+  "mergedBy": {
+   "id": "MDQ6VXNlcjI2MzY2NzA1",
+   "is_bot": false,
+   "login": "alessbarb",
+   "name": "Alessandro Barbagallo"
+  },
+  "number": 14,
+  "reviewRequests": [],
+  "reviews": [],
+  "title": "feat: minimal independent audit emitter and veto-aware promotion gate"
+ },
+ {
+  "headRefOid": "2b36c98d62855954b688603f116086d3e86f67f1",
+  "mergeCommit": {
+   "oid": "83230f3c94ac66e5d999b8e825d442c567b6d5db"
+  },
+  "mergedAt": "2026-10-20T06:07:26Z",
+  "mergedBy": {
+   "id": "MDQ6VXNlcjI2MzY2NzA1",
+   "is_bot": false,
+   "login": "alessbarb",
+   "name": "Alessandro Barbagallo"
+  },
+  "number": 15,
+  "reviewRequests": [],
+  "reviews": [],
+  "title": "feat(control-center): implement daily UI for Kanban, tasks, agents, capabilities, skills, proposals, executions, and audits"
+ },
+ {
+  "headRefOid": "123d3ecd2305df324f98cca49a388e323bfc001f",
+  "mergeCommit": {
+   "oid": "3a84ff501cd168420dd4fe6d55ea2f3ccae662e9"
+  },
+  "mergedAt": "2026-10-20T06:12:24Z",
+  "mergedBy": {
+   "id": "MDQ6VXNlcjI2MzY2NzA1",
+   "is_bot": false,
+   "login": "alessbarb",
+   "name": "Alessandro Barbagallo"
+  },
+  "number": 19,
+  "reviewRequests": [],
+  "reviews": [],
+  "title": "feat: audit local candidate manifests by exact SHA and result tree"
+ },
+ {
+  "headRefOid": "7d21b4afe92745dd4b8cc1bc598dd7665c63de7b",
+  "mergeCommit": {
+   "oid": "5d8cc895783a2023016a6bfb108147dd8c60ce05"
+  },
+  "mergedAt": "2026-10-20T06:16:40Z",
+  "mergedBy": {
+   "id": "MDQ6VXNlcjI2MzY2NzA1",
+   "is_bot": false,
+   "login": "alessbarb",
+   "name": "Alessandro Barbagallo"
+  },
+  "number": 20,
+  "reviewRequests": [],
+  "reviews": [],
+  "title": "refactor: separar HTML, CSS y JavaScript del Control Center"
+ },
+ {
+  "headRefOid": "78a76ceba4f31a8362a1736c44fdf1af51c83221",
+  "mergeCommit": {
+   "oid": "ddd520f58613564dbc6460949e2dea8e78b75517"
+  },
+  "mergedAt": "2026-10-21T07:46:41Z",
+  "mergedBy": {
+   "id": "MDQ6VXNlcjI2MzY2NzA1",
+   "is_bot": false,
+   "login": "alessbarb",
+   "name": "Alessandro Barbagallo"
+  },
+  "number": 21,
+  "reviewRequests": [],
+  "reviews": [],
+  "title": "docs(governance): registrar excepci\u00f3n CEO Clase A y orden operativa local"
+ }
+]

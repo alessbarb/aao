@@ -20,14 +20,13 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
+from aao import governance_ledger
 from aao.independent_audit import (
     _LIMITATIONS,
     POLICY_VERSION,
     AuditError,
-    _append_ledger,
     _git,
     _is_sha,
-    _ledger_entries,
     _visible_in_sandbox,
     _write_evidence,
     adversarial_findings,
@@ -45,7 +44,9 @@ _MANIFEST_FIELDS = {"schema", "repository", "target_ref", "target_sha", "candida
                     "candidate_tree", "result_tree", "producer"}
 _GIT_ENV = {"PATH": "/usr/bin:/bin", "HOME": "/nonexistent", "GIT_CONFIG_NOSYSTEM": "1",
             "GIT_CONFIG_GLOBAL": "/dev/null", "LANG": "C.UTF-8"}
-_ANCHOR_FIELDS = {"schema", "policy_path", "policy_sha256", "auditor_uid", "auditor_public_key", "ledger_path"}
+_ANCHOR_FIELDS = {"schema", "policy_path", "policy_sha256", "auditor_uid", "auditor_public_key", "ledger_path",
+                  "ledger_anchor_path", "attribution_path"}
+ATTRIBUTION_SCHEMA = "aao.implementer-attribution.v1"
 
 
 def read_protected(path: Path, owner_uids: tuple[int, ...]) -> bytes:
@@ -88,7 +89,43 @@ def load_anchor(anchor_path: Path = ANCHOR_PATH, anchor_owner_uids: tuple[int, .
     policy, digest = parse_policy(read_protected(Path(anchor["policy_path"]), (uid,)))
     if digest != anchor["policy_sha256"]:
         raise AuditError("policy digest is not the one pinned by the trust anchor")
-    return {**anchor, "policy": policy, "anchor_sha256": _sha(raw)}
+    return {**anchor, "policy": policy, "anchor_sha256": _sha(raw), "anchor_owner_uids": anchor_owner_uids}
+
+
+def attributed_implementers(anchor: dict[str, Any], candidate_sha: str) -> list[str]:
+    """Implementer identities from the anchored attribution source, never from the manifest or Git metadata.
+
+    The file is written by the merge authority from authenticated push events (RA-02) and is owned like the
+    trust anchor. An absent file, unknown candidate or empty list means attribution is unresolved."""
+    try:
+        data = json.loads(read_protected(Path(anchor["attribution_path"]), anchor["anchor_owner_uids"]))
+        identities = data["candidates"][candidate_sha] if data.get("schema") == ATTRIBUTION_SCHEMA else None
+    except (AuditError, OSError, ValueError, KeyError, TypeError, AttributeError):
+        return []
+    if not isinstance(identities, list) or not all(isinstance(i, str) and i for i in identities):
+        return []
+    return sorted(set(identities))
+
+
+def _ledger_keys(anchor: dict[str, Any], directory: Path) -> dict[str, Any]:
+    """Trusted signer registry for the audit ledger: only the anchored auditor key."""
+    public = directory / "auditor.pub"
+    public.write_text(anchor["auditor_public_key"], encoding="ascii")
+    return {anchor["policy"]["auditor_id"]: {"public_key": str(public)}}
+
+
+def ledger_rows(anchor: dict[str, Any]) -> list[dict[str, Any]]:
+    """Verify every entry signature and that the externally anchored hash is still part of the chain."""
+    ledger = _ledger(anchor)
+    try:
+        expected = read_protected(Path(anchor["ledger_anchor_path"]), anchor["anchor_owner_uids"]).decode().strip()
+        with tempfile.TemporaryDirectory(prefix="aao-ledger-keys-") as temporary:
+            rows = governance_ledger.verify(ledger, _ledger_keys(anchor, Path(temporary)))
+    except (OSError, ValueError, UnicodeDecodeError) as error:
+        raise AuditError(f"audit ledger is not trustworthy: {error}") from error
+    if expected != "0" * 64 and expected not in {r["hash"] for r in rows}:
+        raise AuditError("audit ledger does not contain its external anchor (truncated or rewritten)")
+    return rows
 
 
 def parse_manifest(path: Path) -> tuple[dict[str, Any], str]:
@@ -212,7 +249,9 @@ def audit_manifest(
         tree = _checkout_result(clone, manifest)
         findings = adversarial_findings(clone, manifest["target_sha"], manifest["result_tree"], policy)
         authors = _git(clone, "log", "--format=%ae", f"{manifest['target_sha']}..{manifest['candidate_sha']}")
-        implementers = sorted({manifest["producer"], *authors.split()})
+        # Declared identities can only make the decision stricter; recusal relies on attribution (SL-02).
+        declared = sorted({manifest["producer"], *authors.split()})
+        implementers = attributed_implementers(anchor, manifest["candidate_sha"])
         output.mkdir(mode=0o700, exist_ok=False)
         evidence_dir = output / "evidence"
         evidence_dir.mkdir(mode=0o700)
@@ -232,9 +271,11 @@ def audit_manifest(
     key = f"{manifest['candidate_sha']}:{manifest['result_tree']}"
     blocking = [f["id"] for f in findings if f"{key}:{f['id']}" not in policy["dispositions"]]
     blocking += [f"audit-check-failed:{n}" for n, c in checks.items() if c["conclusion"] != "success"]
-    if policy["auditor_id"] in implementers:
+    if policy["auditor_id"] in implementers or policy["auditor_id"] in declared:
         blocking.append("auditor-is-implementer")
     custody = _custody(anchor, key_path)
+    if not implementers:
+        custody.append("implementer attribution is unresolved")
     verdict = "veto" if veto_reason else "provisional" if custody else "reject" if blocking else "approve"
     report = {
         "schema": REPORT_SCHEMA, "manifest_sha256": manifest_digest, "manifest": manifest,
@@ -243,7 +284,7 @@ def audit_manifest(
         "policy_version": POLICY_VERSION, "policy_sha256": anchor["policy_sha256"],
         "anchor_sha256": anchor["anchor_sha256"], "auditor_id": policy["auditor_id"],
         "auditor_uid": anchor["auditor_uid"], "auditor_revision": auditor_revision(),
-        "implementer_ids": implementers, "verdict": verdict, "veto": bool(veto_reason),
+        "implementer_ids": implementers, "declared_implementers": declared, "verdict": verdict, "veto": bool(veto_reason),
         "veto_reason": veto_reason or "", "blocking_findings": blocking, "findings": findings,
         "audit_checks": checks, "custody_problems": custody, "evidence_files": evidence,
         "assurance_level": "A", "limitations": list(_LIMITATIONS),
@@ -258,7 +299,15 @@ def audit_manifest(
         signature = subprocess.run(["openssl", "pkeyutl", "-sign", "-inkey", str(key_path), "-rawin", "-in",
                                     str(output / "report.json")], check=True, capture_output=True).stdout
         (output / "report.sig").write_text(base64.b64encode(signature).decode("ascii"), encoding="ascii")
-    _append_ledger(ledger, report, _sha(report_bytes))
+        # Only a custody-valid auditor can record decisions; every entry is signed (SL-03).
+        ledger_rows(anchor)
+        with tempfile.TemporaryDirectory(prefix="aao-ledger-keys-") as temporary:
+            governance_ledger.append(
+                ledger, {"type": "veto" if verdict == "veto" else "audit-verdict",
+                         "candidate_sha": manifest["candidate_sha"], "result_tree": manifest["result_tree"],
+                         "report_sha256": _sha(report_bytes), "verdict": verdict, "veto": verdict == "veto",
+                         "recorded_at": report["created_at"]},
+                policy["auditor_id"], str(key_path), _ledger_keys(anchor, Path(temporary)))
     return report
 
 
@@ -307,7 +356,7 @@ def verify_promotion(
     if not report.get("evidence_files"):
         reasons.append("report has no evidence")
     try:
-        entries = [e for e in _ledger_entries(_ledger(anchor)) if e.get("candidate_sha") == manifest["candidate_sha"]]
+        entries = [e for e in ledger_rows(anchor) if e.get("candidate_sha") == manifest["candidate_sha"]]
         if any(e.get("veto") for e in entries):
             reasons.append("candidate has a recorded audit veto")
         if not entries or entries[-1].get("report_sha256") != _sha(raw):
