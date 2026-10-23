@@ -13,6 +13,8 @@
 cd ~/workspace/repos/active/aao && git fetch origin && git checkout <SHA revisado de esta PR>
 sudo install -d -o root -g root -m 0755 /opt/aao-p2
 sudo install -o root -g root -m 0755 scripts/github_apps/exchange_manifest_code.py /opt/aao-p2/
+sudo install -d -o root -g root -m 0755 /opt/aao-p2/github-apps
+sudo install -o root -g root -m 0644 docs/proposals/github-apps/*.json /opt/aao-p2/github-apps/
 gh repo create alessbarb/aao-governance-trial --public --description "AAO P2/P3 trial (disposable)" --add-readme
 ```
 
@@ -32,6 +34,31 @@ sudo -u aao-integrator -H python3 /opt/aao-p2/exchange_manifest_code.py aao-inte
 - El código se puede usar una sola vez y caduca en una hora.
 - El script rechaza ejecutarse como root o como un uid distinto del rol.
 
+## 1-bis. Apps de la organización (segunda pasada)
+
+Una App privada solo se puede instalar en la cuenta que es su propietaria. Las 3 de implementador se instalan solo en su fork, dentro de la organización, así que **se crean bajo la organización**. La App de sondeo de A-14 también.
+
+**Primero** (antes de cualquier canje de esta pasada): El script de canje cambia en esta pasada: ahora rechaza guardar la clave si GitHub devuelve permisos distintos de los del manifiesto revisado. Instala la versión revisada y los manifiestos:
+
+```bash
+sudo install -o root -g root -m 0755 scripts/github_apps/exchange_manifest_code.py /opt/aao-p2/
+sudo install -d -o root -g root -m 0755 /opt/aao-p2/github-apps
+sudo install -o root -g root -m 0644 docs/proposals/github-apps/*.json /opt/aao-p2/github-apps/
+```
+
+```bash
+# Crea la organización gratuita aao-agents en https://github.com/account/organizations/new (plan Free).
+sudo useradd --system --create-home --shell /usr/sbin/nologin aao-probe-noworkflows   # uid solo para A-14; se borra al acabar
+crear_org() {
+  python3 scripts/github_apps/create_app_form.py "$1" --org aao-agents && xdg-open "/tmp/aao-create-$1.html"
+  read -r -p "code: " code
+  sudo -u "$1" -H python3 /opt/aao-p2/exchange_manifest_code.py "$1" "$code"
+}
+for app in aao-impl-codex aao-impl-claude aao-impl-ag aao-probe-noworkflows; do crear_org "$app"; done
+```
+
+Las Apps de la primera pasada se comprueban a posteriori con `scripts/github_apps/verify_app_permissions.sh <apps...>`; todas deben dar PASS.
+
 ## 2. Instalar las Apps (solo en el repo de ensayo, por ahora)
 
 En la página de cada App, *Install App*, repo `aao-governance-trial` únicamente:
@@ -41,7 +68,7 @@ En la página de cada App, *Install App*, repo `aao-governance-trial` únicament
 
 ## 3. Fork para los implementadores
 
-Crea una organización gratuita (p. ej. `aao-agents`, sin gasto) y haz un fork de `aao-governance-trial` en ella. Instala las 3 Apps de implementador solo en ese fork.
+En la **misma** organización `aao-agents` del §1-bis, haz un fork de `aao-governance-trial` en ella. Instala las 3 Apps de implementador solo en ese fork.
 
 ## 4. Rulesets en el repo de ensayo
 

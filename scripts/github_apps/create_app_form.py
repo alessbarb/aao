@@ -3,6 +3,9 @@
 
 Run as the CEO (it only writes an HTML file; no credentials involved):
     python3 scripts/github_apps/create_app_form.py aao-integrator
+    python3 scripts/github_apps/create_app_form.py aao-impl-codex --org aao-agents
+A private App can only be installed on the account that owns it, so the implementer Apps (installed only on
+their forks in the organization) and the probe App must be owned by the organization (--org).
 Open the printed file in the browser and click "Create GitHub App".
 GitHub then redirects to http://127.0.0.1:9/?code=...  (nothing listens there):
 copy the `code` value from the address bar and give it to the role account:
@@ -20,19 +23,25 @@ MANIFESTS = Path(__file__).resolve().parents[2] / "docs" / "proposals" / "github
 
 
 def main() -> int:
-    if len(sys.argv) != 2:
+    if len(sys.argv) not in (2, 4) or (len(sys.argv) == 4 and sys.argv[2] != "--org"):
         print(__doc__)
         return 2
     name = sys.argv[1]
+    org = sys.argv[3] if len(sys.argv) == 4 else None
+    if org is not None and not org.replace("-", "").isalnum():
+        print("invalid organization name", file=sys.stderr)
+        return 2
+    target = f"https://github.com/organizations/{org}/settings/apps/new" if org else "https://github.com/settings/apps/new"
     manifest = json.loads((MANIFESTS / f"{name}.json").read_text(encoding="utf-8"))
     manifest["redirect_url"] = "http://127.0.0.1:9/"
     state = secrets.token_urlsafe(16)
     page = Path(f"/tmp/aao-create-{name}.html")
     page.write_text(
         "<!doctype html><meta charset=utf-8><title>Create " + html.escape(name) + "</title>"
-        "<p>Creating GitHub App <b>" + html.escape(name) + "</b> under your account. State: "
+        "<p>Creating GitHub App <b>" + html.escape(name) + "</b> under "
+        + html.escape(f"organization {org}" if org else "your account") + ". State: "
         + state + "</p>"
-        '<form action="https://github.com/settings/apps/new?state=' + state + '" method="post">'
+        '<form action="' + target + '?state=' + state + '" method="post">'
         '<input type="hidden" name="manifest" value="' + html.escape(json.dumps(manifest)) + '">'
         '<button type="submit">Create GitHub App</button></form>',
         encoding="utf-8",
