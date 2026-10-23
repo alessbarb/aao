@@ -36,6 +36,14 @@ sudo -u aao-integrator -H python3 /opt/aao-p2/exchange_manifest_code.py aao-inte
 
 Una App privada solo se puede instalar en la cuenta que es su propietaria. Las 3 de implementador se instalan solo en su fork, dentro de la organización, así que **se crean bajo la organización**. La App de sondeo de A-14 también.
 
+**Primero** (antes de cualquier canje de esta pasada): El script de canje cambia en esta pasada: ahora rechaza guardar la clave si GitHub devuelve permisos distintos de los del manifiesto revisado. Instala la versión revisada y los manifiestos:
+
+```bash
+sudo install -o root -g root -m 0755 scripts/github_apps/exchange_manifest_code.py /opt/aao-p2/
+sudo install -d -o root -g root -m 0755 /opt/aao-p2/github-apps
+sudo install -o root -g root -m 0644 docs/proposals/github-apps/*.json /opt/aao-p2/github-apps/
+```
+
 ```bash
 # Crea la organización gratuita aao-agents en https://github.com/account/organizations/new (plan Free).
 sudo useradd --system --create-home --shell /usr/sbin/nologin aao-probe-noworkflows   # uid solo para A-14; se borra al acabar
@@ -45,14 +53,6 @@ crear_org() {
   sudo -u "$1" -H python3 /opt/aao-p2/exchange_manifest_code.py "$1" "$code"
 }
 for app in aao-impl-codex aao-impl-claude aao-impl-ag aao-probe-noworkflows; do crear_org "$app"; done
-```
-
-El script de canje cambia en esta pasada: ahora rechaza guardar la clave si GitHub devuelve permisos distintos de los del manifiesto revisado. Antes de empezar, instala la versión revisada y los manifiestos:
-
-```bash
-sudo install -o root -g root -m 0755 scripts/github_apps/exchange_manifest_code.py /opt/aao-p2/
-sudo install -d -o root -g root -m 0755 /opt/aao-p2/github-apps
-sudo install -o root -g root -m 0644 docs/proposals/github-apps/*.json /opt/aao-p2/github-apps/
 ```
 
 Las Apps de la primera pasada se comprueban a posteriori con `scripts/github_apps/verify_app_permissions.sh <apps...>`; todas deben dar PASS.
