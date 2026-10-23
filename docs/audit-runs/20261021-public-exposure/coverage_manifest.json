@@ -1,0 +1,63 @@
+{
+ "generated": "2026-10-23",
+ "repository": "alessbarb/aao",
+ "visibility": "public",
+ "git": {
+  "commands": [
+   "git fetch origin '+refs/heads/*:refs/remotes/origin/*' '+refs/pull/*/head:refs/remotes/origin/pr/*'",
+   "git rev-list --remotes | wc -l"
+  ],
+  "public_branches": 8,
+  "pr_head_refs": 26,
+  "tags": 0,
+  "public_commits": 524,
+  "note": "git rev-list --all gives 550 in the auditor clone: 26 extra commits exist only on local, unpublished branches; scanning --all is a superset",
+  "public_author_emails": {
+   "alessbarb@gmail.com": 508,
+   "noreply@openai.com": 16
+  },
+  "scanners": [
+   "gitleaks v8.21.2 git --log-opts=--all",
+   "custom regex over every blob of every commit",
+   "commit messages (git log --remotes --format=%B) with gitleaks + patterns"
+  ]
+ },
+ "github": {
+  "issues_and_prs": 31,
+  "issue_comments": 72,
+  "pr_review_comments": 0,
+  "pr_reviews": 0,
+  "pulls_listed": 26,
+  "wiki": false,
+  "pages": false,
+  "discussions": false,
+  "releases": 0,
+  "actions_artifacts": 0,
+  "actions_caches": 0,
+  "actions_secrets": 0,
+  "actions_variables": 0
+ },
+ "actions_logs": {
+  "runs": 583,
+  "downloaded_zip": 583,
+  "failed": 0,
+  "files": 1398,
+  "method": "GET /repos/{o}/{r}/actions/runs/{id}/logs (zip)",
+  "gitleaks_findings": 4,
+  "findings_note": "EXP-02: ephemeral CI test tokens in pytest tracebacks"
+ },
+ "host_secret_equality_check": {
+  "files": [
+   ".env.local",
+   ".env.test"
+  ],
+  "surfaces": [
+   "git history (all refs)",
+   "commit messages",
+   "issues/PR bodies and comments",
+   "PR reviews",
+   "Actions logs"
+  ],
+  "result_after_rotation": "no current host secret value found on any surface"
+ }
+}
