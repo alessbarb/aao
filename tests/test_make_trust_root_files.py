@@ -55,3 +55,21 @@ def test_auditor_cannot_be_developer():
     except ValueError:
         return
     raise AssertionError("auditor accepted as developer")
+
+
+def test_registry_is_static_and_fail_closed():
+    template = json.loads((ROOT / "docs/audit-runs/20261019-provisional/policy.json").read_text())
+    files = maker.build(REV, template, "A", "S", 1005, ["alessbarb"])
+    registry = maker.build_registry(files["policy.json"], files["trust-anchor.json"], auditor_models={},
+                                    author_models={})
+    assert not maker.PER_PR_FIELDS & set(registry)
+    assert set(registry["ra_status"].values()) == {"PENDING"}
+    assert registry["enabled_risk_classes"] == ["R1"]
+    assert registry["trusted_auditor_revisions"] == [REV]
+    assert registry["policy_sha256"] == files["trust-anchor.json"]["policy_sha256"]
+    try:
+        maker.build_registry(files["policy.json"], files["trust-anchor.json"], auditor_models={},
+                             author_models={}, ra_status={"RA-02": "YES"})
+    except ValueError:
+        return
+    raise AssertionError("invalid RA status accepted")
