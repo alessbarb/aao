@@ -1,0 +1,10 @@
+# Fallback: a request left in the inbox (e.g. after a failed run) is retried.
+[Unit]
+Description=AAO auditor dispatch every 2 minutes
+
+[Timer]
+OnBootSec=3min
+OnUnitInactiveSec=2min
+
+[Install]
+WantedBy=timers.target

@@ -49,6 +49,7 @@ TOOLS = ("git", "bwrap", "openssl", "timeout", "prlimit")
 CEO_USER = os.environ.get("AAO_CEO_USER", "alessbarb")
 ROOT_EQUIVALENT_GROUPS = ("sudo", "admin", "wheel", "docker", "lxd", "libvirt", "disk")
 UNITS = {"aao-auditor@probe.service": "aao-auditor@.service",
+         "aao-auditor-dispatch.service": "aao-auditor-dispatch.service",
          "aao-supervisor-intake.service": "aao-supervisor-intake.service"}
 results: list[tuple[bool, str, str]] = []
 
@@ -411,12 +412,35 @@ def anchor(expected_revision: str) -> None:
           "T6 policy trusts exactly the frozen auditor revision", f"{policy.get('trusted_auditor_revisions')}")
 
 
+STATUS_FILE = Path("/var/lib/aao-trust-verify/status.json")
+
+
+def write_status(path: Path, expected_revision: str, verifier_sha256: str) -> None:
+    """Atomic, root-owned 0644 status the integrator requires (fresh PASS) before any promotion."""
+    from datetime import UTC, datetime
+
+    failed = [name for ok, name, _ in results if not ok]
+    status = {"schema": "aao.trust-root-verification.v1", "result": "FAIL" if failed else "PASS",
+              "expected_revision": expected_revision, "verified_at": datetime.now(UTC).isoformat(),
+              "failed": failed, "verifier_sha256": verifier_sha256}
+    path.parent.mkdir(mode=0o755, parents=True, exist_ok=True)
+    temporary = path.with_name(f".{path.name}.{os.getpid()}")
+    descriptor = os.open(temporary, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW, 0o644)
+    with os.fdopen(descriptor, "w", encoding="utf-8") as handle:
+        json.dump(status, handle, sort_keys=True)
+        handle.flush()
+        os.fsync(handle.fileno())
+    os.chmod(temporary, 0o644)
+    os.replace(temporary, path)
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     source = parser.add_mutually_exclusive_group(required=True)
     source.add_argument("--expected-revision", help="trust-root candidate SHA (40 hex)")
     source.add_argument("--expected-revision-file", type=Path, help="root-owned file holding that SHA")
     parser.add_argument("--smoke", action="store_true", help="non-root smoke run; unreadable checks FAIL")
+    parser.add_argument("--status-file", type=Path, help=f"write the result for the integrator (production: {STATUS_FILE})")
     args = parser.parse_args()
     if os.geteuid() != 0 and not args.smoke:
         print("run as root (it only reads): sudo /usr/bin/python3 -I " + sys.argv[0], file=sys.stderr)
@@ -436,6 +460,8 @@ def main() -> int:
         except (OSError, KeyError, ValueError) as error:
             check(False, "section aborted", repr(error))
     me = hashlib.sha256(Path(__file__).read_bytes()).hexdigest()
+    if args.status_file:
+        write_status(args.status_file, args.expected_revision, me)
     print(f"verify_trust_root_host.py sha256={me} expected_revision={args.expected_revision}")
     for ok, name, detail in results:
         print(f"{'PASS' if ok else 'FAIL'}  {name}" + (f"  [{detail}]" if detail and not ok else ""))

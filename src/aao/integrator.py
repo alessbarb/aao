@@ -8,7 +8,7 @@ import re
 import subprocess
 from collections.abc import Callable
 from dataclasses import dataclass
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Any
 
@@ -16,6 +16,10 @@ from aao.git_paths import changed_paths as git_changed_paths
 from aao.governance_ledger import active_vetoes, append, open_incidents, verify
 from aao.integration_authorization import canonical, validate
 from aao.pending_veto import PendingVetoError, pending_vetoes
+
+TRUST_VERIFICATION_PATH = Path("/var/lib/aao-trust-verify/status.json")
+TRUST_VERIFICATION_ROOT = Path("/")
+TRUST_VERIFICATION_SCHEMA = "aao.trust-root-verification.v1"
 
 
 @dataclass(frozen=True)
@@ -26,6 +30,79 @@ class TrustSources:
     heartbeat: Path
     freeze: Path
     integrator_private_key: Path
+    # The production path and trust boundary are fixed. Tests may supply an
+    # isolated status path and boundary; production callers use these defaults.
+    trust_verification: Path = TRUST_VERIFICATION_PATH
+    trust_verification_root: Path = TRUST_VERIFICATION_ROOT
+    trust_verification_owner_uid: int = 0
+
+
+def _require_trust_root_verification(sources: TrustSources, registry: dict[str, Any],
+                                     current_time: datetime) -> None:
+    """Require a fresh, protected verifier result for a statically trusted revision."""
+    try:
+        path = Path(sources.trust_verification)
+        boundary = Path(sources.trust_verification_root)
+        if path.is_symlink():
+            raise ValueError("status file is a symlink")
+        if not path.is_absolute() or not boundary.is_absolute() or boundary not in path.parents:
+            raise ValueError("status path is outside the protected trust boundary")
+        # Check each directory from the status parent through the configured
+        # trust boundary, rejecting symlinks, foreign ownership, and writable
+        # group/other permissions.
+        for parent in (path.parent, *path.parent.parents):
+            info = parent.lstat()
+            if not parent.is_dir() or parent.is_symlink():
+                raise ValueError(f"unprotected parent: {parent}")
+            if info.st_uid != sources.trust_verification_owner_uid or info.st_mode & 0o022:
+                raise ValueError(f"unprotected parent: {parent}")
+            if parent == path.parent and info.st_mode & 0o777 != 0o755:
+                raise ValueError("status directory mode is not 0755")
+            if parent == boundary:
+                break
+        else:
+            raise ValueError("trust boundary not reached")
+        info = path.lstat()
+        if not path.is_file() or path.is_symlink():
+            raise ValueError("status is not a regular file")
+        if info.st_uid != sources.trust_verification_owner_uid:
+            raise ValueError("status owner is not root")
+        if info.st_mode & 0o022:
+            raise ValueError("status is writable by group or others")
+        if info.st_mode & 0o777 != 0o644:
+            raise ValueError("status file mode is not 0644")
+        status = json.loads(path.read_text(encoding="utf-8"))
+        fields = {"schema", "result", "expected_revision", "verified_at", "failed", "verifier_sha256"}
+        if not isinstance(status, dict) or set(status) != fields:
+            raise ValueError("status schema fields are invalid")
+        if status["schema"] != TRUST_VERIFICATION_SCHEMA:
+            raise ValueError("status schema is invalid")
+        if status["result"] != "PASS":
+            raise ValueError("verifier result is not PASS")
+        if status["failed"] != []:
+            raise ValueError("verifier reports failed checks")
+        revision = status["expected_revision"]
+        trusted_revisions = registry.get("trusted_auditor_revisions")
+        if (not isinstance(revision, str) or not re.fullmatch(r"[0-9a-f]{40}", revision)
+                or not isinstance(trusted_revisions, list) or revision not in trusted_revisions):
+            raise ValueError("revision is not trusted by the static registry")
+        if (not isinstance(status["verifier_sha256"], str)
+                or not re.fullmatch(r"[0-9a-f]{64}", status["verifier_sha256"])):
+            raise ValueError("verifier digest is invalid")
+        if not isinstance(status["verified_at"], str):
+            raise TypeError("verification timestamp is invalid")
+        verified_at = datetime.fromisoformat(status["verified_at"])
+        if verified_at.tzinfo is None or verified_at.utcoffset() != timedelta(0):
+            raise ValueError("verification timestamp is not UTC")
+        age = current_time.astimezone(UTC) - verified_at.astimezone(UTC)
+        if age < timedelta(0):
+            raise ValueError("verification timestamp is in the future")
+        if age > timedelta(hours=26):
+            raise ValueError("verification status is stale")
+    except (OSError, UnicodeError, json.JSONDecodeError, TypeError, KeyError, ValueError) as error:
+        if isinstance(error, ValueError) and str(error).startswith("trust root not verified:"):
+            raise
+        raise ValueError(f"trust root not verified: {error}") from error
 
 
 def _public_key_der(public_key: str) -> bytes:
@@ -116,6 +193,7 @@ def promote(repo: Path, remote: str, auth: dict[str, Any], signature: str,
     current_time = now()
     if current_time.tzinfo is None:
         raise ValueError("clock must return timezone-aware datetime")
+    _require_trust_root_verification(trust_sources, registry, current_time)
     heartbeat = _heartbeat(trust_sources.heartbeat, registry, current_time)
     if heartbeat is None:
         raise ValueError("valid supervisor heartbeat unavailable")

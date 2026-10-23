@@ -1,0 +1,18 @@
+# One pass of the R1 integrator state machine (docs/E2E_PR_PIPELINE.md). Uses only the aao-integrator
+# App key (in its home, read-only here) and the static trust registry. Never the CEO's credentials.
+[Unit]
+Description=AAO integrator tick (R1)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+User=aao-integrator
+Group=aao-integrator
+UMask=0022
+ExecStart=/srv/aao/frozen/aao-integrator/venv/bin/python -I -c "import sys; sys.path.insert(0, '/srv/aao/frozen/aao-integrator/tree/src'); from aao.r1_pipeline import main; sys.argv[0] = 'aao-integrator'; raise SystemExit(main())" tick
+NoNewPrivileges=yes
+PrivateTmp=yes
+ProtectHome=read-only
+ProtectSystem=strict
+ReadWritePaths=/var/lib/aao-integrator /var/lib/aao-audit-inbox /srv/aao/mirror

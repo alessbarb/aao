@@ -93,8 +93,20 @@ def _bare_chain(env, data, output, tmp_path):
     heartbeat = env["heartbeat_path"]
     # The real supervisor helper emits the anchored ledger head and marker snapshot.
     env["heartbeat"]()
+    verification_dir = env["state"] / "trust-verification"
+    verification_dir.mkdir(mode=0o755)
+    verification_path = verification_dir / "status.json"
+    verification_path.write_text(json.dumps({
+        "schema": "aao.trust-root-verification.v1", "result": "PASS",
+        "expected_revision": policy["trusted_auditor_revisions"][0],
+        "verified_at": datetime.now(UTC).isoformat(), "failed": [],
+        "verifier_sha256": "b" * 64,
+    }))
+    verification_path.chmod(0o644)
+    verification_dir.chmod(0o755)
     sources = TrustSources(registry, ledger, ledger_anchor, heartbeat,
-                           env["state"] / "freeze", integrator_private)
+                           env["state"] / "freeze", integrator_private,
+                           verification_path, verification_dir, os.getuid())
     doc = json.loads((output / "authorization.json").read_text())
     sig = (output / "authorization.sig").read_text().strip()
     return bare, sources, doc, sig

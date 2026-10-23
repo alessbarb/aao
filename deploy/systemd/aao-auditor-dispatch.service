@@ -1,0 +1,20 @@
+# The unprivileged audit trigger: processes the inbox written by the integrator (untrusted data).
+# Together with aao-auditor@ it is the only way code runs as aao-auditor (verifier E7/E7a/E8).
+[Unit]
+Description=AAO auditor dispatch (audit + gate requests)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+User=aao-auditor
+Group=aao-ledger-read
+SupplementaryGroups=aao-auditor
+UMask=0027
+ExecStart=/srv/aao/frozen/aao-auditor/venv/bin/python -I -c "import sys; sys.path.insert(0, '/srv/aao/frozen/aao-auditor/tree/src'); from aao.auditor_dispatch import main; sys.argv[0] = 'aao-auditor'; raise SystemExit(main())" once
+NoNewPrivileges=yes
+PrivateTmp=yes
+# The auditor App key lives in ~aao-auditor/.config/aao (manifest flow); read-only.
+ProtectHome=read-only
+ProtectSystem=strict
+ReadWritePaths=/var/lib/aao-auditor
