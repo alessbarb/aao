@@ -58,7 +58,7 @@ jobs:
           AAO_ENV: test
           AAO_TEST_POSTGRES_URL: postgresql://aao_test@localhost:5432/aao_test
           AAO_TEST_DB_DISPOSABLE: "yes"
-        # --tb=short: no function arguments/locals in tracebacks, so test credentials are never
-        # printed to public logs (exposure audit EXP-02).
+        # --tb=short: tracebacks omit function arguments/locals, reducing the chance that test
+        # credentials reach public logs (exposure audit EXP-02). Explicit test output can still leak.
         run: python -m pytest -q -rs -W error --tb=short
       - run: python -m pip check
