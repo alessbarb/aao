@@ -42,6 +42,6 @@ Ejecución del CEO, §1-ter, `REV=c24a269`, archivo `~/aao-p2-app-auth-20261024T
 | aao-impl-codex | aao-impl-codex | `autoaiorg/aao-codex` | FAIL | Igual (fork de `autoaiorg/aao`) |
 | aao-impl-agy | aao-impl-ag | `autoaiorg/aao-agy` | FAIL | Igual (fork de `autoaiorg/aao`) |
 
-A-10 se cumple: ningún implementador alcanza el repo canónico. Pendiente: repetir las cuatro filas FAIL con el manifiesto corregido y `--fork`.
+No se observó acceso de ningún implementador al repo canónico (`implementer_cannot_reach_canonical: true`). El alcance exacto a su fork **no** está demostrado, porque se ejecutó sin `--fork` (`implementer_only_its_forks: false`). Pendiente: repetir las cuatro filas FAIL con el manifiesto corregido y `--fork`.
 
-Nueve PASS demostrarían la autenticación. **No** son el ensayo P2/P3 (A-01..A-14, P3-01..P3-12): RA sigue en PENDING, `enabled_risk_classes` sigue en `["R1"]`, el integrador no se activa y R2 sigue bloqueado.
+Las nueve Apps autenticaron; cuatro filas fallaron comprobaciones adicionales (permisos del integrador y alcance de los forks). Ni la autenticación ni un futuro 9/9 son el ensayo P2/P3 (A-01..A-14, P3-01..P3-12): RA sigue en PENDING, `enabled_risk_classes` sigue en `["R1"]`, el integrador no se activa y R2 sigue bloqueado.
