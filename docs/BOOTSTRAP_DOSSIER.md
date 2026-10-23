@@ -55,3 +55,34 @@ Codex las evaluó **FIEL** contra el registro bruto de la conversación en la ro
 3. Ninguna operación del §12.3 se ejecuta hasta que todos sus requisitos estén en PASS.
 
 🤖 Generated with [Claude Code](https://claude.com/claude-code)
+
+
+## Actualización 2026-10-23: nuevo candidato a raíz de confianza
+
+**Candidato:** `97ad4f13655aae2b736c7ba6b3d8d666e51d4680`, punta de la pila F4. Sustituye al valor provisional `1e5c0c8`.
+
+**Pila:**
+
+| PR | SHA | Contenido |
+|---|---|---|
+| #30 | `1fc2d6c` | F4-02 |
+| #34 | `47072de` | F4-02b |
+| #37 | `3666c92` | F4-01a |
+| #39 | `ec47d76` | F4-01b |
+| #40 | `97ad4f1` | F4-03 |
+
+**Dictámenes:**
+
+- **Revisiones individuales:** todas con APPROVE-TECHNICAL en su última ronda.
+  - #34 y #37: auditor aislado (Claude); autor Codex.
+  - #39 y #40: segunda línea Codex; autor Claude, recusado.
+- **Revisión de conjunto (Codex):** primero REJECT por la ventana de A-2 previa al latido. F4-03 la cerró y la ronda 2 dio **APPROVE-TECHNICAL**: «apta técnicamente como valor inicial de `trusted_auditor_revisions`, condicionada a verificar en el host».
+
+**Condiciones previas a la instalación** (operación 1 del §12.3):
+
+1. Exclusividad en ejecución del uid `aao-auditor`, es decir, solo el servicio auditor corre con ese uid.
+2. Custodia de la ruta del socket de admisión del supervisor y de su directorio padre.
+
+Ambas se verifican en el host con los servicios por rol y su verificador.
+
+**Estado:** **revisado, no instalado.** La instalación del registro de confianza la ejecuta el CEO con sudo (P5 (a)) sobre el artefacto que se prepara y audita.
