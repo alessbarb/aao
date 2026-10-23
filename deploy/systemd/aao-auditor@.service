@@ -1,0 +1,20 @@
+# The ONLY way code runs as aao-auditor (precondition 1 of the trust root).
+# Instance = manifest id; manifest at /var/lib/aao-auditor/inbox/<id>.json.
+# Started by root (systemctl start aao-auditor@<id>); the unprivileged trigger is pending (R1 pilot).
+[Unit]
+Description=AAO independent manifest audit %i
+
+[Service]
+Type=oneshot
+User=aao-auditor
+# Primary gid aao-ledger-read: the ledger and the pending-veto markers the auditor creates get
+# that group, so the supervisor and integrator (members) can read them. No membership is added,
+# so P1's group checks are unchanged.
+Group=aao-ledger-read
+UMask=0027
+ExecStart=/srv/aao/frozen/aao-auditor/venv/bin/python -I -c "import sys; sys.path.insert(0, '/srv/aao/frozen/aao-auditor/tree/src'); from aao.manifest_audit import main; sys.argv[0] = 'aao-auditor'; raise SystemExit(main())" audit --manifest /var/lib/aao-auditor/inbox/%i.json --output /var/lib/aao-auditor/reports/%i --key /var/lib/aao-auditor/keys/auditor-ed25519.pem
+NoNewPrivileges=yes
+PrivateTmp=yes
+ProtectHome=yes
+ProtectSystem=strict
+ReadWritePaths=/var/lib/aao-auditor
