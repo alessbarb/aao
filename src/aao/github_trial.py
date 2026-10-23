@@ -27,7 +27,7 @@ NOT_RUN = {
 }
 
 EXPECTED_PERMISSIONS = {
-    "aao-integrator": {"contents": "write", "pull_requests": "write", "checks": "read", "statuses": "read", "workflows": "write", "metadata": "read"},
+    "aao-integrator": {"contents": "write", "pull_requests": "write", "checks": "read", "statuses": "read", "metadata": "read"},
     "aao-auditor": {"contents": "read", "pull_requests": "read", "checks": "write", "statuses": "write", "metadata": "read"},
     "aao-auditor-alt": {"contents": "read", "pull_requests": "read", "checks": "write", "statuses": "write", "metadata": "read"},
     "aao-supervisor": {"contents": "read", "pull_requests": "read", "checks": "read", "actions": "read", "metadata": "read"},
