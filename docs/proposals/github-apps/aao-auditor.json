@@ -1,0 +1,17 @@
+{
+  "url": "https://github.com/alessbarb/aao",
+  "hook_attributes": {
+    "active": false
+  },
+  "public": false,
+  "default_events": [],
+  "name": "aao-auditor",
+  "default_permissions": {
+    "contents": "read",
+    "pull_requests": "read",
+    "checks": "write",
+    "statuses": "write",
+    "metadata": "read"
+  },
+  "description": "AAO principal auditor. Publishes the aao-audit status/check (required source in ruleset B). Canonical repo."
+}

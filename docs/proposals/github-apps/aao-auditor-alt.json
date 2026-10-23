@@ -1,0 +1,17 @@
+{
+  "url": "https://github.com/alessbarb/aao",
+  "hook_attributes": {
+    "active": false
+  },
+  "public": false,
+  "default_events": [],
+  "name": "aao-auditor-alt",
+  "default_permissions": {
+    "contents": "read",
+    "pull_requests": "read",
+    "checks": "write",
+    "statuses": "write",
+    "metadata": "read"
+  },
+  "description": "AAO alternate / second-line auditor (D13). Canonical repo."
+}

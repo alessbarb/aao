@@ -1,0 +1,18 @@
+{
+  "url": "https://github.com/alessbarb/aao",
+  "hook_attributes": {
+    "active": false
+  },
+  "public": false,
+  "default_events": [],
+  "name": "aao-integrator",
+  "default_permissions": {
+    "contents": "write",
+    "pull_requests": "write",
+    "checks": "read",
+    "statuses": "read",
+    "workflows": "write",
+    "metadata": "read"
+  },
+  "description": "AAO deterministic integrator. Only identity allowed to update main (ruleset A bypass). Install on the canonical repo only."
+}

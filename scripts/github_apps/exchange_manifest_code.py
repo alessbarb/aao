@@ -1,0 +1,55 @@
+#!/usr/bin/env python3
+"""Exchange a GitHub App manifest code for the App credentials, as the role account (P2).
+
+Run ONLY as the role that will own the App, e.g.:
+    sudo -u aao-integrator -H python3 /opt/aao-p2/exchange_manifest_code.py aao-integrator <code>
+Stores the private key in ~/.config/aao/<app>.pem (0600, created exclusively) and
+non-secret metadata in ~/.config/aao/<app>.json. Never prints the key, the client
+secret or the webhook secret. Refuses to run as the CEO or as root.
+"""
+import json
+import os
+import pwd
+import sys
+import urllib.request
+from pathlib import Path
+
+API = os.environ.get("AAO_GITHUB_API", "https://api.github.com")
+ROLE_FOR_APP = {"aao-integrator": "aao-integrator", "aao-auditor": "aao-auditor",
+                "aao-auditor-alt": "aao-auditor-alt", "aao-supervisor": "aao-supervisor",
+                "aao-notifier": "aao-notifier", "aao-pm": "aao-pm", "aao-impl-codex": "aao-impl-codex",
+                "aao-impl-claude": "aao-impl-claude", "aao-impl-ag": "aao-impl-ag"}
+
+
+def main() -> int:
+    if len(sys.argv) != 3:
+        print(__doc__)
+        return 2
+    app, code = sys.argv[1], sys.argv[2]
+    user = pwd.getpwuid(os.geteuid()).pw_name
+    if os.geteuid() == 0 or ROLE_FOR_APP.get(app) != user:
+        print(f"refusing: {app} must be exchanged by its role account, not {user}", file=sys.stderr)
+        return 1
+    request = urllib.request.Request(f"{API}/app-manifests/{code}/conversions", method="POST",
+                                     headers={"Accept": "application/vnd.github+json"})
+    with urllib.request.urlopen(request, timeout=30) as response:
+        data = json.loads(response.read())
+    if data.get("slug") != app and data.get("name") != app:
+        print(f"refusing: GitHub returned app {data.get('slug')!r}, expected {app!r}", file=sys.stderr)
+        return 1
+    directory = Path.home() / ".config" / "aao"
+    directory.mkdir(mode=0o700, parents=True, exist_ok=True)
+    directory.chmod(0o700)
+    key = directory / f"{app}.pem"
+    descriptor = os.open(key, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW, 0o600)
+    with os.fdopen(descriptor, "w", encoding="ascii") as handle:
+        handle.write(data["pem"])
+    meta = {k: data.get(k) for k in ("id", "slug", "name", "owner", "html_url", "permissions")}
+    meta["owner"] = (data.get("owner") or {}).get("login")
+    (directory / f"{app}.json").write_text(json.dumps(meta, indent=1) + "\n", encoding="utf-8")
+    print(f"stored key for {app} (app id {data.get('id')}) at {key} (0600); secrets not printed")
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

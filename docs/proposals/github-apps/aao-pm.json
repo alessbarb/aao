@@ -1,0 +1,16 @@
+{
+  "url": "https://github.com/alessbarb/aao",
+  "hook_attributes": {
+    "active": false
+  },
+  "public": false,
+  "default_events": [],
+  "name": "aao-pm",
+  "default_permissions": {
+    "issues": "write",
+    "pull_requests": "write",
+    "contents": "read",
+    "metadata": "read"
+  },
+  "description": "AAO provisional PM: opens pull requests to the canonical repo from implementer fork branches, manages issues/labels; read-only code."
+}

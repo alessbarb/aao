@@ -1,0 +1,15 @@
+{
+  "url": "https://github.com/alessbarb/aao",
+  "hook_attributes": {
+    "active": false
+  },
+  "public": false,
+  "default_events": [],
+  "name": "aao-impl-claude",
+  "default_permissions": {
+    "contents": "write",
+    "workflows": "write",
+    "metadata": "read"
+  },
+  "description": "AAO implementer. Install ONLY on its fork in the aao-agents organization; never on the canonical repository (App permissions are the same in every installation). Pull requests to the canonical repo are opened by aao-pm."
+}

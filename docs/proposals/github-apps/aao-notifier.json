@@ -1,0 +1,14 @@
+{
+  "url": "https://github.com/alessbarb/aao",
+  "hook_attributes": {
+    "active": false
+  },
+  "public": false,
+  "default_events": [],
+  "name": "aao-notifier",
+  "default_permissions": {
+    "issues": "write",
+    "metadata": "read"
+  },
+  "description": "AAO notifier: opens governance issues only. Canonical repo."
+}
