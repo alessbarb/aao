@@ -8,10 +8,12 @@ import hashlib
 import json
 import os
 import re
+import socket
 import stat
+import struct
 import subprocess
 import tempfile
-from datetime import datetime, timedelta
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Any
 
@@ -267,3 +269,72 @@ def signed_heartbeat(sequence: int, issued_at: str, private_key: str, *, key_id:
     fcntl.flock(lock, fcntl.LOCK_UN)
     lock.close()
     return signed
+
+
+def handle_veto_report(conn: socket.socket, *, auditor_uid: int, state_path: Path, private_key: str, key_id: str,
+                       ledger_path: Path, trusted_keys: dict[str, Any], integrator_key_id: str,
+                       heartbeat_path: Path, validity_seconds: int = 600) -> dict[str, Any]:
+    """F4-03: synchronous veto hand-off. The auditor process reports its pending-veto marker over a Unix
+    socket; the supervisor (its own uid) checks the peer uid with SO_PEERCRED, records the digest in its
+    signed state and emits a fresh signed heartbeat BEFORE acknowledging. A marker file deleted afterwards
+    by any other process is then detected by the gate and the integrator."""
+    def reply(payload: dict[str, Any]) -> dict[str, Any]:
+        conn.sendall(json.dumps(payload).encode() + b"\n")
+        return payload
+
+    _pid, uid, _gid = struct.unpack("3i", conn.getsockopt(socket.SOL_SOCKET, socket.SO_PEERCRED,
+                                                           struct.calcsize("3i")))
+    if uid != auditor_uid:
+        return reply({"ok": False, "error": "peer is not the auditor uid"})
+    data = b""
+    while not data.endswith(b"\n") and len(data) < 4096:
+        chunk = conn.recv(4096)
+        if not chunk:
+            break
+        data += chunk
+    try:
+        report = json.loads(data)
+        candidate, digest = report["candidate_sha"], report["marker_digest"]
+        if (not isinstance(candidate, str) or not re.fullmatch(r"[0-9a-f]{40}", candidate) or
+                not isinstance(digest, str) or not re.fullmatch(r"[0-9a-f]{64}", digest)):
+            raise ValueError("malformed report")
+    except (ValueError, KeyError, TypeError) as error:
+        return reply({"ok": False, "error": f"invalid veto report: {error}"})
+    try:
+        state_path.parent.mkdir(parents=True, exist_ok=True)
+        with state_path.with_name(state_path.name + ".lock").open("a") as lock:
+            fcntl.flock(lock, fcntl.LOCK_EX)
+            try:
+                prior = _read_state(state_path, private_key)
+                markers = {k: list(v) for k, v in prior.get("pending_markers", {}).items()}
+                markers[candidate] = sorted(set(markers.get(candidate, [])) | {digest})
+                _write_state(state_path, {**prior, "pending_markers": markers}, private_key)
+                sequence = int(prior.get("sequence", 0)) + 1
+            finally:
+                fcntl.flock(lock, fcntl.LOCK_UN)
+        now = datetime.now(UTC)
+        event = signed_heartbeat(sequence, now.isoformat(), private_key, key_id=key_id,
+                                 expires_at=(now + timedelta(seconds=validity_seconds)).isoformat(),
+                                 ledger_path=ledger_path, state_path=state_path,
+                                 integrator_key_id=integrator_key_id, trusted_keys=trusted_keys)
+        if digest not in event["pending_markers"].get(candidate, []):
+            raise ValueError("heartbeat does not include the reported marker")
+        temporary = heartbeat_path.with_name(heartbeat_path.name + ".tmp")
+        temporary.write_text(json.dumps(event), encoding="utf-8")
+        os.replace(temporary, heartbeat_path)
+    except (OSError, ValueError, KeyError, subprocess.SubprocessError) as error:
+        return reply({"ok": False, "error": f"supervisor could not record the veto: {error}"})
+    return reply({"ok": True, "heartbeat_sequence": event["sequence"]})
+
+
+def serve_veto_intake(socket_path: Path, **handler_args: Any) -> None:  # pragma: no cover - service loop
+    """Run as the supervisor uid (systemd service). One report per connection."""
+    socket_path.unlink(missing_ok=True)
+    server = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+    server.bind(str(socket_path))
+    os.chmod(socket_path, 0o660)
+    server.listen(16)
+    while True:
+        conn, _ = server.accept()
+        with conn:
+            handle_veto_report(conn, **handler_args)

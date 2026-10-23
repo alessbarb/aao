@@ -48,7 +48,8 @@ _GIT_ENV = {"PATH": "/usr/bin:/bin", "HOME": "/nonexistent", "GIT_CONFIG_NOSYSTE
             "GIT_CONFIG_GLOBAL": "/dev/null", "LANG": "C.UTF-8"}
 _ANCHOR_FIELDS = {"schema", "policy_path", "policy_sha256", "auditor_uid", "auditor_public_key", "ledger_path",
                   "ledger_anchor_path", "attribution_path",
-                  "supervisor_public_key", "supervisor_key_id", "supervisor_heartbeat_path"}
+                  "supervisor_public_key", "supervisor_key_id", "supervisor_heartbeat_path",
+                  "supervisor_intake_socket"}
 ATTRIBUTION_SCHEMA = "aao.implementer-attribution.v1"
 
 
@@ -131,6 +132,28 @@ def pending_vetoes(anchor: dict[str, Any], candidate_sha: str) -> list[str]:
         return verify_pending_vetoes(directory, candidate_sha, anchor["auditor_uid"])
     except PendingVetoError as error:
         raise AuditError(str(error)) from error
+
+
+def _report_veto_to_supervisor(anchor: dict[str, Any], candidate_sha: str, digest: str) -> None:
+    """F4-03: hand the veto to the supervisor's custody before analysis continues; no ack, no audit."""
+    import socket
+
+    try:
+        with socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as client:
+            client.settimeout(30)
+            client.connect(anchor["supervisor_intake_socket"])
+            client.sendall(json.dumps({"candidate_sha": candidate_sha, "marker_digest": digest}).encode() + b"\n")
+            answer = b""
+            while not answer.endswith(b"\n"):
+                chunk = client.recv(4096)
+                if not chunk:
+                    break
+                answer += chunk
+        reply = json.loads(answer)
+    except (OSError, ValueError) as error:
+        raise AuditError(f"supervisor did not acknowledge the veto (marker kept, run aborted): {error}") from error
+    if reply.get("ok") is not True:
+        raise AuditError(f"supervisor refused the veto report (marker kept, run aborted): {reply.get('error')}")
 
 
 def _supervisor_custody(anchor: dict[str, Any], candidate_sha: str, rows: list[dict[str, Any]],
@@ -308,7 +331,8 @@ def audit_manifest(
     manifest, manifest_digest = parse_manifest(manifest_path)
     if veto_reason:
         # A-1: the marker exists before any analysis, so no gate can run in a window where the veto is unseen.
-        record_pending_veto(anchor, manifest["candidate_sha"], manifest_digest, veto_reason)
+        digest = record_pending_veto(anchor, manifest["candidate_sha"], manifest_digest, veto_reason)
+        _report_veto_to_supervisor(anchor, manifest["candidate_sha"], digest)
     for secret in (key_path, output, Path(anchor["ledger_path"]), Path(anchor["policy_path"])):
         if secret is not None and _visible_in_sandbox(secret):
             raise AuditError(f"{secret} would be readable by candidate code inside the sandbox")

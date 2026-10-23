@@ -110,9 +110,11 @@ never observed. Two conditions close it:
 - runtime exclusivity of the auditor uid, so only the auditor service runs as
   `aao-auditor`;
 - a synchronous hand-off of every veto to the supervisor's custody before the
-  veto run returns (F4-03).
+  veto run continues (F4-03; implemented, see section 10).
 
-Until both hold, this revision is **not** a candidate for
+Runtime exclusivity of the auditor uid is an operational precondition. P1
+created the uid, but the auditor still has to run only as that service. It
+must be verified on the host before any revision becomes a candidate for
 `trusted_auditor_revisions`.
 
 **Supervisor-state migration:** legacy `state.json` files without a valid
@@ -245,3 +247,29 @@ Any failure denies promotion. The gate reads the ledger and the markers **once**
   next one are not seen.
 - This depends on the custody of the supervisor uid and its key (P1 created
   the uid; the runtime services are pending).
+
+
+## 10. Synchronous veto hand-off (F4-03, 2026-10-23)
+
+Right after writing its pending-veto marker and before any analysis, a
+`--veto` run sends `{candidate_sha, marker_digest}` to the supervisor's Unix
+socket (`supervisor_intake_socket` in the trust anchor). The supervisor then:
+
+1. checks the peer uid with `SO_PEERCRED` (it must be the auditor uid);
+2. adds the digest to its signed state;
+3. emits a new signed heartbeat that includes the digest;
+4. acknowledges only after all of the above.
+
+Without an acknowledgement the run fails, and the marker stays and blocks.
+Deleting the marker file afterwards, from any process, is detected by the gate
+and the integrator, because the digest already sits in the supervisor's signed
+heartbeat. The supervisor receives the digest from the vetoing process itself,
+not from the file.
+
+**Remaining limits (B):**
+
+- The auditor process itself can choose not to veto. That is a decision of the
+  authorized actor, not a bypass.
+- Root.
+- Custody of the supervisor uid, state and key.
+- The supervisor service must be running, or vetoes fail closed.
