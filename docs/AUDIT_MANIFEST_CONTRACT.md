@@ -70,6 +70,12 @@ custody, write an unsigned report but **append nothing to the ledger**. They are
 not ledger decisions, and the gate never treats their report as an approval.
 A veto without custody **does** block, through its pending-veto marker (below).
 
+**Migration note.** Every ledger row containing `resolves_pending` requires
+`can_resolve_pending` on its signing key, including rows where the value is an
+empty list (`[]`). Before sharing a ledger containing such rows, update the
+trust registry to grant that capability to the anchored auditor key; otherwise
+ledger verification fails closed.
+
 **Pending vetoes (F4-02).** Every `--veto` run, with or without custody, first
 writes a pending-veto marker to `<ledger_path>.pending-vetoes/`, **before any
 analysis**, so the analysis window is covered. There is no mutual exclusion

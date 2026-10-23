@@ -25,6 +25,37 @@ class TrustSources:
     integrator_private_key: Path
 
 
+def _public_key_der(public_key: str) -> bytes:
+    result = subprocess.run(
+        ["openssl", "pkey", "-pubin", "-in", public_key, "-outform", "DER"],
+        check=False,
+        capture_output=True,
+    )
+    if result.returncode != 0:
+        raise ValueError("trust registry contains an unreadable public key")
+    return result.stdout
+
+
+def _validate_integrator_key_separation(registry: dict[str, Any]) -> None:
+    keys = registry.get("ledger_keys")
+    key_id = registry.get("integrator_key_id")
+    if not isinstance(keys, dict) or not isinstance(key_id, str):
+        raise TypeError("integrator trust registry is incomplete")
+    integrator = keys.get(key_id)
+    if not isinstance(integrator, dict) or not integrator.get("public_key"):
+        raise ValueError("integrator trust registry key is missing")
+    if integrator.get("can_resolve_pending") is True or integrator.get("can_authorize") is True:
+        raise ValueError("integrator key has a reserved ledger capability")
+    integrator_key = _public_key_der(integrator["public_key"])
+    for other_id, entry in keys.items():
+        if other_id == key_id or not isinstance(entry, dict):
+            continue
+        if ((entry.get("can_resolve_pending") is True or entry.get("can_authorize") is True)
+                and entry.get("public_key")
+                and _public_key_der(entry["public_key"]) == integrator_key):
+            raise ValueError("integrator public key is shared with a reserved ledger authority")
+
+
 def _git(repo: Path, *args: str) -> str:
     return subprocess.run(["git", "-C", str(repo), *args], check=True, capture_output=True, text=True).stdout.strip()
 
@@ -66,6 +97,7 @@ def promote(repo: Path, remote: str, auth: dict[str, Any], signature: str,
         raise RuntimeError("integrator frozen")
     registry = json.loads(trust_sources.trust_registry.read_text())
     ledger_keys = registry["ledger_keys"]
+    _validate_integrator_key_separation(registry)
     anchor = trust_sources.ledger_anchor.read_text().strip()
     rows = verify(trust_sources.ledger, ledger_keys, anchor)
     try:
