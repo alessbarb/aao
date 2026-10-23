@@ -822,7 +822,14 @@ def _git_fixture(tmp_path):
     registry["ledger_keys"]["resolver"] = {"public_key": str(resolver_public), "can_resolve_incidents": True}
     reg=tmp_path/"registry.json"; reg.write_text(json.dumps(registry))
     sources = TrustSources(reg, ledger, anchor, heartbeat, freeze, integrator_private)
-    return promote, r, bare, base, head, tree, d, sources, sign(d,str(auditor_private))
+    # Existing focused integrator cases exercise downstream gates with the
+    # fixture's observed PR identity; dedicated coverage passes explicit
+    # mismatching identities to the production entry point.
+    def fixture_promote(*args, **kwargs):
+        kwargs.setdefault("observed_repo", d["repo"])
+        kwargs.setdefault("observed_pr_number", d["pr_number"])
+        return promote(*args, **kwargs)
+    return fixture_promote, r, bare, base, head, tree, d, sources, sign(d,str(auditor_private))
 
 
 def _integrator_identity(name="integrator"):
@@ -858,6 +865,17 @@ def _assert_integrator_rejects_without_main_change(
             ),
         )
     assert _remote_main(bare) == main_before
+
+
+def test_integrator_compares_authorization_with_observed_pr_identity(tmp_path):
+    promote, repo, bare, _base, _head, _tree, auth, sources, signature = _git_fixture(tmp_path)
+    with pytest.raises(ValueError, match="repository or PR mismatch"):
+        promote(repo, "origin", auth, signature, sources, identity_provider=_integrator_identity(),
+                observed_pr_number=auth["pr_number"] + 1,
+                now=lambda: __import__("datetime").datetime(
+                    2026, 1, 1, 1, tzinfo=__import__("datetime").timezone.utc
+                ))
+    assert _remote_main(bare) == auth["base_sha"]
 
 
 def test_integrator_blocks_on_active_veto_in_ledger(tmp_path):

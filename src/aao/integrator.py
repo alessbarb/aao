@@ -93,12 +93,15 @@ def promote(repo: Path, remote: str, auth: dict[str, Any], signature: str,
             trust_sources: TrustSources, message: str = "Governed integration",
             before_push=None, identity_provider=None, after_push=None,
             after_recheck=None,
+            observed_repo: str | None = None, observed_pr_number: int | None = None,
             now: Callable[[], datetime] = lambda: datetime.now(UTC)) -> str:
     if identity_provider is None:
         raise RuntimeError("identity provider is mandatory")
     if trust_sources.freeze.exists() or (repo / ".aao-freeze").exists():
         raise RuntimeError("integrator frozen")
     registry = json.loads(trust_sources.trust_registry.read_text())
+    if not isinstance(observed_repo, str) or not observed_repo or not isinstance(observed_pr_number, int):
+        raise ValueError("observed repository and PR number are required")
     ledger_keys = registry["ledger_keys"]
     _validate_integrator_key_separation(registry)
     rows = verify(trust_sources.ledger, ledger_keys)
@@ -196,7 +199,7 @@ def promote(repo: Path, remote: str, auth: dict[str, Any], signature: str,
         ).stdout.splitlines()
     except (subprocess.CalledProcessError, OSError) as error:
         raise ValueError(f"changed paths unavailable: {error}") from error
-    state = {**registry, "repo": registry.get("repo"), "pr_number": registry.get("pr_number"),
+    state = {**registry, "repo": observed_repo, "pr_number": observed_pr_number,
         "pr_head": head, "target_ref": ref, "target_sha": base,
         "merge_tree_sha": auth["merge_result_tree_sha"], "now": current_time.isoformat(),
         "heartbeat_valid": heartbeat_ok, "ra03_pass": ra03, "ra09_pass": ra09,

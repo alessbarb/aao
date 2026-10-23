@@ -37,7 +37,7 @@ Git versions.
 Fixed path `/etc/aao-audit/trust-anchor.json`, `aao.audit-trust-anchor.v1`:
 `policy_path`, `policy_sha256` (canonical JSON digest), `auditor_uid`,
 `auditor_public_key` (PEM), `ledger_path`, `ledger_anchor_path`,
-`attribution_path`. There is no CLI option or environment variable that
+`attribution_path`, `attribution_writer_uid`. There is no CLI option or environment variable that
 overrides it.
 
 | Object | Required custody (checked with `O_NOFOLLOW` + `fstat`) |
@@ -46,7 +46,7 @@ overrides it.
 | Policy | owned by `auditor_uid`, same rules; digest must equal the anchor pin |
 | Ledger and its directory | owned by `auditor_uid`, no group/other write; created `0600`. Format: F3a `governance_ledger`, every entry signed by the anchored auditor key (`audit-verdict` / `veto`) |
 | Ledger anchor (`ledger_anchor_path`) | owned like the trust anchor; holds a terminal hash that must still be part of the verified chain (`0`×64 = genesis) |
-| Attribution (`attribution_path`) | owned like the trust anchor; `aao.implementer-attribution.v1`, `candidates: {sha: [identity…]}` written by the merge authority from authenticated push events (RA-02). Absent, unknown or empty → `provisional` |
+| Attribution (`attribution_path`) | owned by either an `anchor_owner_uids` principal or the anchored `attribution_writer_uid` (the `aao-supervisor` uid); `aao.implementer-attribution.v1`, `candidates: {sha: [identity…]}` written by the supervisor from authenticated push events (RA-02). This writer exception applies only to this file. Absent, unknown or empty → `provisional` |
 | Evidence | owned by `auditor_uid`, `0444`, re-hashed at gate time |
 | Signing key | owned by `auditor_uid`, no group/other bits, public key equal to the anchor's |
 
