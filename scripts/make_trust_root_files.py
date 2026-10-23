@@ -87,6 +87,24 @@ def build_registry(policy: dict, anchor: dict, *, auditor_models: dict[str, str]
     return registry
 
 
+def build_runtime_configs(repo: str) -> dict[str, dict]:
+    """Fixed configs of the R1 loop (aao.r1_pipeline, aao.auditor_dispatch). Paths match deploy/tmpfiles.d."""
+    if len(repo.split("/")) != 2 or not all(part.replace("-", "").replace("_", "").replace(".", "").isalnum()
+                                            for part in repo.split("/")):
+        raise ValueError("repo must be owner/name")
+    integrator = {"schema": "aao.integrator-config.v1", "repo": repo, "git_remote": f"https://github.com/{repo}.git",
+                  "mirror": "/srv/aao/mirror/repo.git", "inbox": "/var/lib/aao-audit-inbox",
+                  "reports": "/var/lib/aao-auditor/reports", "state_dir": "/var/lib/aao-integrator/state",
+                  "trust_registry": "/srv/aao/trust/registry.json", "ledger": LEDGER,
+                  "ledger_anchor": "/etc/aao-audit/ledger.anchor", "heartbeat": HEARTBEAT,
+                  "freeze": "/var/lib/aao-integrator/freeze",
+                  "integrator_private_key": "/var/lib/aao-integrator/integrator-ed25519.pem"}
+    dispatch = {"schema": "aao.audit-dispatch-config.v1", "inbox": "/var/lib/aao-audit-inbox",
+                "reports": "/var/lib/aao-auditor/reports", "key": "/var/lib/aao-auditor/keys/auditor-ed25519.pem",
+                "repository_root": "/srv/aao/mirror/repo.git", "repo": repo}
+    return {"integrator-config.json": integrator, "dispatch.json": dispatch}
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     parser.add_argument("--revision", required=True)
@@ -96,6 +114,7 @@ def main() -> int:
                         default=Path("/srv/aao/trust/keys/aao-supervisor-ed25519.pub"))
     parser.add_argument("--developer", action="append", default=["alessbarb", "aao-impl-codex", "aao-impl-claude",
                                                                  "aao-impl-ag", "aao-pm"])
+    parser.add_argument("--repo", required=True, help="owner/name of the repository the R1 loop serves")
     parser.add_argument("--out", type=Path, required=True)
     args = parser.parse_args()
     files = build(args.revision, json.loads(args.policy_template.read_text()), args.auditor_public_key.read_text(),
@@ -105,6 +124,7 @@ def main() -> int:
         files["policy.json"], files["trust-anchor.json"],
         auditor_models={"aao-auditor": "claude", "aao-auditor-alt": "codex"},
         author_models={"aao-impl-claude": "claude", "aao-impl-codex": "codex", "aao-impl-ag": "gemini"})
+    files.update(build_runtime_configs(args.repo))
     args.out.mkdir(mode=0o700)
     for name, value in files.items():
         (args.out / name).write_text(json.dumps(value, indent=2, sort_keys=True) + "\n")

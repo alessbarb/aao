@@ -49,6 +49,7 @@ TOOLS = ("git", "bwrap", "openssl", "timeout", "prlimit")
 CEO_USER = os.environ.get("AAO_CEO_USER", "alessbarb")
 ROOT_EQUIVALENT_GROUPS = ("sudo", "admin", "wheel", "docker", "lxd", "libvirt", "disk")
 UNITS = {"aao-auditor@probe.service": "aao-auditor@.service",
+         "aao-auditor-dispatch.service": "aao-auditor-dispatch.service",
          "aao-supervisor-intake.service": "aao-supervisor-intake.service"}
 results: list[tuple[bool, str, str]] = []
 

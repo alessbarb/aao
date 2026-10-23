@@ -1,0 +1,10 @@
+[Unit]
+Description=Start the auditor dispatch when the integrator writes a request
+
+[Path]
+DirectoryNotEmpty=/var/lib/aao-audit-inbox
+PathChanged=/var/lib/aao-audit-inbox
+Unit=aao-auditor-dispatch.service
+
+[Install]
+WantedBy=paths.target

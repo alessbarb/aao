@@ -21,7 +21,7 @@ El árbol del auditor tiene que ser **propiedad de `aao-auditor`**. `auditor_rev
 La venv es de root. El python del sistema no trae pytest ni ruff, que las comprobaciones de la política necesitan.
 
 ```bash
-for role in aao-auditor aao-supervisor; do
+for role in aao-auditor aao-supervisor aao-integrator; do
   sudo install -d -o aao-trust -g aao-trust -m 0755 /srv/aao/frozen/$role
   sudo git clone -q --no-hardlinks "$REPO" /srv/aao/frozen/$role/tree
   sudo git -C /srv/aao/frozen/$role/tree -c advice.detachedHead=false checkout -q "$REV"
@@ -37,7 +37,7 @@ sudo chmod -R go-w /srv/aao/frozen
 
 ```bash
 T=/srv/aao/frozen/aao-supervisor/tree/deploy
-sudo install -o root -g root -m 0644 $T/systemd/*.service $T/systemd/*.timer /etc/systemd/system/
+sudo install -o root -g root -m 0644 $T/systemd/*.service $T/systemd/*.timer $T/systemd/*.path /etc/systemd/system/
 sudo install -o root -g root -m 0644 $T/tmpfiles.d/aao-trust-root.conf /etc/tmpfiles.d/
 sudo systemd-tmpfiles --create /etc/tmpfiles.d/aao-trust-root.conf
 sudo -u aao-supervisor openssl genpkey -algorithm ed25519 -out /var/lib/aao-supervisor/keys/supervisor-ed25519.pem
@@ -51,14 +51,18 @@ sudo -u aao-supervisor openssl pkey -in /var/lib/aao-supervisor/keys/supervisor-
 Primero se genera la clave de firma del integrador, que custodia su propio uid. Después, los archivos se generan con el script revisado de esta misma revisión:
 
 ```bash
+sudo systemd-tmpfiles --create /etc/tmpfiles.d/aao-trust-root.conf   # crea /var/lib/aao-integrator (0700)
 sudo -u aao-integrator openssl genpkey -algorithm ed25519 -out /var/lib/aao-integrator/integrator-ed25519.pem
 sudo -u aao-integrator chmod 0600 /var/lib/aao-integrator/integrator-ed25519.pem
 sudo -u aao-integrator openssl pkey -in /var/lib/aao-integrator/integrator-ed25519.pem -pubout \
   | sudo install -o aao-trust -g aao-trust -m 0644 /dev/stdin /srv/aao/trust/keys/aao-integrator-ed25519.pub
 G=$(sudo mktemp -d)/out
 sudo /usr/bin/python3 -I /srv/aao/frozen/aao-supervisor/tree/scripts/make_trust_root_files.py --revision "$REV" \
-  --policy-template /srv/aao/frozen/aao-supervisor/tree/docs/audit-runs/20261019-provisional/policy.json --out "$G"
-sudo install -d -o root -g root -m 0755 /etc/aao-audit /etc/aao-supervisor
+  --policy-template /srv/aao/frozen/aao-supervisor/tree/docs/audit-runs/20261019-provisional/policy.json \
+  --repo alessbarb/aao-governance-trial --out "$G"     # primero el repo de ensayo; el canónico, tras PASS
+sudo install -d -o root -g root -m 0755 /etc/aao-audit /etc/aao-supervisor /etc/aao-integrator
+sudo install -o root -g root -m 0644 "$G/integrator-config.json" /etc/aao-integrator/config.json
+sudo install -o root -g root -m 0644 "$G/dispatch.json" /etc/aao-audit/dispatch.json
 sudo install -o root -g root -m 0644 "$G/trust-anchor.json" /etc/aao-audit/trust-anchor.json
 sudo install -o root -g root -m 0644 "$G/supervisor-config.json" /etc/aao-supervisor/config.json
 sudo install -o aao-trust -g aao-trust -m 0644 "$G/registry.json" /srv/aao/trust/registry.json
@@ -73,7 +77,9 @@ El registro nace con todos los RA en **PENDING**, así que el integrador falla c
 
 ```bash
 sudo systemctl daemon-reload
-sudo systemctl enable --now aao-supervisor-intake.service aao-supervisor-heartbeat.timer
+sudo systemctl enable --now aao-supervisor-intake.service aao-supervisor-heartbeat.timer aao-trust-root-verify.timer
+# The R1 loop. With RA PENDING in the registry it is fail-closed: it audits and stages, but never promotes.
+sudo systemctl enable --now aao-auditor-dispatch.path aao-auditor-dispatch.timer aao-integrator-tick.timer
 sudo /usr/bin/python3 -I /srv/aao/frozen/aao-supervisor/tree/scripts/verify_trust_root_host.py --expected-revision "$REV" \
   | tee ~/aao-trust-root-verify-$(date +%Y%m%dT%H%M%S).log
 ```
