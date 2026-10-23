@@ -1,0 +1,83 @@
+== T1 preflight rejects unexpected privileged group
+TEST PASS  unexpected group -> fail closed, no changes
+== T2 preflight rejects wrong shell
+TEST PASS  wrong shell -> fail closed
+== T3 preflight rejects foreign sudoers rule
+TEST PASS  foreign sudoers -> fail closed
+== T4 apply twice (idempotent)
+TEST PASS  first apply
+TEST PASS  second apply
+TEST PASS  key not regenerated
+TEST PASS  no new users on second run
+== T5 sudoers: CEO cannot reach auditors
+TEST PASS  sudoers excludes auditors
+TEST PASS  CEO sudo -l lists no auditor
+== T6 verifier as every role
+TEST PASS  verify aao-pm
+TEST PASS  verify aao-impl-codex
+TEST PASS  verify aao-impl-claude
+TEST PASS  verify aao-impl-ag
+TEST PASS  verify aao-auditor
+TEST PASS  verify aao-auditor-alt
+TEST PASS  verify aao-integrator
+TEST PASS  verify aao-supervisor
+TEST PASS  verify aao-notifier
+== T7 verifier catches an ACL grant (no false PASS)
+TEST PASS  ACL leak detected
+== T8 verifier: missing target is NOT RUN, not PASS
+TEST PASS  missing target -> NOT RUN
+== T8b verifier: a hidden or missing managed path is never PASS
+TEST PASS  missing keys dir seen by supervisor -> NOT RUN
+TEST PASS  verifier has no ancestor inference
+== T8c layout asserted as root
+TEST PASS  layout matches
+TEST PASS  private key mode 600 owned by auditor
+== T8d preflight rejects non-conforming existing state
+TEST PASS  wrong mode on existing dir -> fail closed
+TEST PASS  extended ACL on existing dir -> fail closed
+TEST PASS  public key not matching private key -> fail closed
+TEST PASS  clean state applies again
+TEST PASS  no temp key files left
+== T8e preflight fails closed on missing tools and unsafe content
+TEST PASS  getfacl missing -> fail closed
+TEST PASS  role account with usable password -> fail closed
+TEST PASS  world-writable file in managed tree -> fail closed
+TEST PASS  symlink in managed tree -> fail closed
+TEST PASS  private key mode 644 -> fail closed
+TEST PASS  file owned by another user in managed tree -> fail closed
+== T8f induced failure while publishing a key leaves no temp file
+TEST PASS  publish fails
+TEST PASS  no temp key file left after failure
+TEST PASS  no partial public key published
+TEST PASS  recovery: clean re-apply publishes the key
+== T9 auditor-auditor isolation
+TEST PASS  alt cannot enter primary keys
+TEST PASS  primary cannot read alt ledger
+TEST PASS  alt cannot write own frozen checkout
+== T10 integration with independent_audit.py custody + signature
+TEST PASS  as auditor: only the expected 'revision not reviewed' problem
+TEST PASS  as implementer: rejected (wrong account, key unavailable)
+Signature Verified Successfully
+TEST PASS  signature verifies with published trust key
+TEST PASS  signature fails with the other auditor's key
+== T11b purge fails closed when the archive cannot be written
+TEST PASS  purge with unwritable archive dir fails
+uid=1006(aao-auditor) gid=1007(aao-auditor) groups=1007(aao-auditor)
+uid=1003(aao-pm) gid=1004(aao-pm) groups=1004(aao-pm)
+TEST PASS  accounts preserved after failed purge
+TEST PASS  keys preserved after failed purge
+TEST PASS  trust registry preserved after failed purge
+TEST PASS  sudoers preserved after failed purge
+== T11 revert is non-destructive
+TEST PASS  revert
+TEST PASS  sudoers removed
+TEST PASS  accounts locked
+TEST PASS  keys kept
+TEST PASS  CEO untouched
+TEST PASS  after --revert, --apply refuses (locked agent shells); documented path is --purge then --apply
+== T12 purge restores the pre-install state
+TEST PASS  purge
+TEST PASS  passwd/group/sudoers/dirs identical to initial state
+TEST PASS  evidence archive kept (0600)
+TEST PASS  CEO account intact after purge
+== RESULT: ALL PASS

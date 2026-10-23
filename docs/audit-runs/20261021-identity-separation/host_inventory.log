@@ -1,0 +1,59 @@
+# Host inventory (read-only) — 2026-10-21T11:01:26+02:00
+host: UX363EA kernel: 7.0.0-38-generic os: Ubuntu 24.04.5 LTS
+
+## human/role accounts (uid>=1000)
+alessbarb 1000 /home/alessbarb /bin/bash
+
+## privileged groups
+sudo: alessbarb
+admin: 
+docker: alessbarb
+adm: syslog,alessbarb
+lxd: 
+libvirt: 
+
+## existing aao-* accounts/groups
+0
+none
+
+## sudoers.d entries (names only)
+README  1.0K
+
+## managed paths present
+absent  /var/lib/aao-auditor
+absent  /var/lib/aao-auditor-alt
+absent  /var/lib/aao-supervisor
+absent  /srv/aao
+absent  /etc/sudoers.d/aao-launch
+
+## ptrace_scope: 1
+
+## docker containers (not modified by the script)
+aao-postgres-1 | postgres:16-alpine | Exited (0) 26 hours ago | 
+campbuddy-mongo | mongo:7 | Up 26 hours | 0.0.0.0:27017->27017/tcp, [::]:27017->27017/tcp
+/aao-postgres-1 user= mounts=volume:aao_aao_pg_dev/var/lib/docker/volumes/aao_aao_pg_dev/_data->/var/lib/postgresql/data 
+/campbuddy-mongo user= mounts=volume:8b4dd42d95e8494d57a146717cba717d3990f734d8127654b20af8d022766e29/var/lib/docker/volumes/8b4dd42d95e8494d57a146717cba717d3990f734d8127654b20af8d022766e29/_data->/data/configdb volume:campbuddy_mongo-data/var/lib/docker/volumes/campbuddy_mongo-data/_data->/data/db 
+
+## acl tools: /usr/bin/getfacl
+
+## dry run of identity_separation.sh as alessbarb
+# preflight
+# preflight OK
+# docker group members (not modified): alessbarb
+# DRY RUN: no changes will be made.
++ groupadd --system aao-ledger-read
++ groupadd --system aao-events
++ useradd --create-home --home-dir /home/aao-pm --shell /bin/bash --user-group aao-pm
++ chmod 0700 /home/aao-pm
++ useradd --create-home --home-dir /home/aao-impl-codex --shell /bin/bash --user-group aao-impl-codex
++ chmod 0700 /home/aao-impl-codex
++ useradd --create-home --home-dir /home/aao-impl-claude --shell /bin/bash --user-group aao-impl-claude
++ chmod 0700 /home/aao-impl-claude
++ useradd --create-home --home-dir /home/aao-impl-ag --shell /bin/bash --user-group aao-impl-ag
++ chmod 0700 /home/aao-impl-ag
++ useradd --create-home --home-dir /home/aao-auditor --shell /usr/sbin/nologin --user-group aao-auditor
++ chmod 0700 /home/aao-auditor
++ useradd --create-home --home-dir /home/aao-auditor-alt --shell /usr/sbin/nologin --user-group aao-auditor-alt
++ chmod 0700 /home/aao-auditor-alt
++ useradd --create-home --home-dir /home/aao-integrator --shell /usr/sbin/nologin --user-group aao-integrator
++ chmod 0700 /home/aao-integrator
