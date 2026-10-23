@@ -1,8 +1,8 @@
-# Auditoría de exposición pública: `alessbarb/aao` (2026-10-21)
+# Auditoría de exposición pública: `autoaiorg/aao` (2026-10-21)
 
 **Motivo:** el CEO cambió el repositorio a público el 2026-10-21 (`docs/decisions/CEO-DEC-REPO-PUBLIC-2026-10-21.md`). Se audita antes de crear forks.
 **Autor:** Claude (coordinador). **Pendiente:** revisión de esta auditoría por Codex. Independencia de auditoría no demostrada.
-**Estado verificado:** `visibility: public`, `forks_count: 0`, `allow_forking: true` (GET `/repos/alessbarb/aao`, 2026-10-21).
+**Estado verificado:** `visibility: public`, `forks_count: 0`, `allow_forking: true` (GET `/repos/autoaiorg/aao`, 2026-10-21).
 
 ## 1. Alcance y método
 

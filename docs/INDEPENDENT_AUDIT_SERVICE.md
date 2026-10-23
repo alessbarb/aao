@@ -39,7 +39,7 @@ revision.
 
 ```bash
 # Audit (read-only against GitHub); run as the auditor account.
-python -m aao.independent_audit audit --github-pr alessbarb/aao 10 \
+python -m aao.independent_audit audit --github-pr autoaiorg/aao 10 \
   --policy /var/lib/aao-auditor/policy.json --key /var/lib/aao-auditor/keys/auditor-ed25519.pem \
   --output /var/lib/aao-auditor/runs/pr10-<sha> --ledger /var/lib/aao-auditor/ledger.jsonl \
   [--source <local mirror>] [--veto "<reason>"]
@@ -47,7 +47,7 @@ python -m aao.independent_audit audit --github-pr alessbarb/aao 10 \
 # Promotion decision, run by the merge authority on a clean checkout at the SHA.
 python -m aao.independent_audit gate --repository <checkout> --policy ... \
   --report <run>/report.json --signature <run>/report.sig --ledger ... \
-  --github-pr alessbarb/aao 10 --implementer <PR author from the merge authority>
+  --github-pr autoaiorg/aao 10 --implementer <PR author from the merge authority>
 ```
 
 Policy fields: `version`, `auditor_id`, `auditor_os_user`, `developer_os_users`,
@@ -141,7 +141,7 @@ sudo -u aao-auditor chmod 0400 /var/lib/aao-auditor/keys/auditor-ed25519.pem
 sudo -u aao-auditor openssl pkey -in /var/lib/aao-auditor/keys/auditor-ed25519.pem -pubout \
   -out /var/lib/aao-auditor/keys/auditor-ed25519.pub
 # 3. Auditor code: clone at the independently reviewed revision only.
-sudo -u aao-auditor git clone https://github.com/alessbarb/aao /var/lib/aao-auditor/src/aao
+sudo -u aao-auditor git clone https://github.com/autoaiorg/aao /var/lib/aao-auditor/src/aao
 sudo -u aao-auditor git -C /var/lib/aao-auditor/src/aao checkout --detach <REVIEWED_SHA>
 # 4. Policy: copy docs/audit-runs/20261019-provisional/policy.json, then set
 #    trusted_auditor_revisions=[<REVIEWED_SHA>] and keep developer_os_users=["alessbarb"].

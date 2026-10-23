@@ -78,7 +78,7 @@ def test_registry_is_static_and_fail_closed():
 
 def test_runtime_configs_match_the_service_loaders(tmp_path):
     from aao import auditor_dispatch, r1_pipeline
-    configs = maker.build_runtime_configs("alessbarb/aao-governance-trial")
+    configs = maker.build_runtime_configs("autoaiorg/aao-governance-trial")
     assert set(configs["integrator-config.json"]) == r1_pipeline._CONFIG_FIELDS
     assert configs["integrator-config.json"]["schema"] == r1_pipeline.CONFIG_SCHEMA
     assert set(configs["dispatch.json"]) == auditor_dispatch._CONFIG_FIELDS

@@ -10,7 +10,7 @@
 
 ## 1. Identificación de la Discrepancia Exacta de Contrato (P1)
 
-En respuesta al reporte de Codex y al encargo del PM (comentario [#15#issuecomment-6278595382](https://github.com/alessbarb/aao/pull/15#issuecomment-6278595382)), se compararon las especificaciones del frontend con el código real de `src/aao/work_management_api.py` y `docs/RUNTIME_CONSUMER_CONTRACT.md` en el HEAD de #11 (`91eb754`):
+En respuesta al reporte de Codex y al encargo del PM (comentario [#15#issuecomment-6278595382](https://github.com/autoaiorg/aao/pull/15#issuecomment-6278595382)), se compararon las especificaciones del frontend con el código real de `src/aao/work_management_api.py` y `docs/RUNTIME_CONSUMER_CONTRACT.md` en el HEAD de #11 (`91eb754`):
 
 ### Discrepancia Identificada
 - **Endpoint afectado:** `GET /v1/work/{work_id}/patch-proposals/{proposal_id}`

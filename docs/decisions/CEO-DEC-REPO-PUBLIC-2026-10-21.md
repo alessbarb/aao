@@ -2,11 +2,11 @@
 
 **ID:** CEO-DEC-REPO-PUBLIC-2026-10-21
 **Autoridad:** CEO, como administrador de GitHub (D4). Decisión administrativa del 2026-10-21, comunicada en la conversación de gobierno.
-**Estado:** **EJECUTADA por el CEO.** `alessbarb/aao` tiene `visibility: public`, verificado con GET `/repos/alessbarb/aao` el 2026-10-21.
+**Estado:** **EJECUTADA por el CEO.** `autoaiorg/aao` tiene `visibility: public`, verificado con GET `/repos/autoaiorg/aao` el 2026-10-21.
 
 ## Cita literal del CEO
 
-> «He cambiado la visibilidad de alessbarb/aao a pública. Esta es una decisión administrativa del CEO y debe registrarse como tal.»
+> «He cambiado la visibilidad de autoaiorg/aao a pública. Esta es una decisión administrativa del CEO y debe registrarse como tal.»
 
 > «La publicación del repositorio no autoriza automáticamente P1, P2, P5 ni la activación de R2.»
 

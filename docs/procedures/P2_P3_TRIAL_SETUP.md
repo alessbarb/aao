@@ -15,7 +15,7 @@ sudo install -d -o root -g root -m 0755 /opt/aao-p2
 sudo install -o root -g root -m 0755 scripts/github_apps/exchange_manifest_code.py /opt/aao-p2/
 sudo install -d -o root -g root -m 0755 /opt/aao-p2/github-apps
 sudo install -o root -g root -m 0644 docs/proposals/github-apps/*.json /opt/aao-p2/github-apps/
-gh repo create alessbarb/aao-governance-trial --public --description "AAO P2/P3 trial (disposable)" --add-readme
+gh repo create autoaiorg/aao-governance-trial --public --description "AAO P2/P3 trial (disposable)" --add-readme
 ```
 
 ## 1. Crear cada App y entregar su clave a su rol (unos 2 minutos por App)
@@ -75,8 +75,8 @@ En la **misma** organización `aao-agents` del §1-bis, haz un fork de `aao-gove
 ```bash
 INTEGRATOR_ID=$(sudo -u aao-integrator -H python3 -c 'import json,os;print(json.load(open(os.path.expanduser("~/.config/aao/aao-integrator.json")))["id"])')
 AUDITOR_ID=$(sudo -u aao-auditor -H python3 -c 'import json,os;print(json.load(open(os.path.expanduser("~/.config/aao/aao-auditor.json")))["id"])')
-scripts/github_apps/apply_rulesets.sh alessbarb/aao-governance-trial "$INTEGRATOR_ID" "$AUDITOR_ID"          # simulación
-scripts/github_apps/apply_rulesets.sh alessbarb/aao-governance-trial "$INTEGRATOR_ID" "$AUDITOR_ID" --apply
+scripts/github_apps/apply_rulesets.sh autoaiorg/aao-governance-trial "$INTEGRATOR_ID" "$AUDITOR_ID"          # simulación
+scripts/github_apps/apply_rulesets.sh autoaiorg/aao-governance-trial "$INTEGRATOR_ID" "$AUDITOR_ID" --apply
 ```
 
 **Si GitHub rechaza la App como excepción** en un repo de cuenta personal, el script falla y **se detiene**. Según P3, en ese caso se eleva la transferencia a una organización como decisión aparte. Nada se transfiere implícitamente.

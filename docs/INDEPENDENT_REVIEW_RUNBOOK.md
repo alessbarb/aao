@@ -67,7 +67,7 @@ RUN="$ROOT/run-copy"
 PACKAGE_SHA=SET_TO_EXACT_PUBLISHED_REVIEW_PACKAGE_SHA
 SOURCE_SHA=31e7397be082394a6da95eadebd0d8ad6bf99c39
 
-git clone https://github.com/alessbarb/aao.git "$REPO"
+git clone https://github.com/autoaiorg/aao.git "$REPO"
 git -C "$REPO" checkout --detach "$PACKAGE_SHA"
 test "$(git -C "$REPO" rev-parse HEAD)" = "$PACKAGE_SHA"
 git -C "$REPO" merge-base --is-ancestor "$SOURCE_SHA" "$PACKAGE_SHA"

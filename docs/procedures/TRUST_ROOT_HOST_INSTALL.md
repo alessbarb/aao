@@ -59,7 +59,7 @@ sudo -u aao-integrator openssl pkey -in /var/lib/aao-integrator/integrator-ed255
 G=$(sudo mktemp -d)/out
 sudo /usr/bin/python3 -I /srv/aao/frozen/aao-supervisor/tree/scripts/make_trust_root_files.py --revision "$REV" \
   --policy-template /srv/aao/frozen/aao-supervisor/tree/docs/audit-runs/20261019-provisional/policy.json \
-  --repo alessbarb/aao-governance-trial --out "$G"     # primero el repo de ensayo; el canónico, tras PASS
+  --repo autoaiorg/aao-governance-trial --out "$G"     # primero el repo de ensayo; el canónico, tras PASS
 sudo install -d -o root -g root -m 0755 /etc/aao-audit /etc/aao-supervisor /etc/aao-integrator
 sudo install -o root -g root -m 0644 "$G/integrator-config.json" /etc/aao-integrator/config.json
 sudo install -o root -g root -m 0644 "$G/dispatch.json" /etc/aao-audit/dispatch.json

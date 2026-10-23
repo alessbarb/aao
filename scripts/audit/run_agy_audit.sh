@@ -41,7 +41,7 @@ work=$(mktemp -d); trap 'rm -rf "$work"' EXIT
 # Every git call: no system/global config (so no filters/hooks/credentials), no prompt.
 g() { env -i PATH=/usr/bin:/bin HOME=/nonexistent LANG=C.UTF-8 GIT_CONFIG_GLOBAL=/dev/null GIT_CONFIG_NOSYSTEM=1 \
         GIT_TERMINAL_PROMPT=0 git -c core.hooksPath=/dev/null "$@"; }
-g clone -q --no-hardlinks --no-checkout https://github.com/alessbarb/aao.git "$work/repo"
+g clone -q --no-hardlinks --no-checkout https://github.com/autoaiorg/aao.git "$work/repo"
 g -C "$work/repo" cat-file -e "$head^{commit}"; g -C "$work/repo" cat-file -e "$base^{commit}"
 g -C "$work/repo" -c advice.detachedHead=false checkout -q "$head"
 [[ $(g -C "$work/repo" rev-parse HEAD) == "$head" ]]

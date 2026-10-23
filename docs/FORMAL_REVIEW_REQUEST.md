@@ -6,7 +6,7 @@ acceptance, merge approval, or operating authorization.
 
 ## Exact review targets
 
-- Repository: `https://github.com/alessbarb/aao`
+- Repository: `https://github.com/autoaiorg/aao`
 - Corrected implementation/source: `31e7397be082394a6da95eadebd0d8ad6bf99c39`
 - Initial corrected documentation package: `c9b2c7ad44d2cadc2e214904073073221e1207cd`
 - Final review package: the exact full SHA is pinned in

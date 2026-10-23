@@ -47,7 +47,7 @@ FORK_PERMISSIONS = {
     "aao-impl-claude": {"contents": "write", "workflows": "write", "metadata": "read"},
     "aao-impl-ag": {"contents": "write", "workflows": "write", "metadata": "read"},
 }
-CANONICAL_REPO = "alessbarb/aao"
+CANONICAL_REPO = "autoaiorg/aao"
 CHECK_WAIT_SECONDS = 300
 CHECK_POLL_SECONDS = 5
 
@@ -226,7 +226,7 @@ def _denial_outcome(item: dict, unchanged: bool, rule: str, label: str) -> tuple
 
 
 def _merge_trial_pr(client: GitHubAppClient, base: str, evidence: list[dict]) -> tuple[str, str, list[dict]]:
-    if base.lower() == "/repos/alessbarb/aao":
+    if base.lower() == "/repos/autoaiorg/aao":
         return "NOT RUN", "refusing to promote on the canonical repository; use the disposable trial", evidence
     pull_list = _api(client, "GET", f"{base}/pulls?state=open&per_page=100")
     evidence.append(pull_list)
@@ -709,7 +709,7 @@ def main(argv: list[str] | None = None) -> int:
     try:
         validate_role_uid(args.role)
         if not _trial_repo_allowed(*args.repo.split("/", 1)):
-            raise GitHubAuthError("--repo must be explicitly listed in AAO_GITHUB_TRIAL_REPOS and cannot be alessbarb/aao")
+            raise GitHubAuthError("--repo must be explicitly listed in AAO_GITHUB_TRIAL_REPOS and cannot be autoaiorg/aao")
         if args.role == "ceo":
             if args.test_id not in ("P3-01", "P3-09"):
                 raise GitHubAuthError("--role ceo is allowed only for P3-01 and P3-09")

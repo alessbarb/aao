@@ -25,7 +25,7 @@ adversarial findings and dispositions are recorded in
 
 This is a prepared package for a qualified independent reviewer. It is not
 itself the requested independent review and does not claim formal acceptance.
-The current review vehicle is the [draft GitHub PR #2](https://github.com/alessbarb/aao/pull/2);
+The current review vehicle is the [draft GitHub PR #2](https://github.com/autoaiorg/aao/pull/2);
 the PR head binds the exact code and package checkout for each review revision.
 No formal reviewer has been assigned yet. Review must be performed by a
 qualified person other than the implementer; internal agent feedback is not

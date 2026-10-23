@@ -24,7 +24,7 @@ sudo -u aao-pm          -i claude                # PM (instancia separada de Cla
 
 # 2. Clon propio del repositorio en cada cuenta (público, sin credenciales)
 for u in aao-pm aao-impl-codex aao-impl-claude aao-impl-ag; do
-  sudo -u "$u" -i git clone https://github.com/alessbarb/aao.git
+  sudo -u "$u" -i git clone https://github.com/autoaiorg/aao.git
 done
 
 # 3. Verificación, desde la ruta real de lanzamiento

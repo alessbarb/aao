@@ -1,7 +1,7 @@
 # P3 (revisada tras la publicación): protección preventiva de `main` y forks públicos
 
 **Estado:** PROPUESTA administrativa al CEO (D4). No vigente. No autoriza P1, P2, P5 ni la activación de R2.
-**Contexto:** el CEO cambió `alessbarb/aao` a **público** el 2026-10-21 (`docs/decisions/CEO-DEC-REPO-PUBLIC-2026-10-21.md`). Con GitHub Free, un repositorio público dispone de protección de ramas y rulesets, lo que cambia P2 y P3. La auditoría de exposición previa está en `docs/PUBLIC_EXPOSURE_AUDIT_2026-10-21.md`.
+**Contexto:** el CEO cambió `autoaiorg/aao` a **público** el 2026-10-21 (`docs/decisions/CEO-DEC-REPO-PUBLIC-2026-10-21.md`). Con GitHub Free, un repositorio público dispone de protección de ramas y rulesets, lo que cambia P2 y P3. La auditoría de exposición previa está en `docs/PUBLIC_EXPOSURE_AUDIT_2026-10-21.md`.
 **Complementa:** P2 (`docs/proposals/P2_GITHUB_IDENTITIES_AND_PERMISSIONS.md`). Las identidades y la custodia de P2 se mantienen; este documento sustituye la parte de prevención de P2 (el modelo de fork «para evitar el plan de pago») por reglas preventivas en el propio repo, y mantiene los forks como capa adicional.
 
 ## 1. Qué cambia respecto a P2
@@ -102,7 +102,7 @@ Si alguna falla, la recomendación es **transferir el repo a la organización gr
 ## 6. Lo que tendría que hacer el CEO (unos 20 minutos, además de P2)
 
 1. Crear el repo público de ensayo y aplicar en él los rulesets A, B y C.
-2. Tras P3-01 a P3-12 en PASS, aplicar los mismos rulesets en `alessbarb/aao`.
+2. Tras P3-01 a P3-12 en PASS, aplicar los mismos rulesets en `autoaiorg/aao`.
 3. Configurar Actions y los límites de interacción del §3.
 
 ## 7. Riesgos residuales
