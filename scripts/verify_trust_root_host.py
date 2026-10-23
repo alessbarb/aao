@@ -144,7 +144,8 @@ def sudo_grants(target: str) -> list[str]:
         if result.returncode not in (0, 1):
             bad.append(f"{account.pw_name}: cannot evaluate sudo policy ({result.stderr.strip()[:80]})")
             continue
-        reach = runas_users(result.stdout) & {"ALL", target, f"#{uid(target)}"}
+        # root reaches every uid, so a grant to run as root is a grant to run as the target.
+        reach = runas_users(result.stdout) & {"ALL", target, f"#{uid(target)}", "root", "#0"}
         if reach:
             bad.append(f"{account.pw_name}: runas {sorted(reach)}")
     return bad
@@ -166,13 +167,61 @@ def cron_entries(target: str) -> list[str]:
     return found
 
 
+POLKIT_ACTIONS = ("org.freedesktop.systemd1.manage-units", "org.freedesktop.systemd1.manage-unit-files",
+                  "org.freedesktop.systemd1.reload-daemon", "org.freedesktop.machine1.shell",
+                  "org.freedesktop.machine1.host-shell")
+POLKIT_DIRS = ("/etc/polkit-1/rules.d", "/usr/share/polkit-1/rules.d", "/usr/local/share/polkit-1/rules.d",
+               "/run/polkit-1/rules.d", "/etc/polkit-1/localauthority", "/var/lib/polkit-1/localauthority")
+
+
+def _package_pristine(path: Path) -> bool:
+    """path belongs to a dpkg package and `dpkg --verify` reports no change to it."""
+    owner = subprocess.run(["dpkg", "-S", str(path)], check=False, capture_output=True, text=True)
+    if owner.returncode:
+        return False
+    package = owner.stdout.split(":", 1)[0].strip()
+    verify = subprocess.run(["dpkg", "--verify", package], check=False, capture_output=True, text=True).stdout
+    return str(path) not in verify
+
+
 def polkit_grants(target: str) -> list[str]:
-    """Local polkit rules mentioning the target or systemd unit management (systemd-run --uid, transient units)."""
+    """Polkit paths to start processes as another uid (systemd-run --uid, transient units, machinectl shell).
+
+    Effective policy = implicit authorizations + JavaScript rules. Implicit authorizations must require an
+    admin (admins are the root-equivalent groups of E5). Any rule file, in every rules/localauthority
+    directory, that can return YES (or mentions these actions or the target) must be an unmodified file of
+    an installed package; a local or modified rule is a FAIL, since its dynamic effect is not evaluated."""
     found = []
-    for directory in ("/etc/polkit-1/rules.d", "/etc/polkit-1/localauthority"):
+    for action in POLKIT_ACTIONS:
+        shown = subprocess.run(["pkaction", "--action-id", action, "--verbose"], check=False, capture_output=True,
+                               text=True).stdout
+        for value in re.findall(r"implicit \w+:\s+(\S+)", shown):
+            if value not in ("auth_admin", "auth_admin_keep", "no"):
+                found.append(f"{action} implicit {value}")
+    pattern = re.compile(rf"{re.escape(target)}|org\.freedesktop\.(systemd1|machine1)|Result\.YES|ResultAny|=yes",
+                         re.IGNORECASE)
+    for directory in POLKIT_DIRS:
         for path in sorted(Path(directory).rglob("*")) if Path(directory).is_dir() else []:
-            if path.is_file() and re.search(rf"{re.escape(target)}|org\.freedesktop\.systemd1|org\.freedesktop\.machine1",
-                                            path.read_text(errors="replace")):
+            if path.is_file() and pattern.search(path.read_text(errors="replace")) and not _package_pristine(path):
+                found.append(f"{path} (local or modified rule)")
+    return found
+
+
+UNIT_DIRS = ("/etc/systemd/system", "/run/systemd/system", "/run/systemd/transient", "/run/systemd/generator",
+             "/run/systemd/generator.early", "/run/systemd/generator.late", "/usr/local/lib/systemd/system",
+             "/usr/lib/systemd/system", "/lib/systemd/system")
+
+
+def units_running_as(target: str, allowed: set[str]) -> list[str]:
+    """Unit files or drop-ins (any search path) that set User= to the target, other than the reviewed ones."""
+    found = []
+    names = {target, str(uid(target))}
+    for directory in UNIT_DIRS:
+        for path in sorted(Path(directory).rglob("*")) if Path(directory).is_dir() else []:
+            if not path.is_file():
+                continue
+            users = re.findall(r"^\s*User\s*=\s*(\S+)", path.read_text(errors="replace"), re.MULTILINE)
+            if names & set(users) and path.name not in allowed:
                 found.append(str(path))
     return found
 
@@ -216,6 +265,9 @@ def exclusivity(expected_revision: str) -> None:
           "run as auditor", "; ".join(grants))
     polkit = polkit_grants(AUDITOR)
     check(not polkit, "E6b no local polkit rule grants unit management or mentions the auditor", "; ".join(polkit))
+    units = units_running_as(AUDITOR, {"aao-auditor@.service", "aao-auditor-dispatch.service"})
+    check(not units, "E7a no other unit (any search path, incl. transient/generated) sets User=aao-auditor",
+          "; ".join(units))
     strays = [f"pid {pid} {cg}" for pid, uids, cg in processes()
               if account.pw_uid in uids and not AUDITOR_CGROUP.match(cg)]
     check(not strays, "E7 every auditor-uid process is inside an aao-auditor unit", "; ".join(strays[:5]))

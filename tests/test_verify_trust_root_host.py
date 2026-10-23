@@ -70,3 +70,40 @@ def test_cron_user_field(tmp_path, monkeypatch):
     monkeypatch.setattr(verifier, "Path", lambda p, *r: mapping.get(str(p)) or real_path(p, *r))
     monkeypatch.setattr(verifier, "uid", lambda name: 999999)
     assert len(verifier.cron_entries("aao-auditor")) == 2
+
+
+def test_units_running_as_flags_foreign_unit(tmp_path, monkeypatch):
+    system = tmp_path / "system"
+    system.mkdir()
+    (system / "aao-auditor@.service").write_text("[Service]\nUser=aao-auditor\n")
+    monkeypatch.setattr(verifier, "UNIT_DIRS", (str(system),))
+    monkeypatch.setattr(verifier, "uid", lambda name: 1005)
+    allowed = {"aao-auditor@.service"}
+    assert verifier.units_running_as("aao-auditor", allowed) == []
+    (system / "evil.service.d").mkdir()
+    (system / "evil.service.d" / "x.conf").write_text("[Service]\nUser = 1005\n")
+    assert verifier.units_running_as("aao-auditor", allowed) == [str(system / "evil.service.d" / "x.conf")]
+
+
+def test_sudo_grant_to_root_reaches_the_auditor(monkeypatch):
+    class Result:
+        returncode, stderr = 0, ""
+        stdout = "User eve may run:\n    (root) /usr/bin/vim\n"
+    monkeypatch.setattr(verifier.pwd, "getpwall", lambda: [verifier.pwd.struct_passwd(
+        ("eve", "x", 2000, 2000, "", "/home/eve", "/bin/bash"))])
+    monkeypatch.setattr(verifier.subprocess, "run", lambda *a, **k: Result())
+    monkeypatch.setattr(verifier, "uid", lambda name: 1005)
+    assert verifier.sudo_grants("aao-auditor") == ["eve: runas ['root']"]
+
+
+def test_local_polkit_rule_is_flagged(tmp_path, monkeypatch):
+    rules = tmp_path / "rules.d"
+    rules.mkdir()
+    (rules / "10-local.rules").write_text('polkit.addRule(function(a, s) { return polkit.Result.YES; });')
+    (rules / "20-other.rules").write_text("// nothing relevant")
+    monkeypatch.setattr(verifier, "POLKIT_DIRS", (str(rules),))
+    monkeypatch.setattr(verifier, "POLKIT_ACTIONS", ())
+    monkeypatch.setattr(verifier, "_package_pristine", lambda path: False)
+    assert verifier.polkit_grants("aao-auditor") == [f"{rules / '10-local.rules'} (local or modified rule)"]
+    monkeypatch.setattr(verifier, "_package_pristine", lambda path: True)
+    assert verifier.polkit_grants("aao-auditor") == []
