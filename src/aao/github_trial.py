@@ -28,15 +28,16 @@ NOT_RUN = {
 
 EXPECTED_PERMISSIONS = {
     "aao-integrator": {"contents": "write", "pull_requests": "write", "checks": "read", "statuses": "read", "workflows": "write", "metadata": "read"},
-    "aao-auditor": {"contents": "read", "pull_requests": "read", "checks": "write", "statuses": "write", "metadata": "read"},
-    "aao-auditor-alt": {"contents": "read", "pull_requests": "read", "checks": "write", "statuses": "write", "metadata": "read"},
+    "aao-auditor": {"contents": "read", "pull_requests": "read", "checks": "write", "metadata": "read"},
+    "aao-auditor-alt": {"contents": "read", "pull_requests": "read", "checks": "write", "metadata": "read"},
     "aao-supervisor": {"contents": "read", "pull_requests": "read", "checks": "read", "actions": "read", "metadata": "read"},
     "aao-notifier": {"issues": "write", "metadata": "read"},
-    "aao-pm": {"issues": "write", "pull_requests": "read", "contents": "read", "metadata": "read"},
+    "aao-pm": {"issues": "write", "pull_requests": "write", "contents": "read", "metadata": "read"},
     "aao-impl-codex": {"contents": "write", "pull_requests": "write", "workflows": "write", "metadata": "read"},
     "aao-impl-claude": {"contents": "write", "pull_requests": "write", "workflows": "write", "metadata": "read"},
     "aao-impl-ag": {"contents": "write", "pull_requests": "write", "workflows": "write", "metadata": "read"},
 }
+CANONICAL_REPO = "alessbarb/aao"
 CHECK_WAIT_SECONDS = 300
 CHECK_POLL_SECONDS = 5
 
@@ -60,6 +61,18 @@ def validate_role_uid(role: str) -> None:
         raise GitHubAuthError(f"uid {os.getuid()} does not match role {role} uid {expected}")
 
 
+def validate_ceo_gh_identity(repo: str) -> None:
+    """Require the gh CLI token to identify the CEO and be admin on this trial repo."""
+    user = subprocess.run(["gh", "api", "--hostname", "github.com", "user", "--jq", ".login"], check=True, capture_output=True,
+                          text=True, timeout=10, stdin=subprocess.DEVNULL).stdout.strip()
+    if user.lower() != "alessbarb":
+        raise GitHubAuthError("gh authenticated user is not alessbarb")
+    admin = subprocess.run(["gh", "api", "--hostname", "github.com", f"repos/{repo}", "--jq", ".permissions.admin"], check=True,
+                          capture_output=True, text=True, timeout=10, stdin=subprocess.DEVNULL).stdout.strip()
+    if admin.lower() != "true":
+        raise GitHubAuthError("CEO GitHub account lacks admin permission on the trial repository")
+
+
 def _redact(value: Any) -> Any:
     if isinstance(value, dict):
         return {k: ("[REDACTED]" if re.search(r"token|authorization|private.?key", k, re.IGNORECASE) else _redact(v)) for k, v in value.items()}
@@ -81,6 +94,10 @@ def _git_push(client: GitHubAppClient, repo: str, refspec: str, *, force_with_le
     credential = base64.b64encode(f"x-access-token:{token}".encode()).decode("ascii")
     config = [("http.extraheader", f"AUTHORIZATION: basic {credential}")]
     env = os.environ.copy()
+    for key in list(env):
+        if key.startswith(("GIT_TRACE", "GIT_CURL_VERBOSE")):
+            env.pop(key, None)
+    env["GIT_TRACE_REDACT"] = "1"
     env["GIT_CONFIG_COUNT"] = str(len(config))
     for i, (key, value) in enumerate(config):
         env[f"GIT_CONFIG_KEY_{i}"] = key
@@ -96,23 +113,63 @@ def _git_push(client: GitHubAppClient, repo: str, refspec: str, *, force_with_le
         result = subprocess.run(args, env=env, stdin=subprocess.DEVNULL, capture_output=True, timeout=90, check=False)
     except (OSError, subprocess.TimeoutExpired) as exc:
         return {"method": "git push", "remote": remote, "refspec": refspec, "status": None, "response": type(exc).__name__}
+    stderr = result.stderr.decode("utf-8", errors="replace")[:4000]
+    stderr = re.sub(r"(Authorization:\s*(?:Basic|Bearer)\s+)\S+", r"\1[REDACTED]", stderr, flags=re.IGNORECASE)
+    stderr = stderr.replace(token, "[REDACTED]")
+    server_rejected = bool(re.search(r"remote:.*(?:protected branch|permission to .* denied|not permitted|GH\d+:)|\[rejected\].*(?:stale info|protected branch|permission|non-fast-forward)", stderr, re.IGNORECASE))
     return {"method": "git push", "remote": remote, "refspec": refspec,
-            "status": 0 if result.returncode == 0 else 1,
-            "response": "push accepted" if result.returncode == 0 else "push rejected (git stderr withheld to avoid credential leakage)"}
+            "exit_code": result.returncode, "status": 0 if result.returncode == 0 else 1,
+            "server_rejected": server_rejected, "response": stderr}
+
+
+def _trial_repo_allowed(owner: str, repo: str) -> bool:
+    target = f"{owner}/{repo}".lower()
+    if target == CANONICAL_REPO:
+        return False
+    allowed = {item.strip().lower() for item in os.environ.get("AAO_GITHUB_TRIAL_REPOS", "").split(",") if item.strip()}
+    return bool(allowed) and target in allowed
+
+
+def _main_sha(client: GitHubAppClient, base: str, evidence: list[dict]) -> str | None:
+    record = _api(client, "GET", f"{base}/git/ref/heads/main")
+    evidence.append(record)
+    if record["status"] != 200 or not isinstance(record["response"], dict):
+        return None
+    return record["response"].get("object", {}).get("sha")
+
+
+def _verify_unchanged(client: GitHubAppClient, base: str, before: str, evidence: list[dict]) -> bool:
+    after = _main_sha(client, base, evidence)
+    return bool(after and after == before)
+
+
+def _push_rejection_pass(item: dict, unchanged: bool, expected: str = "protected branch") -> bool:
+    response = item.get("response", "").lower()
+    reason_matches = expected.lower() in response or (expected == "protected branch" and "permission to " in response and " denied" in response)
+    return item.get("exit_code", 0) != 0 and item.get("server_rejected") is True and reason_matches and unchanged
 
 
 def _merge_trial_pr(client: GitHubAppClient, base: str, evidence: list[dict]) -> tuple[str, str, list[dict]]:
     if base.lower() == "/repos/alessbarb/aao":
         return "NOT RUN", "refusing to promote on the canonical repository; use the disposable trial", evidence
-    pull_list = _api(client, "GET", f"{base}/pulls?state=open&per_page=1")
+    pull_list = _api(client, "GET", f"{base}/pulls?state=open&per_page=100")
     evidence.append(pull_list)
+    authorized_number = os.environ.get("AAO_GITHUB_TRIAL_PR")
+    authorized_head = os.environ.get("AAO_GITHUB_TRIAL_PR_HEAD", "")
+    if not authorized_number or not authorized_number.isdigit() or not re.fullmatch(r"[0-9a-f]{40,64}", authorized_head):
+        return "NOT RUN", "Set AAO_GITHUB_TRIAL_PR and AAO_GITHUB_TRIAL_PR_HEAD to the explicitly authorized disposable PR and exact head SHA.", evidence
     if pull_list["status"] != 200 or not pull_list["response"]:
         return "NOT RUN", "Create an open trial PR with the exact authorized commit and required checks, then rerun.", evidence
-    pr = pull_list["response"][0]
+    matches = [item for item in pull_list["response"] if item.get("number") == int(authorized_number)]
+    if not matches:
+        return "NOT RUN", "The authorized disposable PR is not among open trial PRs.", evidence
+    pr = matches[0]
     number = pr.get("number")
     candidate = pr.get("head", {}).get("sha")
     if not isinstance(number, int) or not candidate:
         return "FAIL", "trial PR response lacks number or head SHA", evidence
+    if candidate != authorized_head:
+        return "FAIL", "authorized trial PR head SHA does not match AAO_GITHUB_TRIAL_PR_HEAD", evidence
     detail = _api(client, "GET", f"{base}/pulls/{number}")
     evidence.append(detail)
     if detail["status"] != 200 or not isinstance(detail["response"], dict):
@@ -132,7 +189,8 @@ def _merge_trial_pr(client: GitHubAppClient, base: str, evidence: list[dict]) ->
     auditor = _api(client, "GET", "/apps/aao-auditor")
     evidence.append(auditor)
     auditor_id = auditor.get("response", {}).get("id") if isinstance(auditor.get("response"), dict) else None
-    if auditor["status"] != 200 or not isinstance(auditor_id, int):
+    auditor_owner = auditor.get("response", {}).get("owner", {}).get("login", "").lower() if isinstance(auditor.get("response"), dict) else ""
+    if auditor["status"] != 200 or not isinstance(auditor_id, int) or auditor_owner != "alessbarb":
         return "FAIL", "could not resolve aao-auditor App id", evidence
 
     try:
@@ -206,6 +264,8 @@ def owner_repo(base: str) -> str:
 def run_test(test_id: str, owner: str, repo: str, role: str, client: GitHubAppClient) -> tuple[str, str, list[dict]]:
     base = f"/repos/{owner}/{repo}"
     evidence: list[dict] = []
+    if not _trial_repo_allowed(owner, repo):
+        return "NOT RUN", "Repository is not explicitly listed in AAO_GITHUB_TRIAL_REPOS or is the canonical repository; no operation performed.", evidence
     implementers = {"aao-impl-codex", "aao-impl-claude", "aao-impl-ag"}
     required_roles = {
         "A-01": implementers, "A-02": implementers, "A-03": {"aao-integrator"},
@@ -219,9 +279,13 @@ def run_test(test_id: str, owner: str, repo: str, role: str, client: GitHubAppCl
     if test_id in NOT_RUN:
         return "NOT RUN", NOT_RUN[test_id], evidence
     if test_id == "A-01":
+        before = _main_sha(client, base, evidence)
+        if not before:
+            return "FAIL", "could not read main before push attempt", evidence
         item = _git_push(client, f"{owner}/{repo}", "HEAD:refs/heads/main")
         evidence.append(item)
-        return ("PASS", "implementer push to main was rejected", evidence) if item["status"] == 1 else ("FAIL", "implementer push to main was accepted", evidence)
+        unchanged = _verify_unchanged(client, base, before, evidence)
+        return ("PASS", "server denied push to protected branch; main unchanged", evidence) if _push_rejection_pass(item, unchanged, "protected branch") else ("FAIL", "push failed for an unproven cause, changed main, or was accepted", evidence)
     if test_id == "A-04":
         ref = _api(client, "GET", f"{base}/git/ref/heads/main")
         evidence.append(ref)
@@ -230,23 +294,54 @@ def run_test(test_id: str, owner: str, repo: str, role: str, client: GitHubAppCl
         actual = ref["response"].get("object", {}).get("sha")
         if not actual:
             return "FAIL", "main response has no SHA", evidence
-        stale = "0" * 40 if actual != "0" * 40 else "1" * 40
-        item = _git_push(client, f"{owner}/{repo}", "HEAD:refs/heads/main", force_with_lease=stale)
+        # First move main to a distinct, real commit, then use its actual prior SHA as the lease.
+        try:
+            local = subprocess.run(["git", "rev-parse", "HEAD"], check=True, capture_output=True, text=True, timeout=10).stdout.strip()
+        except (OSError, subprocess.SubprocessError):
+            return "NOT RUN", "local candidate commit unavailable for stale-lease trial", evidence
+        if not re.fullmatch(r"[0-9a-f]{40,64}", local) or local == actual:
+            return "NOT RUN", "trial needs a distinct local commit to move main before stale-lease attempt", evidence
+        stage = f"refs/heads/aao-trial/stale-lease-{local[:8]}"
+        staged = _git_push(client, f"{owner}/{repo}", f"{local}:{stage}")
+        evidence.append(staged)
+        if staged.get("exit_code") != 0:
+            return "FAIL", "could not stage the distinct candidate commit", evidence
+        moved = _api(client, "POST", "/graphql", {"query": "mutation($input: UpdateRefsInput!) { updateRefs(input: $input) { refs { name } } }", "variables": {"input": {"refUpdates": [{"name": "refs/heads/main", "oid": local, "beforeOid": actual}]}}})
+        evidence.append(moved)
+        moved_ok = moved["status"] == 200 and isinstance(moved["response"], dict) and not moved["response"].get("errors")
+        if not moved_ok or _main_sha(client, base, evidence) != local:
+            return "FAIL", "could not move main to distinct candidate before stale lease", evidence
+        item = _git_push(client, f"{owner}/{repo}", f"{actual}:refs/heads/main", force_with_lease=actual)
         evidence.append(item)
-        return ("PASS", "force-with-lease using stale SHA was rejected", evidence) if item["status"] == 1 else ("FAIL", "stale force-with-lease was accepted", evidence)
+        unchanged = _verify_unchanged(client, base, local, evidence)
+        response = item.get("response", "").lower()
+        valid_server_reject = item.get("exit_code", 0) != 0 and item.get("server_rejected") and ("stale" in response or "rejected" in response)
+        return ("PASS", "server rejected stale force-with-lease; moved main unchanged", evidence) if valid_server_reject and unchanged else ("FAIL", "stale lease was not rejected by server for the expected reason or main changed", evidence)
     if test_id == "A-09":
         item = _api(client, "POST", f"{base}/issues", {"title": "AAO P2/P3 trial notification", "body": "Disposable trial harness check."})
         evidence.append(item)
         if item["status"] not in (200, 201):
             return "FAIL", f"issue creation returned HTTP {item['status']}", evidence
+        before = _main_sha(client, base, evidence)
+        if not before:
+            return "FAIL", "issue created but could not read main before push", evidence
         push = _git_push(client, f"{owner}/{repo}", "HEAD:refs/heads/main")
         evidence.append(push)
-        return ("PASS", "issue created and push to main rejected", evidence) if push["status"] == 1 else ("FAIL", "issue created but push to main accepted", evidence)
+        unchanged = _verify_unchanged(client, base, before, evidence)
+        return ("PASS", "issue created; server denied protected-branch push; main unchanged", evidence) if _push_rejection_pass(push, unchanged) else ("FAIL", "issue created but push failure cause or remote state did not match", evidence)
     if test_id == "A-10":
         item = _api(client, "GET", "/installation")
         evidence.append(item)
         actual = item["response"].get("permissions", {}) if isinstance(item["response"], dict) else {}
         expected = EXPECTED_PERMISSIONS[role]
+        is_canonical = f"{owner}/{repo}".lower() == CANONICAL_REPO
+        if role.startswith("aao-impl-") and is_canonical:
+            expected = {"pull_requests": "write", "contents": "read", "metadata": "read"}
+        elif not is_canonical:
+            if role in ("aao-auditor", "aao-auditor-alt"):
+                expected = {"contents": "read", "metadata": "read"}
+            elif not role.startswith("aao-impl-"):
+                return "NOT RUN", "this App role is specified only for the canonical repository", evidence
         clean = {k: v for k, v in actual.items() if v not in (None, "none")}
         return ("PASS", "installation permissions match role manifest", evidence) if clean == expected else ("FAIL", f"installation permissions differ from expected table: expected {expected}, got {clean}", evidence)
     if test_id == "A-12":
@@ -257,6 +352,16 @@ def run_test(test_id: str, owner: str, repo: str, role: str, client: GitHubAppCl
     if test_id == "A-13":
         return "NOT RUN", "Manual expiry step: use an installation token after its expires_at time (or revoke it), then verify GitHub returns HTTP 401; harness cannot wait an hour within one-test invocation.", evidence
     if test_id == "A-14":
+        if not role.startswith("aao-impl-") or f"{owner}/{repo}".lower() == CANONICAL_REPO:
+            return "NOT RUN", "A-14 must run with an implementer App installed on its disposable fork; no canonical-repository App is valid.", evidence
+        fork_parent = os.environ.get("AAO_GITHUB_TRIAL_FORK_PARENT", "").lower()
+        if not fork_parent or fork_parent == CANONICAL_REPO:
+            return "NOT RUN", "Set AAO_GITHUB_TRIAL_FORK_PARENT to the explicit disposable trial parent repository.", evidence
+        fork_info = _api(client, "GET", base)
+        evidence.append(fork_info)
+        parent = fork_info.get("response", {}).get("parent", {}).get("full_name", "").lower() if isinstance(fork_info.get("response"), dict) else ""
+        if fork_info["status"] != 200 or not isinstance(fork_info["response"], dict) or fork_info["response"].get("fork") is not True or parent != fork_parent:
+            return "NOT RUN", "Target is not the explicitly configured disposable fork of the trial repository.", evidence
         try:
             changed = subprocess.run(["git", "diff-tree", "--root", "--no-commit-id", "--name-only", "-r", "HEAD"],
                                      check=True, capture_output=True, text=True, timeout=10).stdout.splitlines()
@@ -264,13 +369,19 @@ def run_test(test_id: str, owner: str, repo: str, role: str, client: GitHubAppCl
             return "NOT RUN", "Run from a local disposable clone containing the test commit.", evidence
         if not any(path.startswith(".github/workflows/") for path in changed):
             return "NOT RUN", "Prepare a disposable local commit changing .github/workflows/ and rerun; the harness will attempt that commit's push to main.", evidence
+        before = _main_sha(client, base, evidence)
+        if not before:
+            return "FAIL", "could not read fork main before workflow push", evidence
         item = _git_push(client, f"{owner}/{repo}", "HEAD:refs/heads/main")
         evidence.append(item)
-        return ("PASS", "workflow-changing push was rejected", evidence) if item["status"] == 1 else ("FAIL", "workflow-changing push was accepted", evidence)
+        message = item.get("response", "").lower()
+        expected = item.get("exit_code", 0) != 0 and item.get("server_rejected") and ("workflow" in message or "workflows" in message or "permission" in message)
+        unchanged = _verify_unchanged(client, base, before, evidence)
+        return ("PASS", "server denied workflow-changing push for missing workflow permission; fork main unchanged", evidence) if expected and unchanged else ("FAIL", "workflow push was not rejected for the expected permission or fork main changed", evidence)
     if test_id == "P3-09":
         if role != "ceo":
             return "NOT RUN", "Run explicitly with --role ceo to test the CEO identity.", evidence
-        pulls = _api(client, "GET", f"{base}/pulls?state=open&per_page=1")
+        pulls = _api(client, "GET", f"{base}/pulls?state=open&per_page=100")
         evidence.append(pulls)
         if pulls["status"] != 200 or not pulls["response"]:
             return "NOT RUN", "Create an open disposable PR, then rerun this test.", evidence
@@ -279,7 +390,11 @@ def run_test(test_id: str, owner: str, repo: str, role: str, client: GitHubAppCl
             return "FAIL", "open PR response lacks a number", evidence
         item = _api(client, "PUT", f"{base}/pulls/{number}/merge", {"merge_method": "merge"})
         evidence.append(item)
-        return ("PASS", "CEO PR merge attempt was rejected", evidence) if item["status"] >= 400 else ("FAIL", "CEO PR merge attempt was accepted", evidence)
+        after = _api(client, "GET", f"{base}/pulls/{number}")
+        evidence.append(after)
+        expected = item["status"] == 403 and isinstance(item["response"], dict) and "resource not accessible" in item["response"].get("message", "").lower()
+        unchanged = after["status"] == 200 and after["response"].get("merged") is False and after["response"].get("state") == "open"
+        return ("PASS", "CEO merge denied with HTTP 403 permission reason; PR remains open", evidence) if expected and unchanged else ("FAIL", "CEO merge attempt was not denied for the expected permission or PR state changed", evidence)
     if test_id == "A-02":
         pulls = _api(client, "GET", f"{base}/pulls?state=open&per_page=1")
         evidence.append(pulls)
@@ -288,20 +403,39 @@ def run_test(test_id: str, owner: str, repo: str, role: str, client: GitHubAppCl
         number = pulls["response"][0]["number"]
         item = _api(client, "PUT", f"{base}/pulls/{number}/merge", {"merge_method": "merge"})
         evidence.append(item)
-        return ("PASS", "merge attempt was rejected", evidence) if item["status"] >= 400 else ("FAIL", "merge attempt was accepted", evidence)
+        after = _api(client, "GET", f"{base}/pulls/{number}")
+        evidence.append(after)
+        rejected = item["status"] == 403 and isinstance(item["response"], dict) and "resource not accessible" in item["response"].get("message", "").lower()
+        unchanged = after["status"] == 200 and after["response"].get("merged") is False and after["response"].get("state") == "open"
+        return ("PASS", "merge denied with HTTP 403 permission reason; PR remains open", evidence) if rejected and unchanged else ("FAIL", "merge was not denied for the expected permission reason or PR state changed", evidence)
     if test_id in ("A-03", "P3-05"):
-        # updateRefs tests are GraphQL and use an intentionally stale beforeOid.
-        ref = _api(client, "GET", f"{base}/git/ref/heads/main")
-        evidence.append(ref)
-        if ref["status"] != 200:
+        # Make a real distinct update, then exercise CAS with the previous actual OID.
+        sha = _main_sha(client, base, evidence)
+        if not sha:
             return "NOT RUN", "main ref unavailable; prepare the disposable trial repository", evidence
-        sha = ref["response"]["object"]["sha"]
+        try:
+            candidate = subprocess.run(["git", "rev-parse", "HEAD"], check=True, capture_output=True, text=True, timeout=10).stdout.strip()
+        except (OSError, subprocess.SubprocessError):
+            return "NOT RUN", "local candidate commit unavailable for stale updateRefs trial", evidence
+        if not re.fullmatch(r"[0-9a-f]{40,64}", candidate) or candidate == sha:
+            return "NOT RUN", "trial needs a distinct local commit to move main before stale updateRefs", evidence
+        staged = _git_push(client, f"{owner}/{repo}", f"{candidate}:refs/heads/aao-trial/stale-ref-{candidate[:8]}")
+        evidence.append(staged)
+        if staged.get("exit_code") != 0:
+            return "FAIL", "could not stage distinct candidate commit", evidence
+        query = {"query": "mutation($input: UpdateRefsInput!) { updateRefs(input: $input) { refs { name } } }", "variables": {"input": {"refUpdates": [{"name": "refs/heads/main", "oid": candidate, "beforeOid": sha}]}}}
+        moved = _api(client, "POST", "/graphql", query)
+        evidence.append(moved)
+        moved_ok = moved["status"] == 200 and isinstance(moved["response"], dict) and not moved["response"].get("errors")
+        if not moved_ok or _main_sha(client, base, evidence) != candidate:
+            return "FAIL", "could not move main to distinct candidate before stale updateRefs attempt", evidence
         query = {"query": "mutation($input: UpdateRefsInput!) { updateRefs(input: $input) { refs { name } } }",
-                 "variables": {"input": {"refUpdates": [{"name": "refs/heads/main", "oid": sha, "beforeOid": "0" * 40}]}}}
+                 "variables": {"input": {"refUpdates": [{"name": "refs/heads/main", "oid": sha, "beforeOid": sha}]}}}
         item = _api(client, "POST", "/graphql", query)
         evidence.append(item)
-        errors = item["status"] >= 400 or (isinstance(item["response"], dict) and bool(item["response"].get("errors")))
-        return ("PASS", "stale beforeOid updateRefs was rejected", evidence) if errors else ("FAIL", "stale beforeOid updateRefs was accepted", evidence)
+        errors = item["status"] == 200 and isinstance(item["response"], dict) and any("before" in e.get("message", "").lower() or "stale" in e.get("message", "").lower() for e in item["response"].get("errors", []))
+        unchanged = _verify_unchanged(client, base, candidate, evidence)
+        return ("PASS", "updateRefs rejected stale beforeOid; moved main unchanged", evidence) if errors and unchanged else ("FAIL", "updateRefs did not report expected stale precondition rejection or main changed", evidence)
     if test_id in ("P3-01", "P3-02", "P3-07", "P3-12"):
         if test_id == "P3-01":
             if role != "ceo":
@@ -313,13 +447,16 @@ def run_test(test_id: str, owner: str, repo: str, role: str, client: GitHubAppCl
             return "NOT RUN", "Run with one of the implementer App roles to test its denial on canonical main.", evidence
         if test_id == "P3-12" and role != "aao-integrator":
             return "NOT RUN", "Run as aao-integrator with a non-fast-forward candidate on the disposable trial main.", evidence
+        before = _main_sha(client, base, evidence)
+        if not before:
+            return "FAIL", "could not read main before protected push attempt", evidence
         item = _git_push(client, f"{owner}/{repo}", "HEAD:refs/heads/main", force=test_id == "P3-07")
         evidence.append(item)
-        return ("PASS", "protected main push was rejected", evidence) if item["status"] == 1 else ("FAIL", "protected main push was accepted", evidence)
+        unchanged = _verify_unchanged(client, base, before, evidence)
+        expected = "non-fast-forward" if test_id == "P3-12" else "protected branch"
+        return ("PASS", f"server denied {test_id} push for expected reason; main unchanged", evidence) if _push_rejection_pass(item, unchanged, expected) else ("FAIL", "push was not rejected by the server for the expected reason or main changed", evidence)
     if test_id == "P3-08":
-        item = _api(client, "DELETE", f"{base}/git/refs/heads/main")
-        evidence.append(item)
-        return ("PASS", "deleting main was rejected", evidence) if item["status"] >= 400 else ("FAIL", "deleting main was accepted", evidence)
+        return "NOT RUN", "Default-branch deletion is not a meaningful ruleset test: GitHub forbids deleting the default branch independently of rulesets. Configure a protected non-default trial branch and rerun.", evidence
     if test_id in ("A-05", "P3-06"):
         if role != "aao-integrator":
             return "NOT RUN", "Run as aao-integrator on the disposable trial repository after authorization and all required checks are present.", evidence
@@ -343,15 +480,26 @@ def run_test(test_id: str, owner: str, repo: str, role: str, client: GitHubAppCl
             return ("PASS", "aao-audit check was accepted from the configured auditor app_id", evidence) if item["status"] in (200, 201) and actual_app == client.app_id else ("FAIL", "auditor check run rejected or returned a different app_id", evidence)
         if role not in ("aao-impl-codex", "aao-impl-claude", "aao-impl-ag"):
             return "NOT RUN", "Use aao-auditor for the positive source-attribution check or an implementer for the expected 403.", evidence
-        return ("PASS", "implementer check-run publication was rejected", evidence) if item["status"] >= 400 else ("FAIL", "implementer published a check run", evidence)
+        denied = item["status"] == 403 and isinstance(item["response"], dict) and "resource not accessible" in item["response"].get("message", "").lower()
+        return ("PASS", "implementer check-run publication denied with HTTP 403 permission reason", evidence) if denied else ("FAIL", "check-run publication was not denied for the expected permission reason", evidence)
     if test_id == "P3-03":
         try:
             sha = subprocess.run(["git", "rev-parse", "HEAD"], check=True, capture_output=True, text=True, timeout=10).stdout.strip()
         except (OSError, subprocess.SubprocessError):
             return "NOT RUN", "Run from a disposable local clone containing a candidate commit without aao-audit.", evidence
+        staged = _git_push(client, f"{owner}/{repo}", f"{sha}:refs/heads/aao-trial/no-audit-{sha[:8]}")
+        evidence.append(staged)
+        if staged.get("exit_code") != 0:
+            return "FAIL", "candidate without required check could not be staged on the trial repository", evidence
+        before = _main_sha(client, base, evidence)
+        if not before:
+            return "FAIL", "could not read main before required-check update attempt", evidence
         item = _api(client, "PATCH", f"{base}/git/refs/heads/main", {"sha": sha, "force": True})
         evidence.append(item)
-        return ("PASS", "update to commit without required aao-audit check was rejected", evidence) if item["status"] >= 400 else ("FAIL", "update without required aao-audit check was accepted", evidence)
+        message = item["response"].get("message", "").lower() if isinstance(item["response"], dict) else ""
+        expected = item["status"] == 403 and ("protected branch" in message or "required status check" in message or "required check" in message)
+        unchanged = _verify_unchanged(client, base, before, evidence)
+        return ("PASS", "protected branch denied missing-check update with HTTP 403; main unchanged", evidence) if expected and unchanged else ("FAIL", "update was not rejected for required-check protection or main changed", evidence)
     if test_id == "P3-04":
         return "NOT RUN", "Prepare a candidate whose aao-audit check/status was published by a non-auditor App, then run as aao-integrator and attempt the candidate ref update; the auditor app_id is not available cross-uid to this invocation.", evidence
     raise ValueError(f"unsupported test id: {test_id}")
@@ -409,17 +557,20 @@ def main(argv: list[str] | None = None) -> int:
         parser.error("--repo must be OWNER/REPO")
     try:
         validate_role_uid(args.role)
+        if not _trial_repo_allowed(*args.repo.split("/", 1)):
+            raise GitHubAuthError("--repo must be explicitly listed in AAO_GITHUB_TRIAL_REPOS and cannot be alessbarb/aao")
         if args.role == "ceo":
             if args.test_id not in ("P3-01", "P3-09"):
                 raise GitHubAuthError("--role ceo is allowed only for P3-01 and P3-09")
-            token_result = subprocess.run(["gh", "auth", "token"], check=True, capture_output=True,
+            token_result = subprocess.run(["gh", "auth", "token", "--hostname", "github.com"], check=True, capture_output=True,
                                           text=True, timeout=10, stdin=subprocess.DEVNULL)
             token = token_result.stdout.strip()
             if not token:
                 raise GitHubAuthError("gh auth token returned no token")
+            validate_ceo_gh_identity(args.repo)
             client = object.__new__(GitHubAppClient)
             client.app_id, client._installation_token = 0, token
-            client.api_base, client.timeout = os.environ.get("AAO_GITHUB_API", "https://api.github.com").rstrip("/"), 15.0
+            client.api_base, client.timeout = "https://api.github.com", 15.0
             client.close = lambda: None
         else:
             client = GitHubAppClient(args.role)
@@ -433,8 +584,16 @@ def main(argv: list[str] | None = None) -> int:
         output = write_evidence(args.test_id, status, reason, args.repo, args.role, client.app_id, records)
         print(f"{status}: {reason}\nEvidence: {output}")
         return 0 if status == "PASS" else (1 if status == "FAIL" else 2)
-    except (GitHubAuthError, OSError, ValueError) as exc:
-        print(f"NOT RUN: {exc}")
+    except (GitHubAuthError, OSError, ValueError, subprocess.SubprocessError,
+            KeyError, TypeError, IndexError, StopIteration) as exc:
+        message = str(exc) if isinstance(exc, GitHubAuthError) else type(exc).__name__
+        try:
+            output = write_evidence(args.test_id, "NOT RUN", message, args.repo, args.role,
+                                    getattr(locals().get("client"), "app_id", 0),
+                                    [{"method": "harness", "status": "error", "response": type(exc).__name__}])
+            print(f"NOT RUN: {message}\nEvidence: {output}")
+        except OSError:
+            print(f"NOT RUN: {message}")
         return 2
     finally:
         if "client" in locals():

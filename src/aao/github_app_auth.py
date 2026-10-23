@@ -9,7 +9,6 @@ import os
 import pwd
 import subprocess
 import time
-import urllib.error
 import urllib.parse
 import urllib.request
 from dataclasses import dataclass
@@ -32,6 +31,13 @@ class APIResponse:
     status: int
     body: Any
     headers: dict[str, str]
+
+
+class _NoRedirect(urllib.request.HTTPRedirectHandler):
+    """Never forward bearer credentials to a redirect target."""
+
+    def redirect_request(self, req, fp, code, msg, headers, newurl):
+        return None
 
 
 def _b64url(data: bytes) -> str:
@@ -87,6 +93,8 @@ class GitHubAppClient:
         self.app_id, key_path = load_app(app)
         self.api_base = (api_base or os.environ.get("AAO_GITHUB_API", "https://api.github.com")).rstrip("/")
         parsed_base = urllib.parse.urlsplit(self.api_base)
+        if self.api_base != "https://api.github.com" and os.environ.get("AAO_GITHUB_API_ALLOW_TEST") != "1":
+            raise GitHubAuthError("custom GitHub API base requires AAO_GITHUB_API_ALLOW_TEST=1")
         if parsed_base.scheme != "https":
             try:
                 loopback = parsed_base.scheme == "http" and ipaddress.ip_address(parsed_base.hostname or "").is_loopback
@@ -107,7 +115,8 @@ class GitHubAppClient:
                      **({"Content-Type": "application/json"} if data is not None else {})},
         )
         try:
-            with urllib.request.urlopen(req, timeout=self.timeout) as res:
+            opener = urllib.request.build_opener(_NoRedirect())
+            with opener.open(req, timeout=self.timeout) as res:
                 raw, status, headers = res.read(), res.status, dict(res.headers.items())
         except urllib.error.HTTPError as exc:
             raw, status, headers = exc.read(), exc.code, dict(exc.headers.items())
@@ -128,7 +137,8 @@ class GitHubAppClient:
         installation_id = installation.body.get("id")
         if not isinstance(installation_id, int):
             raise GitHubAuthError("installation lookup returned no installation id")
-        response = self._request("POST", f"/app/installations/{installation_id}/access_tokens", token=jwt, body={})
+        response = self._request("POST", f"/app/installations/{installation_id}/access_tokens", token=jwt,
+                                 body={"repository_names": [repo]})
         if response.status != 201 or not isinstance(response.body, dict) or not response.body.get("token"):
             raise GitHubAuthError(f"installation token request failed with HTTP {response.status}")
         self._installation_token = str(response.body["token"])
