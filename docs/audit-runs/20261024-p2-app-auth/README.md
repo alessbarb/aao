@@ -1,6 +1,6 @@
 # P2: autenticación API de las nueve GitHub Apps (2026-10-24)
 
-**Estado: NO DEMOSTRADA.** Las claves están instaladas (lo declara el CEO); ninguna App ha autenticado todavía contra la API en un registro de este expediente.
+**Estado: autenticación DEMOSTRADA para las nueve Apps (2026-10-23 23:08–23:09 UTC). Resultado global 5/9 PASS:** los cuatro FAIL no son de autenticación (ver «Resultados»).
 
 ## Hechos verificados por el PM (2026-10-24)
 
@@ -28,16 +28,20 @@ Las Apps tienen `installation_id` en `autoaiorg/aao` antes de existir el repo de
 
 ## Resultados
 
-| App | uid | Resultado |
-|---|---|---|
-| aao-integrator | aao-integrator | PENDIENTE |
-| aao-auditor | aao-auditor | PENDIENTE |
-| aao-auditor-alt | aao-auditor-alt | PENDIENTE |
-| aao-supervisor | aao-supervisor | PENDIENTE |
-| aao-notifier | aao-notifier | PENDIENTE |
-| aao-pm | aao-pm | PENDIENTE |
-| aao-impl-claude | aao-impl-claude | PENDIENTE |
-| aao-impl-codex | aao-impl-codex | PENDIENTE |
-| aao-impl-agy | aao-impl-ag | PENDIENTE |
+Ejecución del CEO, §1-ter, `REV=c24a269`, salida íntegra en [`app-auth-20261024T010852.jsonl`](app-auth-20261024T010852.jsonl), sha256 `5b86c2715f0322c8e1801e2ff2233efba2be020d55a2007ec2e917cb23c154d1`, sin secretos (comprobado: no hay clave, JWT ni token). La generó el CEO en su terminal con el verificador instalado como root en `/opt/aao-p2`; el PM la copió al expediente sin modificarla. En las nueve filas pasan `jwt_app_id`, `slug_equals_name`, `installation_belongs_to_app`, `installation_not_suspended`, `installation_token_issued` y `token_revoked`: **las nueve Apps autentican**, y todas son de `autoaiorg`, con instalación `selected`.
 
-Nueve PASS demostrarían la autenticación. **No** son el ensayo P2/P3 (A-01..A-14, P3-01..P3-12): RA sigue en PENDING, `enabled_risk_classes` sigue en `["R1"]`, el integrador no se activa y R2 sigue bloqueado.
+| App | uid | Repos accesibles | Resultado | Motivo del FAIL |
+|---|---|---|---|---|
+| aao-integrator | aao-integrator | `autoaiorg/aao` | FAIL | La App no tiene `workflows: write` y el manifiesto lo pedía. Por política, `.github/workflows/` es R2, así que se corrige el manifiesto (mínimo privilegio) y no la App |
+| aao-auditor | aao-auditor | `autoaiorg/aao` | PASS | — |
+| aao-auditor-alt | aao-auditor-alt | `autoaiorg/aao` | PASS | — |
+| aao-supervisor | aao-supervisor | `autoaiorg/aao` | PASS | — |
+| aao-notifier | aao-notifier | `autoaiorg/aao` | PASS | — |
+| aao-pm | aao-pm | `autoaiorg/aao` | PASS | — |
+| aao-impl-claude | aao-impl-claude | `autoaiorg/aao-claude` | FAIL | Se ejecutó sin `--fork`, así que el alcance no quedó demostrado. Según la API pública, el repo es un fork de `autoaiorg/aao` |
+| aao-impl-codex | aao-impl-codex | `autoaiorg/aao-codex` | FAIL | Igual (fork de `autoaiorg/aao`) |
+| aao-impl-agy | aao-impl-ag | `autoaiorg/aao-agy` | FAIL | Igual (fork de `autoaiorg/aao`) |
+
+No se observó acceso de ningún implementador al repo canónico (`implementer_cannot_reach_canonical: true`). El alcance exacto a su fork **no** está demostrado, porque se ejecutó sin `--fork` (`implementer_only_its_forks: false`). Pendiente: repetir las cuatro filas FAIL con el manifiesto corregido y `--fork`.
+
+Las nueve Apps autenticaron; cuatro filas fallaron comprobaciones adicionales (permisos del integrador y alcance de los forks). Ni la autenticación ni un futuro 9/9 son el ensayo P2/P3 (A-01..A-14, P3-01..P3-12): RA sigue en PENDING, `enabled_risk_classes` sigue en `["R1"]`, el integrador no se activa y R2 sigue bloqueado.

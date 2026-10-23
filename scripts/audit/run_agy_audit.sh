@@ -27,9 +27,14 @@ done
 for d in "$home/.antigravity" "$home/.gemini" "$home/.config" "$home/.config/antigravity"; do
   [[ -e $d || -L $d ]] || continue
   [[ ! -L $d && $(realpath -e "$d") == "$home"/* ]] || { echo "refusing: $d is a symlink or leaves $home" >&2; exit 1; }
-  # No symlinks at all (they could point at another account's session), only this uid, no group/other write.
-  bad=$(find "$d" \( -type l -o ! -uid "$(id -u)" -o -perm /022 \) -print -quit)
-  [[ -z $bad ]] || { echo "refusing: $bad is a symlink or not exclusively $me's" >&2; exit 1; }
+  # Only this uid, no group/other write (symlink modes are always 0777, so links are checked by target below).
+  bad=$(find "$d" \( ! -uid "$(id -u)" -o \( ! -type l -perm /022 \) \) -print -quit)
+  [[ -z $bad ]] || { echo "refusing: $bad is not exclusively $me's" >&2; exit 1; }
+  # agy keeps its own links (e.g. cli.log -> log/cli-<date>.log). A link may only resolve inside this same
+  # state directory: never to another account's session or anywhere else.
+  while IFS= read -r -d '' link; do
+    [[ $(realpath -m -- "$link") == "$d"/* ]] || { echo "refusing: symlink $link resolves outside $d" >&2; exit 1; }
+  done < <(find "$d" -type l -print0)
   # No other filesystem mounted inside (its content could be another account's session).
   foreign=$(find "$d" -printf '%D %p\n' | awk -v dev="$(stat -c %d "$home")" '$1 != dev {print $2; exit}')
   [[ -z $foreign ]] || { echo "refusing: $foreign is on another filesystem" >&2; exit 1; }

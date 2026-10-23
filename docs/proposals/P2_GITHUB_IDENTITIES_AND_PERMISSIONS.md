@@ -45,7 +45,7 @@ Cada implementador tiene **su propia App**. Así la atribución distingue a Code
 
 | App | Repo canónico | Fork de implementación |
 |---|---|---|
-| `aao-integrator` | `contents: write` (CAS de `main` y refs temporales), `pull_requests: write` (comentar o cerrar tras promover), `checks: read`, `statuses: read`, **`workflows: write`** (solo para poder promover árboles autorizados que toquen `.github/workflows/`; la clase R2 y la autorización firmada lo controlan) | — |
+| `aao-integrator` | `contents: write` (CAS de `main` y refs temporales), `pull_requests: write` (comentar o cerrar tras promover), `checks: read`, `statuses: read`, sin `workflows` mientras R2 esté bloqueado (2026-10-24: la App instalada no lo tiene, y `.github/workflows/` es R2). Se añadirá al activar R2 (§12.5 de `docs/AUTONOMOUS_GOVERNANCE_POLICY.md`), con decisión del CEO, para promover árboles autorizados que toquen workflows | — |
 | `aao-auditor`, `aao-auditor-alt` | `contents: read`, `pull_requests: read`, `checks: write` (dictamen como check run) | `contents: read` |
 | `aao-supervisor` | `contents: read`, `pull_requests: read`, `checks: read`, `actions: read` (latido del workflow detectivo) | — |
 | `aao-notifier` | `issues: write` | — |
@@ -130,7 +130,7 @@ Cada prueba guarda la evidencia con el SHA, la petición, la respuesta y el `app
 
 ## 10. Riesgos residuales tras P2
 
-- El integrador tiene `contents: write` y `workflows: write` en el canónico. Una vulneración del uid `aao-integrator` permitiría escribir en `main`. Lo detecta el supervisor (D11) y lo frena la custodia de su uid.
+- El integrador tiene `contents: write` en el canónico (sin `workflows` mientras R2 esté bloqueado). Una vulneración del uid `aao-integrator` permitiría escribir en `main`. Lo detecta el supervisor (D11) y lo frena la custodia de su uid.
 - El CEO sigue siendo administrador, que es su papel (D4). Sus pushes manuales los detecta el supervisor.
 - Sin P3, la prevención para el integrador y el CEO es solo detectiva.
 
