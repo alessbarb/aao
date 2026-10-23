@@ -72,7 +72,13 @@ def _call(method: str, path: str, token: str) -> tuple[int, object]:
 
 
 def _err(status: int, body: object) -> str:
-    return f"HTTP {status}: {body.get('message') if isinstance(body, dict) else ''}"
+    return f"HTTP {status}"  # GitHub's message is not echoed: the output must hold only our own fields
+
+
+def _trusted(path: Path) -> bool:
+    """Registry and manifests decide which key is read and what is expected: root-owned, not group/other-writable."""
+    st = os.stat(path, follow_symlinks=False)
+    return st.st_uid == 0 and not st.st_mode & 0o022 and not stat.S_ISLNK(st.st_mode)
 
 
 def _read_key(path: Path, uid: int, home: Path) -> bytes:
@@ -90,6 +96,9 @@ def _read_key(path: Path, uid: int, home: Path) -> bytes:
 
 
 def verify(app: str) -> tuple[bool, dict]:
+    manifest = MANIFESTS / f"{app}.json"
+    if not all(_trusted(p) for p in (HERE, REGISTRY, MANIFESTS, manifest)):
+        return False, {"app": app, "error": "registry/manifests must be root-owned and not group/other-writable"}
     registry = json.loads(REGISTRY.read_text(encoding="utf-8"))
     entry = next((a for a in registry["apps"] if a["name"] == app), None)
     if entry is None:
@@ -100,6 +109,8 @@ def verify(app: str) -> tuple[bool, dict]:
     checks = rec["checks"]
     if os.getuid() == 0 or me.pw_name != entry["linux_uid"]:
         return False, rec | {"error": f"must run as {entry['linux_uid']}, not {me.pw_name}"}
+    if Path(entry["key_file"]).name != f"{app}.pem":
+        return False, rec | {"error": f"key_file must be named {app}.pem"}
     try:
         key = _read_key(Path(entry["key_file"]), me.pw_uid, Path(me.pw_dir))
         jwt = _jwt(int(entry["app_id"]), key)
@@ -107,7 +118,7 @@ def verify(app: str) -> tuple[bool, dict]:
     except (OSError, ValueError, subprocess.CalledProcessError) as exc:
         return False, rec | {"error": f"key/JWT: {type(exc).__name__}: {exc}" if isinstance(exc, ValueError)
                              else f"key/JWT: {type(exc).__name__}"}
-    want = json.loads((MANIFESTS / f"{app}.json").read_text(encoding="utf-8"))["default_permissions"]
+    want = json.loads(manifest.read_text(encoding="utf-8"))["default_permissions"]
 
     status, body = _call("GET", "/app", jwt)
     if status != 200 or not isinstance(body, dict):
@@ -135,28 +146,40 @@ def verify(app: str) -> tuple[bool, dict]:
     if not token:
         return False, rec | {"error": "access_tokens " + _err(status, tok)}
     repos: list[str] = []
+    canonical = registry["canonical_repository"]
+    forks_of_canonical: list[bool] = []
     try:
         page = 1
         while True:
             status, body = _call("GET", f"/installation/repositories?per_page=100&page={page}", token)
-            if status != 200 or not isinstance(body, dict):
+            if status != 200 or not isinstance(body, dict) or not isinstance(body.get("total_count"), int) \
+                    or not isinstance(body.get("repositories"), list):
                 rec["error"] = "GET /installation/repositories " + _err(status, body)
                 break
-            repos += [r["full_name"] for r in body.get("repositories", [])]
-            if len(repos) >= body.get("total_count", 0) or not body.get("repositories"):
+            repos += [r["full_name"] for r in body["repositories"]]
+            if len(repos) == body["total_count"]:
+                break
+            if not body["repositories"] or len(repos) > body["total_count"]:
+                rec["error"] = "repository listing inconsistent with total_count"
                 break
             page += 1
+        if app not in CANONICAL_ONLY and "error" not in rec:
+            for name in repos:  # each implementer repo must be a fork whose parent is the canonical repo
+                status, body = _call("GET", f"/repos/{name}", token)
+                forks_of_canonical.append(status == 200 and isinstance(body, dict) and body.get("fork") is True
+                                          and (body.get("parent") or {}).get("full_name") == canonical)
     finally:
         revoke, _ = _call("DELETE", "/installation/token", token)
         del token
     rec["accessible_repositories"] = sorted(repos)
     checks["token_revoked"] = revoke == 204
-    canonical = registry["canonical_repository"]
     if app in CANONICAL_ONLY:
         checks["access_is_canonical_only"] = rec["accessible_repositories"] == [canonical] \
             and rec["repository_selection"] == "selected"
     else:
         checks["implementer_cannot_reach_canonical"] = canonical not in rec["accessible_repositories"]
+        checks["implementer_only_forks_of_canonical"] = bool(repos) and rec["repository_selection"] == "selected" \
+            and all(forks_of_canonical) and len(forks_of_canonical) == len(repos)
     return "error" not in rec and all(checks.values()), rec
 
 
