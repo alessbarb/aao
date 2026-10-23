@@ -1,6 +1,6 @@
 # P2: autenticación API de las nueve GitHub Apps (2026-10-24)
 
-**Estado: autenticación DEMOSTRADA para las nueve Apps (2026-10-23 23:08–23:09 UTC). Resultado global 5/9 PASS:** los cuatro FAIL no son de autenticación (ver «Resultados»).
+**Estado: 9/9 PASS (2026-10-23 23:20 UTC).** Las nueve Apps autentican, tienen los permisos del manifiesto revisado y solo alcanzan los repos previstos.
 
 ## Hechos verificados por el PM (2026-10-24)
 
@@ -32,16 +32,21 @@ Ejecución del CEO, §1-ter, `REV=c24a269`, salida íntegra en [`app-auth-202610
 
 | App | uid | Repos accesibles | Resultado | Motivo del FAIL |
 |---|---|---|---|---|
-| aao-integrator | aao-integrator | `autoaiorg/aao` | FAIL | La App no tiene `workflows: write` y el manifiesto lo pedía. Por política, `.github/workflows/` es R2, así que se corrige el manifiesto (mínimo privilegio) y no la App |
+| aao-integrator | aao-integrator | `autoaiorg/aao` | PASS (2.ª ejecución) | — |
 | aao-auditor | aao-auditor | `autoaiorg/aao` | PASS | — |
 | aao-auditor-alt | aao-auditor-alt | `autoaiorg/aao` | PASS | — |
 | aao-supervisor | aao-supervisor | `autoaiorg/aao` | PASS | — |
 | aao-notifier | aao-notifier | `autoaiorg/aao` | PASS | — |
 | aao-pm | aao-pm | `autoaiorg/aao` | PASS | — |
-| aao-impl-claude | aao-impl-claude | `autoaiorg/aao-claude` | FAIL | Se ejecutó sin `--fork`, así que el alcance no quedó demostrado. Según la API pública, el repo es un fork de `autoaiorg/aao` |
-| aao-impl-codex | aao-impl-codex | `autoaiorg/aao-codex` | FAIL | Igual (fork de `autoaiorg/aao`) |
-| aao-impl-agy | aao-impl-ag | `autoaiorg/aao-agy` | FAIL | Igual (fork de `autoaiorg/aao`) |
+| aao-impl-claude | aao-impl-claude | `autoaiorg/aao-claude` | PASS (2.ª ejecución) | — |
+| aao-impl-codex | aao-impl-codex | `autoaiorg/aao-codex` | PASS (2.ª ejecución) | — |
+| aao-impl-agy | aao-impl-ag | `autoaiorg/aao-agy` | PASS (2.ª ejecución) | — |
 
-No se observó acceso de ningún implementador al repo canónico (`implementer_cannot_reach_canonical: true`). El alcance exacto a su fork **no** está demostrado, porque se ejecutó sin `--fork` (`implementer_only_its_forks: false`). Pendiente: repetir las cuatro filas FAIL con el manifiesto corregido y `--fork`.
+No se observó acceso de ningún implementador al repo canónico (`implementer_cannot_reach_canonical: true`). El alcance exacto a su fork **no** está demostrado, en la 1.ª ejecución, porque se hizo sin `--fork` (`implementer_only_its_forks: false`); la 2.ª ejecución lo demuestra (abajo).
+
+
+### Segunda ejecución (2026-10-23 23:20 UTC, `REV=703887f`)
+
+Se repitieron las cuatro filas FAIL con el manifiesto del integrador corregido (#52) y con `--fork`. Las cuatro dan PASS y `rc=0`. Salida íntegra: [`app-auth-20261024T012035.jsonl`](app-auth-20261024T012035.jsonl), sha256 `573b3929ad6dfacdfe60ad368275156d55679eb060a715ef97d39794645058ab`, sin secretos. Los implementadores alcanzan exactamente su fork (`autoaiorg/aao-claude`, `aao-codex`, `aao-agy`; padre `autoaiorg/aao`) y nunca el canónico: **A-10 queda demostrado para estas instalaciones**.
 
 Las nueve Apps autenticaron; cuatro filas fallaron comprobaciones adicionales (permisos del integrador y alcance de los forks). Ni la autenticación ni un futuro 9/9 son el ensayo P2/P3 (A-01..A-14, P3-01..P3-12): RA sigue en PENDING, `enabled_risk_classes` sigue en `["R1"]`, el integrador no se activa y R2 sigue bloqueado.
