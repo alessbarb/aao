@@ -28,7 +28,7 @@ Las Apps tienen `installation_id` en `autoaiorg/aao` antes de existir el repo de
 
 ## Resultados
 
-Ejecución del CEO, §1-ter, `REV=c24a269`, archivo `~/aao-p2-app-auth-20261024T010852.jsonl` (sin secretos). En las nueve filas pasan `jwt_app_id`, `slug_equals_name`, `installation_belongs_to_app`, `installation_not_suspended`, `installation_token_issued` y `token_revoked`: **las nueve Apps autentican**, y todas son de `autoaiorg`, con instalación `selected`.
+Ejecución del CEO, §1-ter, `REV=c24a269`, salida íntegra en [`app-auth-20261024T010852.jsonl`](app-auth-20261024T010852.jsonl), sha256 `5b86c2715f0322c8e1801e2ff2233efba2be020d55a2007ec2e917cb23c154d1`, sin secretos (comprobado: no hay clave, JWT ni token). La generó el CEO en su terminal con el verificador instalado como root en `/opt/aao-p2`; el PM la copió al expediente sin modificarla. En las nueve filas pasan `jwt_app_id`, `slug_equals_name`, `installation_belongs_to_app`, `installation_not_suspended`, `installation_token_issued` y `token_revoked`: **las nueve Apps autentican**, y todas son de `autoaiorg`, con instalación `selected`.
 
 | App | uid | Repos accesibles | Resultado | Motivo del FAIL |
 |---|---|---|---|---|
