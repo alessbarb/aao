@@ -212,7 +212,8 @@ def verify_heartbeat(event: Any, public_key: str, key_id: str, now: datetime,
 def signed_heartbeat(sequence: int, issued_at: str, private_key: str, *, key_id: str,
                      expires_at: str, ledger_path: Path,
                      state_path: Path, integrator_key_id: str,
-                     trusted_keys: dict[str, Any] | None = None) -> dict[str, Any]:
+                     trusted_keys: dict[str, Any] | None = None,
+                     heartbeat_path: Path | None = None) -> dict[str, Any]:
     """Sign supervisor state; when given custody inputs, refresh the durable registry."""
     if ledger_path is None:
         raise ValueError("supervisor requires a ledger path")
@@ -266,6 +267,20 @@ def signed_heartbeat(sequence: int, issued_at: str, private_key: str, *, key_id:
     state = {**prior, "sequence": max(sequence, int(prior.get("sequence", 0))),
              "ledger_head": head, "pending_markers": markers}
     _write_state(state_path, state, private_key)
+    if heartbeat_path is not None:
+        # Publication happens under the same lock as the state, and never moves backwards (F4-03, A).
+        if heartbeat_path.exists():
+            try:
+                published = int(json.loads(heartbeat_path.read_text()).get("sequence", 0))
+            except (OSError, ValueError, TypeError):
+                published = 0
+            if published >= signed["sequence"]:
+                fcntl.flock(lock, fcntl.LOCK_UN)
+                lock.close()
+                raise ValueError("a heartbeat with an equal or newer sequence is already published")
+        temporary = heartbeat_path.with_name(heartbeat_path.name + ".tmp")
+        temporary.write_text(json.dumps(signed), encoding="utf-8")
+        os.replace(temporary, heartbeat_path)
     fcntl.flock(lock, fcntl.LOCK_UN)
     lock.close()
     return signed
@@ -282,18 +297,26 @@ def handle_veto_report(conn: socket.socket, *, auditor_uid: int, state_path: Pat
         conn.sendall(json.dumps(payload).encode() + b"\n")
         return payload
 
+    conn.settimeout(5)
     _pid, uid, _gid = struct.unpack("3i", conn.getsockopt(socket.SOL_SOCKET, socket.SO_PEERCRED,
                                                            struct.calcsize("3i")))
     if uid != auditor_uid:
         return reply({"ok": False, "error": "peer is not the auditor uid"})
     data = b""
-    while not data.endswith(b"\n") and len(data) < 4096:
-        chunk = conn.recv(4096)
-        if not chunk:
-            break
-        data += chunk
+    try:
+        while not data.endswith(b"\n"):
+            chunk = conn.recv(4096 - len(data))
+            if not chunk:
+                break
+            data += chunk
+            if len(data) >= 4096:
+                return reply({"ok": False, "error": "veto report too large"})
+    except OSError as error:
+        return reply({"ok": False, "error": f"veto report not received: {error}"})
     try:
         report = json.loads(data)
+        if not isinstance(report, dict) or set(report) != {"candidate_sha", "marker_digest"}:
+            raise ValueError("unexpected fields")
         candidate, digest = report["candidate_sha"], report["marker_digest"]
         if (not isinstance(candidate, str) or not re.fullmatch(r"[0-9a-f]{40}", candidate) or
                 not isinstance(digest, str) or not re.fullmatch(r"[0-9a-f]{64}", digest)):
@@ -316,12 +339,10 @@ def handle_veto_report(conn: socket.socket, *, auditor_uid: int, state_path: Pat
         event = signed_heartbeat(sequence, now.isoformat(), private_key, key_id=key_id,
                                  expires_at=(now + timedelta(seconds=validity_seconds)).isoformat(),
                                  ledger_path=ledger_path, state_path=state_path,
-                                 integrator_key_id=integrator_key_id, trusted_keys=trusted_keys)
+                                 integrator_key_id=integrator_key_id, trusted_keys=trusted_keys,
+                                 heartbeat_path=heartbeat_path)
         if digest not in event["pending_markers"].get(candidate, []):
             raise ValueError("heartbeat does not include the reported marker")
-        temporary = heartbeat_path.with_name(heartbeat_path.name + ".tmp")
-        temporary.write_text(json.dumps(event), encoding="utf-8")
-        os.replace(temporary, heartbeat_path)
     except (OSError, ValueError, KeyError, subprocess.SubprocessError) as error:
         return reply({"ok": False, "error": f"supervisor could not record the veto: {error}"})
     return reply({"ok": True, "heartbeat_sequence": event["sequence"]})
@@ -335,6 +356,9 @@ def serve_veto_intake(socket_path: Path, **handler_args: Any) -> None:  # pragma
     os.chmod(socket_path, 0o660)
     server.listen(16)
     while True:
-        conn, _ = server.accept()
-        with conn:
-            handle_veto_report(conn, **handler_args)
+        try:
+            conn, _ = server.accept()
+            with conn:
+                handle_veto_report(conn, **handler_args)
+        except OSError:
+            continue

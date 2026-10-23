@@ -261,6 +261,16 @@ socket (`supervisor_intake_socket` in the trust anchor). The supervisor then:
 4. acknowledges only after all of the above.
 
 Without an acknowledgement the run fails, and the marker stays and blocks.
+
+**Two points about the acknowledgement:**
+
+- **Not trusted on its own.** After an `ok`, the auditor reads the published
+  heartbeat, verifies it with the anchored supervisor key and requires it to
+  list the marker. A spoofed socket cannot forge that.
+- **Publication is serialized with the state.** The supervisor publishes every
+  heartbeat (intake or periodic) under the same lock as its state, and never
+  publishes a sequence lower than or equal to the one already published. A
+  periodic heartbeat computed before the intake can therefore not overwrite it.
 Deleting the marker file afterwards, from any process, is detected by the gate
 and the integrator, because the digest already sits in the supervisor's signed
 heartbeat. The supervisor receives the digest from the vetoing process itself,

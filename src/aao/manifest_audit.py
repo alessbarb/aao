@@ -154,6 +154,20 @@ def _report_veto_to_supervisor(anchor: dict[str, Any], candidate_sha: str, diges
         raise AuditError(f"supervisor did not acknowledge the veto (marker kept, run aborted): {error}") from error
     if reply.get("ok") is not True:
         raise AuditError(f"supervisor refused the veto report (marker kept, run aborted): {reply.get('error')}")
+    # The acknowledgement itself is unauthenticated; the proof is the supervisor-signed heartbeat that must
+    # now list this marker (a spoofed socket cannot produce it without the supervisor key).
+    from aao.supervisor import verify_heartbeat
+
+    try:
+        with tempfile.TemporaryDirectory(prefix="aao-supervisor-key-") as temporary:
+            public = Path(temporary) / "supervisor.pub"
+            public.write_text(anchor["supervisor_public_key"], encoding="ascii")
+            heartbeat = verify_heartbeat(json.loads(Path(anchor["supervisor_heartbeat_path"]).read_bytes()),
+                                         str(public), anchor["supervisor_key_id"], datetime.now(UTC))
+    except (OSError, ValueError) as error:
+        raise AuditError(f"supervisor acknowledgement not backed by a signed heartbeat: {error}") from error
+    if digest not in heartbeat["pending_markers"].get(candidate_sha, []):
+        raise AuditError("supervisor acknowledgement not backed by a signed heartbeat listing the marker")
 
 
 def _supervisor_custody(anchor: dict[str, Any], candidate_sha: str, rows: list[dict[str, Any]],

@@ -205,13 +205,15 @@ def _supervisor_heartbeat(state, supervisor_key, heartbeat_path, auditor_public)
         ledger.touch(mode=0o600)
     auditor_pub = state / "auditor-for-supervisor.pub"
     auditor_pub.write_text(auditor_public, encoding="ascii")
-    _HEARTBEAT_SEQUENCE[0] += 1
+    import time
+
+    sequence = time.time_ns() // 1000   # monotonic across helper and intake publications
     now = datetime.now(UTC)
-    event = signed_heartbeat(_HEARTBEAT_SEQUENCE[0], now.isoformat(), str(supervisor_key), key_id="supervisor",
+    event = signed_heartbeat(sequence, now.isoformat(), str(supervisor_key), key_id="supervisor",
                              expires_at=(now + timedelta(minutes=10)).isoformat(), ledger_path=ledger,
                              state_path=state / "supervisor-state.json", integrator_key_id="integrator",
-                             trusted_keys={"aao-auditor": {"public_key": str(auditor_pub), "can_resolve_pending": True}})
-    heartbeat_path.write_text(json.dumps(event), encoding="utf-8")
+                             trusted_keys={"aao-auditor": {"public_key": str(auditor_pub), "can_resolve_pending": True}},
+                             heartbeat_path=heartbeat_path)
     return event
 
 
@@ -686,3 +688,68 @@ def test_supervisor_intake_rejects_a_peer_that_is_not_the_auditor_uid(env, reque
     env["configure"](supervisor_intake_socket=other)
     with pytest.raises(AuditError, match="peer is not the auditor uid"):
         audit(env, path, run="veto", key_path=_rogue_key(env), veto_reason="unsafe")
+
+
+
+def test_periodic_heartbeat_computed_before_the_intake_cannot_overwrite_it(env):
+    # F4-03 r1 A (Codex): publication is serialized with the state and never moves backwards.
+    from datetime import UTC, datetime, timedelta
+
+    from aao.supervisor import signed_heartbeat
+
+    path, _ = manifest(env)
+    audit(env, path)
+    audit(env, path, run="veto", key_path=_rogue_key(env), veto_reason="unsafe")
+    published = json.loads(env["heartbeat_path"].read_text())
+    candidate = next(iter(published["pending_markers"]))
+    now = datetime.now(UTC)
+    auditor_pub = env["state"] / "auditor-for-supervisor.pub"
+    with pytest.raises(ValueError, match="equal or newer sequence is already published"):
+        signed_heartbeat(1, now.isoformat(), str(env["state"] / "supervisor.pem"), key_id="supervisor",
+                         expires_at=(now + timedelta(minutes=10)).isoformat(),
+                         ledger_path=env["state"] / "ledger.jsonl", state_path=env["state"] / "supervisor-state.json",
+                         integrator_key_id="integrator",
+                         trusted_keys={"aao-auditor": {"public_key": str(auditor_pub), "can_resolve_pending": True}},
+                         heartbeat_path=env["heartbeat_path"])
+    assert json.loads(env["heartbeat_path"].read_text())["pending_markers"][candidate]  # the veto is still there
+
+
+def test_spoofed_intake_acknowledgement_without_a_signed_heartbeat_is_rejected(env, request):
+    import socket as socket_module
+    import threading
+
+    path, _ = manifest(env)
+    fake = os.path.join(tempfile.mkdtemp(prefix="aaok", dir="/tmp"), "s")
+    server = socket_module.socket(socket_module.AF_UNIX, socket_module.SOCK_STREAM)
+    server.bind(fake)
+    server.listen(1)
+
+    def lie():
+        conn, _ = server.accept()
+        with conn:
+            conn.recv(4096)
+            conn.sendall(b'{"ok": true, "heartbeat_sequence": 99}\n')
+
+    threading.Thread(target=lie, daemon=True).start()
+    request.addfinalizer(server.close)
+    env["configure"](supervisor_intake_socket=fake)
+    with pytest.raises(AuditError, match="not backed by a signed heartbeat"):
+        audit(env, path, run="veto", key_path=_rogue_key(env), veto_reason="unsafe")
+
+
+def test_supervisor_intake_rejects_oversized_or_unexpected_reports(env):
+    import socket as socket_module
+
+    from aao.supervisor import handle_veto_report
+
+    for payload in (b'{"candidate_sha": "' + b"a" * 5000 + b'"}\n',
+                    b'{"candidate_sha": "' + b"a" * 40 + b'", "marker_digest": "' + b"b" * 64 + b'", "x": 1}\n'):
+        left, right = socket_module.socketpair(socket_module.AF_UNIX, socket_module.SOCK_STREAM)
+        with left, right:
+            left.sendall(payload)
+            left.shutdown(socket_module.SHUT_WR)
+            reply = handle_veto_report(right, auditor_uid=UID, state_path=env["state"] / "supervisor-state.json",
+                                       private_key=str(env["state"] / "supervisor.pem"), key_id="supervisor",
+                                       ledger_path=env["state"] / "ledger.jsonl", trusted_keys={"x": "y"},
+                                       integrator_key_id="integrator", heartbeat_path=env["heartbeat_path"])
+        assert reply["ok"] is False
