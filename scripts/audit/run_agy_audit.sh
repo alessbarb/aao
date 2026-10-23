@@ -7,7 +7,7 @@
 set -euo pipefail
 PROMPT=/opt/aao-audit/r1-chain.md
 AGY=/usr/local/bin/agy   # root-owned copy; never a binary another account can write
-PROMPT_SHA256=81c7bca96a8dd16fbb08e23cd130d6de7b64eaba3912ac5a27f22e39f66ec156   # reviewed docs/audit-prompts/r1-chain.md
+PROMPT_SHA256=3ddba5375577292dc75bb0ce04634c7d63f03d20cd74bcf1fca1d232f9246ef9   # reviewed docs/audit-prompts/r1-chain.md
 me=$(id -un); [[ $me == aao-auditor-alt ]] || { echo "refusing: must run as aao-auditor-alt, not $me" >&2; exit 1; }
 [[ $# -eq 2 ]] || { echo "usage: $0 <base_sha> <head_sha>" >&2; exit 2; }
 base=$1 head=$2
