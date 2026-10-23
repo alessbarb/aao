@@ -2,5 +2,6 @@
 Description=AAO trust-root host verification (read-only)
 
 [Service]
+# Writes /var/lib/aao-trust-verify/status.json; the integrator refuses to promote without a PASS < 26 h old.
 Type=oneshot
-ExecStart=/usr/bin/python3 -I /srv/aao/frozen/aao-supervisor/tree/scripts/verify_trust_root_host.py --expected-revision-file /etc/aao-audit/expected-revision
+ExecStart=/usr/bin/python3 -I /srv/aao/frozen/aao-supervisor/tree/scripts/verify_trust_root_host.py --expected-revision-file /etc/aao-audit/expected-revision --status-file /var/lib/aao-trust-verify/status.json

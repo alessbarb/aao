@@ -77,11 +77,14 @@ El registro nace con todos los RA en **PENDING**, así que el integrador falla c
 
 ```bash
 sudo systemctl daemon-reload
-sudo systemctl enable --now aao-supervisor-intake.service aao-supervisor-heartbeat.timer aao-trust-root-verify.timer
-# The R1 loop. With RA PENDING in the registry it is fail-closed: it audits and stages, but never promotes.
-sudo systemctl enable --now aao-auditor-dispatch.path aao-auditor-dispatch.timer aao-integrator-tick.timer
+sudo systemctl enable --now aao-supervisor-intake.service aao-supervisor-heartbeat.timer
+# 1) Verify FIRST. The status file is what the integrator requires (PASS less than 26 h old).
 sudo /usr/bin/python3 -I /srv/aao/frozen/aao-supervisor/tree/scripts/verify_trust_root_host.py --expected-revision "$REV" \
-  | tee ~/aao-trust-root-verify-$(date +%Y%m%dT%H%M%S).log
+  --status-file /var/lib/aao-trust-verify/status.json | tee ~/aao-trust-root-verify-$(date +%Y%m%dT%H%M%S).log
+# 2) Only with RESULT: PASS: daily re-verification and the R1 loop. With RA PENDING in the registry it audits
+#    and stages but never promotes; without a fresh verifier PASS it never promotes either.
+sudo systemctl enable --now aao-trust-root-verify.timer
+sudo systemctl enable --now aao-auditor-dispatch.path aao-auditor-dispatch.timer aao-integrator-tick.timer
 ```
 
 Hace falta `RESULT: PASS`. Pega el log completo en el issue del arranque.

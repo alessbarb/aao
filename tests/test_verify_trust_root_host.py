@@ -145,3 +145,18 @@ def test_admin_identities_beyond_e5_groups_are_flagged(tmp_path):
 def test_verifier_anchor_fields_match_the_auditor():
     from aao.manifest_audit import _ANCHOR_FIELDS
     assert verifier.ANCHOR_FIELDS == _ANCHOR_FIELDS
+
+
+def test_status_file_reflects_results_atomically(tmp_path, monkeypatch):
+    import json
+    import stat
+    status = tmp_path / "verify" / "status.json"
+    monkeypatch.setattr(verifier, "results", [(True, "E1 x", ""), (False, "S3 y", "detail")])
+    verifier.write_status(status, "a" * 40, "b" * 64)
+    data = json.loads(status.read_text())
+    assert data["result"] == "FAIL" and data["failed"] == ["S3 y"] and data["expected_revision"] == "a" * 40
+    assert stat.S_IMODE(status.stat().st_mode) == 0o644
+    monkeypatch.setattr(verifier, "results", [(True, "E1 x", "")])
+    verifier.write_status(status, "a" * 40, "b" * 64)
+    assert json.loads(status.read_text())["result"] == "PASS"
+    assert [p.name for p in status.parent.iterdir()] == ["status.json"]
