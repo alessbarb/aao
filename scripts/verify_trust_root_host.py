@@ -8,6 +8,12 @@ It changes nothing. Exit 0 only if every check passes. Paste the full output in 
      cannot be entered another way, and nobody but root (or the auditor itself, for its own git tree)
      can write the code it executes.
   2. Custody of the supervisor intake socket and its parent directory, the heartbeat, and the anchor.
+
+Scope of a PASS: it attests the host configuration at the time of the run. Every way of starting a
+process as the auditor that this checks (sudo policy, cron, polkit, systemd units, group membership,
+login shell) can only be changed by root, i.e. by the trust root itself (P5 (a)); so the property holds
+until root changes it. aao-trust-root-verify.timer re-runs this daily and on boot, and any FAIL must be
+treated as the trust root being withdrawn (the integrator stays fail-closed without a fresh PASS).
 """
 from __future__ import annotations
 
@@ -37,6 +43,12 @@ AUDITOR_ROOT = Path("/srv/aao/frozen/aao-auditor")
 AUDITOR_CGROUP = re.compile(r"^0::/system\.slice/(system-aao\\x2dauditor\.slice/)?aao-auditor(@[^/]+|-dispatch)\.service$")
 INTAKE_CGROUP = re.compile(r"^0::/system\.slice/aao-supervisor-intake\.service$")
 TOOLS = ("git", "bwrap", "openssl", "timeout", "prlimit")
+# Root-equivalent principals are the trust root itself (P5 (a)), not a threat to exclusivity. Any other
+# account that can become root or the auditor is a FAIL.
+CEO_USER = os.environ.get("AAO_CEO_USER", "alessbarb")
+ROOT_EQUIVALENT_GROUPS = ("sudo", "admin", "wheel", "docker", "lxd", "libvirt", "disk")
+UNITS = {"aao-auditor@probe.service": "aao-auditor@.service",
+         "aao-supervisor-intake.service": "aao-supervisor-intake.service"}
 results: list[tuple[bool, str, str]] = []
 
 
@@ -53,6 +65,13 @@ def gid(name: str) -> int:
     return grp.getgrnam(name).gr_gid
 
 
+def _group(name: str):
+    try:
+        return grp.getgrnam(name)
+    except KeyError:
+        return None
+
+
 def ancestors_safe(path: Path, writers: set[int]) -> str:
     """'' if no ancestor of path is a symlink or writable by a uid outside `writers` (root always allowed)."""
     for parent in Path(os.path.abspath(path)).parents:
@@ -65,8 +84,15 @@ def ancestors_safe(path: Path, writers: set[int]) -> str:
     return ""
 
 
+def root_only(path: Path) -> bool:
+    """path (already resolved) and every ancestor are root-owned and not group/other writable."""
+    info = os.lstat(path)
+    return info.st_uid == 0 and not info.st_mode & 0o022 and not ancestors_safe(path, set())
+
+
 def tree_writers(root: Path, owners: set[int]) -> list[str]:
-    """Entries under root (inclusive) owned outside `owners`, or group/other writable, or symlinks leaving root."""
+    """Entries under root (inclusive) owned outside `owners`, or group/other writable. A symlink must resolve
+    inside root, or to a root-only file outside it (e.g. the venv's /usr/bin/python3.12)."""
     bad = []
     for directory, dirs, files in os.walk(root, followlinks=False):
         for name in [".", *dirs, *files]:
@@ -74,7 +100,7 @@ def tree_writers(root: Path, owners: set[int]) -> list[str]:
             info = os.lstat(path)
             if stat.S_ISLNK(info.st_mode):
                 target = Path(os.path.realpath(path))
-                if not (target.is_relative_to(root) or target.is_relative_to("/usr")):
+                if not target.exists() or not (target.is_relative_to(root) or root_only(target)):
                     bad.append(f"{path} -> {target}")
                 continue
             if info.st_uid not in owners or info.st_mode & 0o022:
@@ -99,20 +125,72 @@ def processes() -> list[tuple[int, set[int], str]]:
     return found
 
 
-def sudoers_grants(target: str) -> list[str]:
-    """Rules (outside root/%sudo/%admin) whose Runas list could reach `target`."""
-    files = [Path("/etc/sudoers"), *sorted(Path("/etc/sudoers.d").glob("*"))]
+def runas_users(sudo_list_output: str) -> set[str]:
+    """Run-as users from `sudo -l -U <user>` output (sudo resolves aliases and #include/@includedir itself)."""
+    users: set[str] = set()
+    for match in re.finditer(r"^\s*\(([^)]*)\)", sudo_list_output, re.MULTILINE):
+        users.update(item.strip() for item in match.group(1).split(":", 1)[0].split(","))
+    return users
+
+
+def sudo_grants(target: str) -> list[str]:
+    """Accounts other than root and the CEO whose effective sudo policy can run commands as `target` or ALL."""
     bad = []
-    for path in files:
-        for line in path.read_text(errors="replace").splitlines():
-            line = line.split("#", 1)[0].strip()
-            match = re.match(r"^(\S+)\s+\S+\s*=\s*\(([^)]*)\)", line)
-            if not match or match.group(1) in ("root", "%sudo", "%admin"):
-                continue
-            runas = match.group(2).split(":", 1)[0]
-            if any(item.strip() in ("ALL", target) for item in runas.split(",")):
-                bad.append(f"{path}: {line}")
+    for account in pwd.getpwall():
+        if account.pw_uid == 0 or account.pw_name == CEO_USER:
+            continue
+        result = subprocess.run(["sudo", "-n", "-l", "-U", account.pw_name], check=False, capture_output=True,
+                                text=True, env={"PATH": "/usr/bin:/bin", "LANG": "C"})
+        if result.returncode not in (0, 1):
+            bad.append(f"{account.pw_name}: cannot evaluate sudo policy ({result.stderr.strip()[:80]})")
+            continue
+        reach = runas_users(result.stdout) & {"ALL", target, f"#{uid(target)}"}
+        if reach:
+            bad.append(f"{account.pw_name}: runas {sorted(reach)}")
     return bad
+
+
+def cron_entries(target: str) -> list[str]:
+    """User spools owned by target plus system crontabs whose user field is target."""
+    found = [str(p) for d in ("/var/spool/cron/crontabs", "/var/spool/cron/atjobs") if Path(d).is_dir()
+             for p in Path(d).iterdir() if p.lstat().st_uid == uid(target)]
+    for path in [Path("/etc/crontab"), *sorted(Path("/etc/cron.d").glob("*"))]:
+        if not path.is_file():
+            continue
+        for line in path.read_text(errors="replace").splitlines():
+            fields = line.split("#", 1)[0].split()
+            user = fields[1] if fields and fields[0].startswith("@") and len(fields) > 1 else (
+                fields[5] if len(fields) > 5 else "")
+            if user == target:
+                found.append(f"{path}: {line.strip()}")
+    return found
+
+
+def polkit_grants(target: str) -> list[str]:
+    """Local polkit rules mentioning the target or systemd unit management (systemd-run --uid, transient units)."""
+    found = []
+    for directory in ("/etc/polkit-1/rules.d", "/etc/polkit-1/localauthority"):
+        for path in sorted(Path(directory).rglob("*")) if Path(directory).is_dir() else []:
+            if path.is_file() and re.search(rf"{re.escape(target)}|org\.freedesktop\.systemd1|org\.freedesktop\.machine1",
+                                            path.read_text(errors="replace")):
+                found.append(str(path))
+    return found
+
+
+def unit_is_expected(unit: str, expected: Path) -> str:
+    """'' if systemd loads `unit` from exactly one root-only fragment equal to the reviewed file, no drop-ins."""
+    shown = subprocess.run(["systemctl", "show", "-p", "FragmentPath", "-p", "DropInPaths", "--", unit],
+                           check=False, capture_output=True, text=True).stdout
+    props = dict(line.split("=", 1) for line in shown.splitlines() if "=" in line)
+    fragment = props.get("FragmentPath", "")
+    if not fragment or props.get("DropInPaths", ""):
+        return f"fragment={fragment!r} dropins={props.get('DropInPaths', '')!r}"
+    path = Path(fragment)
+    if path.is_symlink() or not root_only(path):
+        return f"{fragment} is a symlink or not root-only"
+    if path.read_bytes() != expected.read_bytes():
+        return f"{fragment} differs from reviewed {expected}"
+    return ""
 
 
 def exclusivity(expected_revision: str) -> None:
@@ -126,18 +204,25 @@ def exclusivity(expected_revision: str) -> None:
         shadow = repr(error)
     check(shadow[:1] in ("!", "*"), "E2 auditor password is locked", shadow[:1] if shadow[:1] not in "!*" else "")
     check(not Path(f"/var/lib/systemd/linger/{AUDITOR}").exists(), "E3 no systemd user linger for auditor")
-    spool = [str(p) for d in ("/var/spool/cron/crontabs", "/var/spool/cron/atjobs") if Path(d).is_dir()
-             for p in Path(d).iterdir() if p.lstat().st_uid == account.pw_uid]
-    check(not spool, "E4 no cron/at jobs owned by auditor", ", ".join(spool))
-    check(not Path(account.pw_dir, ".ssh", "authorized_keys").exists(), "E5 no SSH authorized_keys for auditor")
-    grants = sudoers_grants(AUDITOR)
-    check(not grants, "E6 no sudoers rule can run as auditor (besides root/%sudo/%admin)", "; ".join(grants))
+    cron = cron_entries(AUDITOR)
+    check(not cron, "E4 no cron/at job runs as auditor (user spools, /etc/crontab, /etc/cron.d)", "; ".join(cron))
+    # SSH: sshd always executes the account shell (also for ForceCommand), so E1 already denies it.
+    groups = [g for g in map(_group, ROOT_EQUIVALENT_GROUPS) if g]
+    root_eq = sorted(({m for g in groups for m in g.gr_mem} |
+                      {a.pw_name for a in pwd.getpwall() if any(a.pw_gid == g.gr_gid for g in groups)}) - {CEO_USER})
+    check(not root_eq, "E5 no account besides the CEO is in a root-equivalent group", ", ".join(root_eq))
+    grants = sudo_grants(AUDITOR)
+    check(not grants, "E6 effective sudo policy (sudo -l -U, aliases/includes resolved): only root/CEO can "
+          "run as auditor", "; ".join(grants))
+    polkit = polkit_grants(AUDITOR)
+    check(not polkit, "E6b no local polkit rule grants unit management or mentions the auditor", "; ".join(polkit))
     strays = [f"pid {pid} {cg}" for pid, uids, cg in processes()
               if account.pw_uid in uids and not AUDITOR_CGROUP.match(cg)]
     check(not strays, "E7 every auditor-uid process is inside an aao-auditor unit", "; ".join(strays[:5]))
-    unit = Path("/etc/systemd/system/aao-auditor@.service")
-    check(unit.is_file() and unit.stat().st_uid == 0 and not unit.stat().st_mode & 0o022 and
-          not ancestors_safe(unit, set()), "E8 auditor unit is root-owned and protected")
+    for unit, reviewed in UNITS.items():
+        problem = unit_is_expected(unit, AUDITOR_ROOT / "tree" / "deploy" / "systemd" / reviewed)
+        check(not problem, f"E8 {unit}: single root-only fragment identical to the reviewed file, no drop-ins",
+              problem)
     # Write closure of the auditor's code.
     tree, venv = AUDITOR_ROOT / "tree", AUDITOR_ROOT / "venv"
     problem = ancestors_safe(AUDITOR_ROOT, {uid(TRUST)})
@@ -227,12 +312,19 @@ def anchor(expected_revision: str) -> None:
 
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
-    parser.add_argument("--expected-revision", required=True, help="trust-root candidate SHA (40 hex)")
+    source = parser.add_mutually_exclusive_group(required=True)
+    source.add_argument("--expected-revision", help="trust-root candidate SHA (40 hex)")
+    source.add_argument("--expected-revision-file", type=Path, help="root-owned file holding that SHA")
     parser.add_argument("--smoke", action="store_true", help="non-root smoke run; unreadable checks FAIL")
     args = parser.parse_args()
     if os.geteuid() != 0 and not args.smoke:
         print("run as root (it only reads): sudo /usr/bin/python3 -I " + sys.argv[0], file=sys.stderr)
         return 2
+    if args.expected_revision_file:
+        if not root_only(args.expected_revision_file):
+            print("expected-revision file must be root-only", file=sys.stderr)
+            return 2
+        args.expected_revision = args.expected_revision_file.read_text().strip()
     if not re.fullmatch(r"[0-9a-f]{40}", args.expected_revision):
         print("--expected-revision must be a full SHA", file=sys.stderr)
         return 2
