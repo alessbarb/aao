@@ -29,17 +29,10 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
+from aao.git_paths import _GIT_ENV, changed_paths, path_matches_prefix
 from aao.pr_conformity import GateResult, _canonical, _sha, evaluate, fetch_github_pr_checks
 
 POLICY_VERSION = "GOV-REV-001/v1.1"
-_GIT_ENV = {
-    "PATH": "/usr/bin:/bin",
-    "HOME": "/nonexistent",
-    "GIT_CONFIG_NOSYSTEM": "1",
-    "GIT_CONFIG_GLOBAL": "/dev/null",
-    "GIT_TERMINAL_PROMPT": "0",
-    "LANG": "C.UTF-8",
-}
 _OUTPUT_LIMIT = 12_000
 _SANDBOX_SYSTEM_PATHS = ("/usr", "/bin", "/lib", "/lib64", "/etc")
 _LIMITATIONS = (
@@ -125,12 +118,15 @@ def adversarial_findings(clone: Path, base_sha: str, candidate_sha: str, policy:
     """Rules live in the auditor's code and trusted policy, never in the candidate."""
     findings: list[dict[str, str]] = []
     protected = tuple(policy["protected_paths"])
-    for line in _git(clone, "diff", "--no-renames", "--name-status", base_sha, candidate_sha).splitlines():
-        status, path = line.split("\t", 1)
-        if path.startswith(protected):
+    for path in changed_paths(clone, base_sha, candidate_sha):
+        if any(path_matches_prefix(path, prefix) for prefix in protected):
             findings.append({"id": f"protected-path:{path}", "path": path,
                              "detail": "change to audit, governance or CI control requires disposition by separate authority"})
-        if status == "D" and path.startswith("tests/"):
+    deleted = subprocess.run(["git", "-C", str(clone), "diff", "-z", "--name-only", "--diff-filter=D", "--no-renames",
+                              base_sha, candidate_sha], check=True, capture_output=True).stdout.split(b"\0")
+    for raw_path in deleted:
+        path = os.fsdecode(raw_path) if raw_path else ""
+        if path.startswith("tests/"):
             findings.append({"id": f"deleted-test:{path}", "path": path, "detail": "test file deleted"})
     asserts: dict[str, list[int]] = {}
     current, line_number = "", 0
