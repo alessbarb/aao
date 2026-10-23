@@ -19,6 +19,7 @@ API_VERSION = "2022-11-28"
 ROLE_NAMES = {
     "aao-integrator", "aao-auditor", "aao-auditor-alt", "aao-supervisor",
     "aao-notifier", "aao-pm", "aao-impl-codex", "aao-impl-claude", "aao-impl-ag",
+    "aao-probe-noworkflows",
 }
 
 

@@ -291,6 +291,25 @@ def test_push_classifier_requires_server_reason_and_unchanged_state():
                                            "response": "remote: protected branch hook declined"}, False)
 
 
+@pytest.mark.parametrize(("stderr", "expected"), [
+    (" ! [rejected]        HEAD -> main (non-fast-forward)\nerror: failed to push some refs", False),
+    (" ! [rejected]        main -> main (stale info)\nerror: failed to push some refs", False),
+    (" ! [remote rejected] HEAD -> main (protected branch hook declined)\nerror: failed to push some refs", True),
+    ("remote: error: GH013: repository rule violations found for refs/heads/main.\n! [remote rejected] HEAD -> main (push declined)", True),
+])
+def test_git_push_classifies_real_client_and_server_transcripts(monkeypatch, stderr, expected):
+    monkeypatch.setattr(trial.subprocess, "run", lambda *_args, **_kwargs: type("Result", (), {"returncode": 1, "stderr": stderr.encode()})())
+    result = trial._git_push(type("Client", (), {"_installation_token": "unique-test-token"})(), "org/trial", "HEAD:refs/heads/main")
+    assert result["server_rejected"] is expected
+
+
+def test_a10_auditor_permissions_pass_on_fork_installation():
+    permissions = trial.FORK_PERMISSIONS["aao-auditor"]
+    client = DummyClient([(200, {"permissions": permissions})])
+    status, _, _ = trial.run_test("A-10", "org", "trial", "aao-auditor", client)
+    assert status == "PASS"
+
+
 def test_git_push_discards_trace_settings_and_redacts_stderr(monkeypatch):
     monkeypatch.setenv("GIT_TRACE_CURL", "/tmp/curl-trace.log")
     monkeypatch.setenv("GIT_TRACE_REDACT", "0")

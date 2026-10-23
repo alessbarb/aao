@@ -28,14 +28,22 @@ NOT_RUN = {
 
 EXPECTED_PERMISSIONS = {
     "aao-integrator": {"contents": "write", "pull_requests": "write", "checks": "read", "statuses": "read", "workflows": "write", "metadata": "read"},
-    "aao-auditor": {"contents": "read", "pull_requests": "read", "checks": "write", "metadata": "read"},
-    "aao-auditor-alt": {"contents": "read", "pull_requests": "read", "checks": "write", "metadata": "read"},
+    "aao-auditor": {"contents": "read", "pull_requests": "read", "checks": "write", "statuses": "write", "metadata": "read"},
+    "aao-auditor-alt": {"contents": "read", "pull_requests": "read", "checks": "write", "statuses": "write", "metadata": "read"},
     "aao-supervisor": {"contents": "read", "pull_requests": "read", "checks": "read", "actions": "read", "metadata": "read"},
     "aao-notifier": {"issues": "write", "metadata": "read"},
     "aao-pm": {"issues": "write", "pull_requests": "write", "contents": "read", "metadata": "read"},
     "aao-impl-codex": {"contents": "write", "pull_requests": "write", "workflows": "write", "metadata": "read"},
     "aao-impl-claude": {"contents": "write", "pull_requests": "write", "workflows": "write", "metadata": "read"},
     "aao-impl-ag": {"contents": "write", "pull_requests": "write", "workflows": "write", "metadata": "read"},
+    "aao-probe-noworkflows": {"contents": "write", "metadata": "read"},
+}
+FORK_PERMISSIONS = {
+    "aao-auditor": {"contents": "read", "metadata": "read"},
+    "aao-auditor-alt": {"contents": "read", "metadata": "read"},
+    "aao-impl-codex": {"contents": "write", "workflows": "write", "metadata": "read"},
+    "aao-impl-claude": {"contents": "write", "workflows": "write", "metadata": "read"},
+    "aao-impl-ag": {"contents": "write", "workflows": "write", "metadata": "read"},
 }
 CANONICAL_REPO = "alessbarb/aao"
 CHECK_WAIT_SECONDS = 300
@@ -86,7 +94,7 @@ def _api(client: GitHubAppClient, method: str, path: str, body: dict | None = No
     return {"method": method, "path": path, "body": body, "status": response.status, "response": _redact(response.body)}
 
 
-def _git_push(client: GitHubAppClient, repo: str, refspec: str, *, force_with_lease: str | None = None, force: bool = False) -> dict:
+def _git_push(client: GitHubAppClient, repo: str, refspec: str, *, force_with_lease: str | None = None, force: bool = False, no_verify: bool = False) -> dict:
     """Use HTTPS auth only in process environment; never put token in URL or output."""
     token = client._installation_token
     if not token:
@@ -108,6 +116,8 @@ def _git_push(client: GitHubAppClient, repo: str, refspec: str, *, force_with_le
         args.append(f"--force-with-lease=refs/heads/main:{force_with_lease}")
     elif force:
         args.append("--force")
+    if no_verify:
+        args.append("--no-verify")
     args.extend([remote, refspec])
     try:
         result = subprocess.run(args, env=env, stdin=subprocess.DEVNULL, capture_output=True, timeout=90, check=False)
@@ -116,7 +126,9 @@ def _git_push(client: GitHubAppClient, repo: str, refspec: str, *, force_with_le
     stderr = result.stderr.decode("utf-8", errors="replace")[:4000]
     stderr = re.sub(r"(Authorization:\s*(?:Basic|Bearer)\s+)\S+", r"\1[REDACTED]", stderr, flags=re.IGNORECASE)
     stderr = stderr.replace(token, "[REDACTED]")
-    server_rejected = bool(re.search(r"remote:.*(?:protected branch|permission to .* denied|not permitted|GH\d+:)|\[rejected\].*(?:stale info|protected branch|permission|non-fast-forward)", stderr, re.IGNORECASE))
+    # Client-side [rejected] (non-fast-forward/stale info) is never evidence
+    # that GitHub's receive-pack/ruleset rejected an update.
+    server_rejected = bool(re.search(r"(?:^|\n)[^\n]*\[remote rejected\].*(?:\(|:)|(?:^|\n)remote:.*(?:protected branch|permission to .* denied|not permitted|GH\d+:|workflow|non-fast-forward|ruleset)", stderr, re.IGNORECASE))
     return {"method": "git push", "remote": remote, "refspec": refspec,
             "exit_code": result.returncode, "status": 0 if result.returncode == 0 else 1,
             "server_rejected": server_rejected, "response": stderr}
@@ -272,10 +284,14 @@ def run_test(test_id: str, owner: str, repo: str, role: str, client: GitHubAppCl
         "A-04": {"aao-integrator"}, "A-05": {"aao-integrator"}, "A-09": {"aao-notifier"},
         "P3-02": implementers, "P3-03": {"aao-integrator"}, "P3-05": {"aao-integrator"},
         "P3-06": {"aao-integrator"}, "P3-12": {"aao-integrator"},
+        "P3-01": {"aao-integrator", "ceo"}, "P3-07": {"aao-impl-codex", "aao-impl-claude", "aao-impl-ag"},
+        "P3-09": {"ceo"},
+        "A-14": {"aao-probe-noworkflows"},
     }
     if test_id in required_roles and role not in required_roles[test_id]:
         names = ", ".join(sorted(required_roles[test_id]))
-        return "NOT RUN", f"This test must run with role: {names}.", evidence
+        role_hint = "an implementer App" if test_id == "A-14" else f"role: {names}"
+        return "NOT RUN", f"This test must run with {role_hint}.", evidence
     if test_id in NOT_RUN:
         return "NOT RUN", NOT_RUN[test_id], evidence
     if test_id == "A-01":
@@ -334,14 +350,11 @@ def run_test(test_id: str, owner: str, repo: str, role: str, client: GitHubAppCl
         evidence.append(item)
         actual = item["response"].get("permissions", {}) if isinstance(item["response"], dict) else {}
         expected = EXPECTED_PERMISSIONS[role]
-        is_canonical = f"{owner}/{repo}".lower() == CANONICAL_REPO
-        if role.startswith("aao-impl-") and is_canonical:
-            expected = {"pull_requests": "write", "contents": "read", "metadata": "read"}
-        elif not is_canonical:
-            if role in ("aao-auditor", "aao-auditor-alt"):
-                expected = {"contents": "read", "metadata": "read"}
-            elif not role.startswith("aao-impl-"):
-                return "NOT RUN", "this App role is specified only for the canonical repository", evidence
+        is_trial_fork = f"{owner}/{repo}".lower() != CANONICAL_REPO
+        if is_trial_fork and role in FORK_PERMISSIONS:
+            expected = FORK_PERMISSIONS[role]
+        elif is_trial_fork:
+            return "NOT RUN", "this App is specified only for the canonical repository", evidence
         clean = {k: v for k, v in actual.items() if v not in (None, "none")}
         return ("PASS", "installation permissions match role manifest", evidence) if clean == expected else ("FAIL", f"installation permissions differ from expected table: expected {expected}, got {clean}", evidence)
     if test_id == "A-12":
@@ -352,8 +365,8 @@ def run_test(test_id: str, owner: str, repo: str, role: str, client: GitHubAppCl
     if test_id == "A-13":
         return "NOT RUN", "Manual expiry step: use an installation token after its expires_at time (or revoke it), then verify GitHub returns HTTP 401; harness cannot wait an hour within one-test invocation.", evidence
     if test_id == "A-14":
-        if not role.startswith("aao-impl-") or f"{owner}/{repo}".lower() == CANONICAL_REPO:
-            return "NOT RUN", "A-14 must run with an implementer App installed on its disposable fork; no canonical-repository App is valid.", evidence
+        if role != "aao-probe-noworkflows" or f"{owner}/{repo}".lower() == CANONICAL_REPO:
+            return "NOT RUN", "A-14 requires the dedicated aao-probe-noworkflows App on its disposable fork.", evidence
         fork_parent = os.environ.get("AAO_GITHUB_TRIAL_FORK_PARENT", "").lower()
         if not fork_parent or fork_parent == CANONICAL_REPO:
             return "NOT RUN", "Set AAO_GITHUB_TRIAL_FORK_PARENT to the explicit disposable trial parent repository.", evidence
@@ -392,9 +405,10 @@ def run_test(test_id: str, owner: str, repo: str, role: str, client: GitHubAppCl
         evidence.append(item)
         after = _api(client, "GET", f"{base}/pulls/{number}")
         evidence.append(after)
-        expected = item["status"] == 403 and isinstance(item["response"], dict) and "resource not accessible" in item["response"].get("message", "").lower()
+        message = item.get("response", {}).get("message", "").lower() if isinstance(item.get("response"), dict) else ""
+        expected = item["status"] == 403 and any(term in message for term in ("ruleset", "protected branch", "rule violations", "required pull request"))
         unchanged = after["status"] == 200 and after["response"].get("merged") is False and after["response"].get("state") == "open"
-        return ("PASS", "CEO merge denied with HTTP 403 permission reason; PR remains open", evidence) if expected and unchanged else ("FAIL", "CEO merge attempt was not denied for the expected permission or PR state changed", evidence)
+        return ("PASS", "CEO merge denied by ruleset with HTTP 403; PR remains open", evidence) if expected and unchanged else ("FAIL", "CEO merge attempt was not denied by ruleset or PR state changed", evidence)
     if test_id == "A-02":
         pulls = _api(client, "GET", f"{base}/pulls?state=open&per_page=1")
         evidence.append(pulls)
@@ -440,9 +454,13 @@ def run_test(test_id: str, owner: str, repo: str, role: str, client: GitHubAppCl
         if test_id == "P3-01":
             if role != "ceo":
                 return "NOT RUN", "Run explicitly with --role ceo to test the CEO identity.", evidence
+            before = _main_sha(client, base, evidence)
+            if not before:
+                return "FAIL", "could not read main before CEO push", evidence
             item = _git_push(client, f"{owner}/{repo}", "HEAD:refs/heads/main")
             evidence.append(item)
-            return ("PASS", "CEO push to protected main was rejected", evidence) if item["status"] == 1 else ("FAIL", "CEO push to protected main was accepted", evidence)
+            unchanged = _verify_unchanged(client, base, before, evidence)
+            return ("PASS", "CEO push rejected by ruleset; main unchanged", evidence) if _push_rejection_pass(item, unchanged) else ("FAIL", "CEO push was accepted or rejection was not attributable to ruleset", evidence)
         if test_id == "P3-02" and role not in ("aao-impl-codex", "aao-impl-claude", "aao-impl-ag"):
             return "NOT RUN", "Run with one of the implementer App roles to test its denial on canonical main.", evidence
         if test_id == "P3-12" and role != "aao-integrator":
@@ -450,7 +468,18 @@ def run_test(test_id: str, owner: str, repo: str, role: str, client: GitHubAppCl
         before = _main_sha(client, base, evidence)
         if not before:
             return "FAIL", "could not read main before protected push attempt", evidence
-        item = _git_push(client, f"{owner}/{repo}", "HEAD:refs/heads/main", force=test_id == "P3-07")
+        if test_id == "P3-07":
+            # Force-update an actually divergent candidate; bypass local hooks so
+            # the ruleset, not the client, must decide non_fast_forward.
+            try:
+                parent = subprocess.run(["git", "rev-parse", "HEAD^"], check=True, capture_output=True, text=True, timeout=10).stdout.strip()
+            except (OSError, subprocess.SubprocessError):
+                return "NOT RUN", "P3-07 requires a local commit with a parent for a real non-fast-forward attempt", evidence
+            if parent == before:
+                return "NOT RUN", "P3-07 candidate is fast-forward; prepare a divergent candidate commit", evidence
+            item = _git_push(client, f"{owner}/{repo}", "+HEAD:refs/heads/main", force=True, no_verify=True)
+        else:
+            item = _git_push(client, f"{owner}/{repo}", "HEAD:refs/heads/main")
         evidence.append(item)
         unchanged = _verify_unchanged(client, base, before, evidence)
         expected = "non-fast-forward" if test_id == "P3-12" else "protected branch"
@@ -585,7 +614,7 @@ def main(argv: list[str] | None = None) -> int:
         print(f"{status}: {reason}\nEvidence: {output}")
         return 0 if status == "PASS" else (1 if status == "FAIL" else 2)
     except (GitHubAuthError, OSError, ValueError, subprocess.SubprocessError,
-            KeyError, TypeError, IndexError, StopIteration) as exc:
+            KeyError, TypeError, AttributeError, IndexError, StopIteration) as exc:
         message = str(exc) if isinstance(exc, GitHubAuthError) else type(exc).__name__
         try:
             output = write_evidence(args.test_id, "NOT RUN", message, args.repo, args.role,
