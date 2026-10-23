@@ -223,19 +223,24 @@ def polkit_grants(target: str) -> list[str]:
     return found
 
 
+_STRICT_ADMIN_RULE = re.compile(
+    r"polkit\.addAdminRule\(\s*function\s*\([^)]*\)\s*\{\s*return\s*\[\s*"
+    r"((?:\"unix-(?:user|group):[\w.-]+\"\s*,?\s*)*)\]\s*;?\s*\}\s*\)")
+
+
 def admin_identities(paths: list[Path]) -> tuple[set[str], list[str]]:
-    """Identities that can satisfy auth_admin: AdminIdentities= in local-authority .conf files and every
-    unix-user/unix-group literal in addAdminRule files. A file that defines admins without parseable
-    literals (computed identities) is returned as a problem: it cannot be evaluated."""
+    """Identities that can satisfy auth_admin: AdminIdentities= in local-authority .conf files, and the
+    returned list of every addAdminRule. Fail closed: an addAdminRule whose whole body is not exactly
+    `return ["unix-user:x", "unix-group:y", ...];` (only string literals) cannot be evaluated and is a problem."""
     identities: set[str] = set()
     problems = []
     for path in paths:
-        text = path.read_text(errors="replace")
-        if "addAdminRule" in text:
-            found = re.findall(r"unix-(?:user|group|netgroup):[\w.$-]+", text)
-            if not found:
-                problems.append(f"{path}: addAdminRule without literal identities")
-            identities.update(found)
+        text = re.sub(r"/\*.*?\*/|//[^\n]*", "", path.read_text(errors="replace"), flags=re.DOTALL)
+        strict = _STRICT_ADMIN_RULE.findall(text)
+        if text.count("addAdminRule") != len(strict):
+            problems.append(f"{path}: addAdminRule is not a plain list of literal identities")
+        for body in strict:
+            identities.update(re.findall(r"unix-(?:user|group):[\w.-]+", body))
         for line in text.splitlines():
             if line.strip().startswith("AdminIdentities"):
                 identities.update(i.strip() for i in line.split("=", 1)[1].split(";") if i.strip())
