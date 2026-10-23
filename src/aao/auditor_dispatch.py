@@ -1,22 +1,69 @@
 """Untrusted-inbox dispatcher for the isolated aao-auditor identity."""
 from __future__ import annotations
 
+import argparse
 import json
 import os
 import re
 import stat
 import subprocess
+import sys
 import tempfile
 from collections.abc import Callable
 from pathlib import Path
 from typing import Any
 
 from aao.authorization_issuer import issue_authorization
+from aao.github_app_auth import GitHubAppClient
 from aao.manifest_audit import ANCHOR_PATH, audit_manifest, verify_promotion
 
 _ID = re.compile(r"^[0-9a-f]{64}$")
 _MANIFEST_KEYS = {"schema", "repository", "target_ref", "target_sha", "candidate_sha",
                   "candidate_tree", "result_tree", "producer"}
+CONFIG_PATH = Path("/etc/aao-audit/dispatch.json")
+CONFIG_SCHEMA = "aao.audit-dispatch-config.v1"
+_CONFIG_FIELDS = {"schema", "inbox", "reports", "key", "repository_root", "repo"}
+
+
+def _read_owned(path: Path, owners: tuple[int, ...]) -> bytes:
+    descriptor = os.open(path, os.O_RDONLY | os.O_NOFOLLOW)
+    with os.fdopen(descriptor, "rb") as handle:
+        info = os.fstat(handle.fileno())
+        if not stat.S_ISREG(info.st_mode) or info.st_mode & 0o022 or info.st_uid not in owners:
+            raise ValueError(f"{path} is not a protected regular file owned by {owners}")
+        return handle.read()
+
+
+def load_config(path: Path | None = None, owners: tuple[int, ...] = (0,)) -> dict[str, Any]:
+    path = CONFIG_PATH if path is None else Path(path)
+    config = json.loads(_read_owned(path, owners))
+    if not isinstance(config, dict) or set(config) != _CONFIG_FIELDS or config.get("schema") != CONFIG_SCHEMA:
+        raise ValueError("auditor dispatch config fields are not the expected set")
+    for field in _CONFIG_FIELDS - {"schema"}:
+        if not isinstance(config[field], str) or not config[field]:
+            raise ValueError(f"auditor dispatch config {field} must be a non-empty string")
+    if config["repo"].count("/") != 1 or any(not part for part in config["repo"].split("/")):
+        raise ValueError("auditor dispatch repo must be owner/name")
+    return config
+
+
+def main() -> int:
+    parser = argparse.ArgumentParser(description="AAO auditor dispatcher (fixed config path)")
+    parser.add_argument("command", choices=("once",))
+    parser.parse_args()
+    try:
+        config = load_config(CONFIG_PATH)
+        client = GitHubAppClient("aao-auditor")
+        client.installation_token(*config["repo"].split("/", 1))
+        results = dispatch_once(config["inbox"], config["reports"], config["key"], client,
+                                anchor_path=ANCHOR_PATH,
+                                repository_root=Path(config["repository_root"]),
+                                expected_repo=config["repo"])
+    except (OSError, ValueError, TypeError, KeyError, RuntimeError, json.JSONDecodeError) as error:
+        print(json.dumps({"status": "failed", "reason": f"{type(error).__name__}: {error}"}), file=sys.stderr)
+        return 1
+    print(json.dumps(results, sort_keys=True))
+    return 0
 
 
 def _read_request(path: Path) -> bytes:
@@ -59,6 +106,7 @@ def dispatch_once(inbox: str | Path, reports: str | Path, key: str | Path,
                   github_auditor_client: Any, *, anchor_path: Path = ANCHOR_PATH,
                   anchor_owner_uids: tuple[int, ...] = (0,),
                   repository_root: Path | None = None,
+                  expected_repo: str | None = None,
                   runner: Callable[[Path, list[str]], tuple[int, str, str]] | None = None) -> list[dict[str, str]]:
     """Process each valid request once. The inbox is data only; no command is run from it."""
     inbox, reports, key = Path(inbox), Path(reports), Path(key)
@@ -99,6 +147,8 @@ def dispatch_once(inbox: str | Path, reports: str | Path, key: str | Path,
                 if (not isinstance(request["repo"], str) or request["repo"].count("/") != 1
                         or not isinstance(request["pr_number"], int) or request["pr_number"] <= 0):
                     raise ValueError("invalid repository or PR")
+                if expected_repo is not None and request["repo"] != expected_repo:
+                    raise ValueError("request repository does not match configured repository")
                 manifest_path = reports / request_id / "manifest.json"
                 manifest_path.parent.mkdir(mode=0o700, parents=True, exist_ok=True)
                 manifest_path.write_text(json.dumps(manifest, sort_keys=True, separators=(",", ":")))
@@ -130,6 +180,8 @@ def dispatch_once(inbox: str | Path, reports: str | Path, key: str | Path,
                     raise ValueError("invalid promoted SHA")
                 if not isinstance(repo, str) or repo.count("/") != 1:
                     raise ValueError("invalid repository")
+                if expected_repo is not None and repo != expected_repo:
+                    raise ValueError("request repository does not match configured repository")
                 root = reports / audit_id
                 conformant, reasons = verify_promotion(root / "manifest.json", root / "audit/report.json",
                     root / "audit/report.sig", sha, anchor_path=anchor_path,

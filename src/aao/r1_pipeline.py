@@ -6,16 +6,102 @@ are content-addressed and replaced atomically; they never carry credentials.
 """
 from __future__ import annotations
 
+import argparse
+import base64
 import hashlib
 import json
 import os
+import pwd
+import stat
 import subprocess
+import sys
 import tempfile
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 from urllib.parse import quote
 
+from aao.github_app_auth import GitHubAppClient
+from aao.identity_attribution import GitHubIdentityProvider
 from aao.integrator import TrustSources, promote
+
+CONFIG_PATH = Path("/etc/aao-integrator/config.json")
+CONFIG_SCHEMA = "aao.integrator-config.v1"
+_CONFIG_FIELDS = {"schema", "repo", "git_remote", "mirror", "inbox", "reports", "state_dir",
+                  "trust_registry", "ledger", "ledger_anchor", "heartbeat", "freeze",
+                  "integrator_private_key"}
+
+
+def _read_config_file(path: Path, owners: tuple[int, ...]) -> bytes:
+    descriptor = os.open(path, os.O_RDONLY | os.O_NOFOLLOW)
+    with os.fdopen(descriptor, "rb") as handle:
+        info = os.fstat(handle.fileno())
+        if not stat.S_ISREG(info.st_mode) or info.st_mode & 0o022 or info.st_uid not in owners:
+            raise ValueError(f"{path} is not a protected regular file owned by {owners}")
+        return handle.read()
+
+
+def load_config(path: Path | None = None, owners: tuple[int, ...] = (0,),
+                registry_owners: tuple[int, ...] | None = None) -> dict[str, Any]:
+    """Load fixed-schema root custody configuration and protected trust registry."""
+    if registry_owners is None:
+        registry_owners = (0, pwd.getpwnam("aao-trust").pw_uid)
+    path = CONFIG_PATH if path is None else Path(path)
+    config = json.loads(_read_config_file(Path(path), owners))
+    if not isinstance(config, dict) or set(config) != _CONFIG_FIELDS or config.get("schema") != CONFIG_SCHEMA:
+        raise ValueError("integrator config fields are not the expected set")
+    for field in _CONFIG_FIELDS - {"schema"}:
+        if not isinstance(config[field], str) or not config[field]:
+            raise ValueError(f"integrator config {field} must be a non-empty string")
+    if config["repo"].count("/") != 1 or any(not part for part in config["repo"].split("/")):
+        raise ValueError("integrator repo must be owner/name")
+    remote = config["git_remote"]
+    if not ("://" in remote or remote.startswith("git@")):
+        raise ValueError("integrator git_remote must be a URL")
+    registry = json.loads(_read_config_file(Path(config["trust_registry"]), registry_owners))
+    if not isinstance(registry, dict):
+        raise TypeError("integrator trust registry must be an object")
+    identity = registry.get("integrator_identity")
+    if not isinstance(identity, str) or not identity:
+        raise ValueError("integrator trust registry lacks integrator_identity")
+    return {**config, "integrator_identity": identity}
+
+
+def run_configured_tick(config: dict[str, Any], *, github_client: Any | None = None) -> list[dict[str, Any]]:
+    """Run one configured production tick; github_client is injectable for offline tests."""
+    github = github_client if github_client is not None else GitHubAppClient("aao-integrator")
+    github.repository = config["repo"]
+    git_token = None
+    git_token_provider = None
+    if hasattr(github, "installation_token"):
+        git_token = github.installation_token(*config["repo"].split("/", 1))
+        git_token_provider = lambda: github.installation_token(*config["repo"].split("/", 1))
+    sources = TrustSources(Path(config["trust_registry"]), Path(config["ledger"]),
+                           Path(config["ledger_anchor"]), Path(config["heartbeat"]),
+                           Path(config["freeze"]), Path(config["integrator_private_key"]))
+    identity_name = config["integrator_identity"]
+    if not isinstance(identity_name, str) or not identity_name:
+        raise ValueError("integrator config lacks integrator_identity")
+    identity = GitHubIdentityProvider(identity_name, github, config["repo"])
+    return integrator_tick(github, config["git_remote"], config["mirror"], config["inbox"],
+                           config["reports"], config["state_dir"], sources, identity,
+                           lambda: datetime.now(UTC),
+                           git_token=git_token_provider or git_token)
+
+
+def main(*, owners: tuple[int, ...] = (0,),
+         registry_owners: tuple[int, ...] | None = None) -> int:
+    parser = argparse.ArgumentParser(description="AAO R1 integrator service (fixed config path)")
+    parser.add_argument("command", choices=("tick",))
+    parser.parse_args()
+    try:
+        config = load_config(CONFIG_PATH, owners=owners, registry_owners=registry_owners)
+        results = run_configured_tick(config)
+    except (OSError, ValueError, TypeError, KeyError, RuntimeError, json.JSONDecodeError) as error:
+        print(json.dumps({"status": "failed", "reason": f"{type(error).__name__}: {error}"}), file=sys.stderr)
+        return 1
+    print(json.dumps(results, sort_keys=True))
+    return 0
 
 
 def _canonical(value: Any) -> bytes:
@@ -33,9 +119,22 @@ def _atomic_json(path: Path, value: dict[str, Any]) -> None:
         Path(name).unlink(missing_ok=True)
 
 
-def _git(repo: Path, *args: str) -> str:
+def _git(repo: Path, *args: str, token: str | Any | None = None) -> str:
+    if callable(token):
+        token = token()
+    env = os.environ.copy()
+    env.update({"GIT_TERMINAL_PROMPT": "0", "GIT_CONFIG_NOSYSTEM": "1",
+                "GIT_CONFIG_GLOBAL": "/dev/null", "GIT_CONFIG_COUNT": "2",
+                "GIT_CONFIG_KEY_0": "credential.helper", "GIT_CONFIG_VALUE_0": "",
+                "GIT_CONFIG_KEY_1": "http.https://github.com/.extraheader",
+                "GIT_CONFIG_VALUE_1": ""})
+    if token:
+        basic = base64.b64encode(f"x-access-token:{token}".encode()).decode("ascii")
+        env["GIT_CONFIG_VALUE_1"] = f"AUTHORIZATION: basic {basic}"
+    elif any("github.com" in arg.lower() for arg in args):
+        raise RuntimeError("GitHub installation token is unavailable")
     return subprocess.run(["git", "-C", str(repo), *args], check=True,
-                          capture_output=True, text=True).stdout.strip()
+                          capture_output=True, text=True, env=env).stdout.strip()
 
 
 def _body(response: Any) -> Any:
@@ -81,7 +180,7 @@ def _sha(value: Any) -> bool:
 
 def integrator_tick(github: Any, git_remote: str, mirror: str | Path, inbox: str | Path,
                     reports: str | Path, state_dir: str | Path, trust_sources: TrustSources,
-                    identity_provider: Any, now: Any) -> list[dict[str, Any]]:
+                    identity_provider: Any, now: Any, *, git_token: Any = None) -> list[dict[str, Any]]:
     """Advance each open main-targeting PR at most one safely evidenced step."""
     mirror, inbox, reports, state_dir = map(Path, (mirror, inbox, reports, state_dir))
     for path in (inbox, reports, state_dir):
@@ -91,7 +190,7 @@ def integrator_tick(github: Any, git_remote: str, mirror: str | Path, inbox: str
         if not isinstance(owner_repo, str) or owner_repo.count("/") != 1:
             raise ValueError("GitHub client must identify repository as owner/name")
         pulls = _pulls(github, owner_repo)
-        _git(mirror, "fetch", "--prune", git_remote, "+refs/heads/main:refs/remotes/aao/main")
+        _git(mirror, "fetch", "--prune", git_remote, "+refs/heads/main:refs/remotes/aao/main", token=git_token)
         base = _git(mirror, "rev-parse", "refs/remotes/aao/main")
         # Auditors verify the manifest target_ref inside this mirror. Keep that
         # local branch aligned with the fetched remote tip before creating manifests.
@@ -119,7 +218,7 @@ def integrator_tick(github: Any, git_remote: str, mirror: str | Path, inbox: str
             if state["status"] in ("promoted", "failed"):
                 results.append(state); continue
             pr_ref = f"refs/pull/{number}/head"
-            _git(mirror, "fetch", git_remote, f"+{pr_ref}:refs/remotes/aao/pr/{number}")
+            _git(mirror, "fetch", git_remote, f"+{pr_ref}:refs/remotes/aao/pr/{number}", token=git_token)
             candidate = _git(mirror, "rev-parse", f"refs/remotes/aao/pr/{number}")
             if candidate != head:
                 raise ValueError("fetched pull request head differs from observed API head")
@@ -155,7 +254,7 @@ def integrator_tick(github: Any, git_remote: str, mirror: str | Path, inbox: str
                                          "-p", base, "-p", candidate], input="R1 staged merge\n",
                                         check=True, capture_output=True, text=True).stdout.strip()
                 staged_ref = f"refs/heads/aao-staging/{number}-{staged}"
-                _git(mirror, "push", git_remote, f"{staged}:{staged_ref}")
+                _git(mirror, "push", git_remote, f"{staged}:{staged_ref}", token=git_token)
                 state.update(status="staged", staged_commit=staged, staged_ref=staged_ref)
             gate_id = hashlib.sha256(_canonical([key, "gate", staged])).hexdigest()
             gate_path = reports / gate_id / "gate.json"

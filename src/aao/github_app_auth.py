@@ -106,6 +106,11 @@ class GitHubAppClient:
         self.timeout = timeout
         self._key_path = key_path
         self._installation_token: str | None = None
+        self._installation_id: int | None = None
+
+    def app_request(self, method: str, path: str, *, body: dict | None = None) -> APIResponse:
+        """Make a request authenticated as the App itself, using a short-lived JWT."""
+        return self._request(method, path, token=create_jwt(self.app_id, self._key_path), body=body)
 
     def _request(self, method: str, path: str, *, token: str, body: dict | None = None) -> APIResponse:
         data = json.dumps(body).encode() if body is not None else None
@@ -143,6 +148,7 @@ class GitHubAppClient:
         if response.status != 201 or not isinstance(response.body, dict) or not response.body.get("token"):
             raise GitHubAuthError(f"installation token request failed with HTTP {response.status}")
         self._installation_token = str(response.body["token"])
+        self._installation_id = installation_id
         return self._installation_token
 
     def request(self, method: str, path: str, *, body: dict | None = None) -> APIResponse:
@@ -155,6 +161,7 @@ class GitHubAppClient:
             return None
         response = self._request("DELETE", "/installation/token", token=self._installation_token)
         self._installation_token = None
+        self._installation_id = None
         return response
 
     def close(self) -> None:
