@@ -93,6 +93,9 @@ def integrator_tick(github: Any, git_remote: str, mirror: str | Path, inbox: str
         pulls = _pulls(github, owner_repo)
         _git(mirror, "fetch", "--prune", git_remote, "+refs/heads/main:refs/remotes/aao/main")
         base = _git(mirror, "rev-parse", "refs/remotes/aao/main")
+        # Auditors verify the manifest target_ref inside this mirror. Keep that
+        # local branch aligned with the fetched remote tip before creating manifests.
+        _git(mirror, "update-ref", "refs/heads/main", base)
     except (OSError, ValueError, TypeError, RuntimeError, KeyError, subprocess.SubprocessError) as error:
         return [{"status": "failed", "reason": str(error)}]
 
@@ -173,6 +176,7 @@ def integrator_tick(github: Any, git_remote: str, mirror: str | Path, inbox: str
             promoted = promote(mirror, git_remote, auth, signature, trust_sources,
                                identity_provider=identity_provider, observed_repo=owner_repo,
                                observed_pr_number=number, staged_commit=staged,
+                               ci_verified_sha=staged,
                                candidate_ref=f"refs/pull/{number}/head", now=clock)
             state.update(status="promoted", promoted_sha=promoted)
         except (OSError, ValueError, TypeError, RuntimeError, KeyError, subprocess.SubprocessError) as error:

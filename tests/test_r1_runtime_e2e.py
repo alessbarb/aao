@@ -1,4 +1,5 @@
 """Offline R1 orchestration tests with a fake GitHub client and local bare remotes."""
+import hashlib
 import json
 import subprocess
 from datetime import UTC, datetime
@@ -117,6 +118,7 @@ def test_stage2_and4_alternating_ticks_promote_the_exact_staged_commit(tmp_path,
 
     def fake_promote(repo, git_remote, auth, signature, sources, **kwargs):
         assert kwargs["staged_commit"] == staged
+        assert kwargs["ci_verified_sha"] == staged
         _run("git", "--git-dir", str(remote), "update-ref", "refs/heads/main", staged, base)
         return staged
 
@@ -223,10 +225,11 @@ def test_real_r1_authorizes_and_promotes_over_alternating_ticks(tmp_path, audit_
         def __init__(self):
             self.checks = {}
             self.published = []
+            self.pull_requests = [{"number": 17, "state": "open", "base": {"ref": "main"},
+                                   "head": {"sha": data["candidate_sha"]}}]
 
         def list_open_pull_requests(self, repository, *, base):
-            return [{"number": 17, "state": "open", "base": {"ref": "main"},
-                     "head": {"sha": data["candidate_sha"]}}]
+            return self.pull_requests
 
         def check_conclusion(self, repository, sha, name):
             return self.checks.get((sha, name))
@@ -265,6 +268,8 @@ def test_real_r1_authorizes_and_promotes_over_alternating_ticks(tmp_path, audit_
     (output / "authorization.sig").write_bytes((reports / audit_file.stem / "authorization.sig").read_bytes())
     # Rebuild the trusted integrator inputs from the actual signed document and fixture's pinned anchor.
     _bare, trust, _doc, _sig = _bare_chain(env, data, output, tmp_path)
+    registry_path = trust.trust_registry
+    registry_digest_before = hashlib.sha256(registry_path.read_bytes()).hexdigest()
 
     staged_result = tick()
     assert staged_result[0]["status"] == "staged"
@@ -281,6 +286,94 @@ def test_real_r1_authorizes_and_promotes_over_alternating_ticks(tmp_path, audit_
     promoted = tick()
     assert promoted[0]["status"] == "promoted"
     assert _run("git", "--git-dir", str(bare), "rev-parse", "refs/heads/main") == staged
+    registry_digest_between = hashlib.sha256(registry_path.read_bytes()).hexdigest()
+    assert registry_digest_between == registry_digest_before
+
+    # Prepare a second, consecutive R1 candidate whose base is PR 17's promoted merge.
+    _git(env["repo"], "fetch", "origin", "refs/heads/main")
+    _git(env["repo"], "checkout", "-B", "main", "FETCH_HEAD")
+    _git(env["repo"], "checkout", "-B", "candidate2")
+    (env["repo"] / "second-r1.txt").write_text("second R1 change\n")
+    _git(env["repo"], "add", "second-r1.txt")
+    _git(env["repo"], "commit", "-m", "second R1 candidate")
+    second_head = _git(env["repo"], "rev-parse", "HEAD")
+    env["attribute"](second_head)
+    _git(env["repo"], "push", "origin", f"{second_head}:refs/pull/18/head")
+    github.pull_requests = [{"number": 18, "state": "open", "base": {"ref": "main"},
+                             "head": {"sha": second_head}}]
+    assert tick()[0]["status"] == "queued"
+    second_audit_request = next(path for path in inbox.glob("*.json")
+                                if json.loads(path.read_text()).get("type") == "audit"
+                                and json.loads(path.read_text()).get("pr_number") == 18)
+    second_audit_key = second_audit_request.stem
+    second_audit_result = auditor_dispatch.dispatch_once(
+        inbox, reports, env["key"], github,
+        anchor_path=env["anchor"], anchor_owner_uids=(env["anchor"].stat().st_uid,),
+        repository_root=mirror, runner=ok_runner,
+    )
+    assert any(item.get("id") == second_audit_key and item["status"] == "approve"
+               for item in second_audit_result)
+    # The same static trust registry is reused; only signed per-PR authorization changes.
+    second_staged_result = tick()
+    assert second_staged_result[0]["status"] == "staged"
+    second_staged = second_staged_result[0]["staged_commit"]
+    github.checks[(second_staged, "test")] = "success"
+    second_gate_request = next(path for path in inbox.glob("*.json")
+                               if json.loads(path.read_text()).get("type") == "gate"
+                               and json.loads(path.read_text()).get("pr_number") == 18)
+    # Gate dispatch keys its result by the inbox filename, not the report id in the request.
+    second_gate_id = second_gate_request.stem
+    second_gate_result = auditor_dispatch.dispatch_once(
+        inbox, reports, env["key"], github,
+        anchor_path=env["anchor"], anchor_owner_uids=(env["anchor"].stat().st_uid,),
+        repository_root=mirror,
+    )
+    assert any(item.get("id") == second_gate_id and item["status"] == "success"
+               for item in second_gate_result)
+    assert github.checks[(second_staged, "aao-audit")] == "success"
+    second_promoted = tick()
+    assert second_promoted[0]["status"] == "promoted"
+    assert _run("git", "--git-dir", str(bare), "rev-parse", "refs/heads/main") == second_staged
+    published_before_repeat = list(github.published)
+    repeated_gate_result = auditor_dispatch.dispatch_once(
+        inbox, reports, env["key"], github,
+        anchor_path=env["anchor"], anchor_owner_uids=(env["anchor"].stat().st_uid,),
+        repository_root=mirror,
+    )
+    assert any(item.get("id") == second_gate_id and item["status"] == "ignored"
+               and item.get("reason") == "gate already published for promoted SHA"
+               for item in repeated_gate_result)
+    assert github.published == published_before_repeat
+
+    second_gate_request_data = json.loads(second_gate_request.read_text())
+    unauthorized_sha = staged
+    second_gate_request_data["promoted_sha"] = unauthorized_sha
+    second_gate_request.write_text(json.dumps(second_gate_request_data))
+    new_sha_gate_result = auditor_dispatch.dispatch_once(
+        inbox, reports, env["key"], github,
+        anchor_path=env["anchor"], anchor_owner_uids=(env["anchor"].stat().st_uid,),
+        repository_root=mirror,
+    )
+    assert any(item.get("id") == second_gate_id and item["status"] == "failure"
+               for item in new_sha_gate_result)
+    assert len(github.published) == len(published_before_repeat) + 1
+    assert github.published[-1] == ("aao-audit", unauthorized_sha, "failure")
+    assert json.loads((reports / second_gate_id / "gate.json").read_text())["promoted_sha"] == unauthorized_sha
+
+    # A nonexistent commit cannot receive a GitHub check; fail closed without publishing one.
+    second_gate_request_data["promoted_sha"] = "f" * 40
+    second_gate_request.write_text(json.dumps(second_gate_request_data))
+    published_before_missing_sha = list(github.published)
+    missing_sha_result = auditor_dispatch.dispatch_once(
+        inbox, reports, env["key"], github,
+        anchor_path=env["anchor"], anchor_owner_uids=(env["anchor"].stat().st_uid,),
+        repository_root=mirror,
+    )
+    assert any(item.get("id") == second_gate_id and item["status"] == "failed"
+               for item in missing_sha_result)
+    assert github.published == published_before_missing_sha
+    registry_digest_after = hashlib.sha256(registry_path.read_bytes()).hexdigest()
+    assert registry_digest_after == registry_digest_before
 
 
 def test_stage2_main_movement_requeues_against_new_base(tmp_path):

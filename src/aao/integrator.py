@@ -96,6 +96,7 @@ def promote(repo: Path, remote: str, auth: dict[str, Any], signature: str,
             after_recheck=None,
             observed_repo: str | None = None, observed_pr_number: int | None = None,
             staged_commit: str | None = None,
+            ci_verified_sha: str | None = None,
             candidate_ref: str | None = None,
             now: Callable[[], datetime] = lambda: datetime.now(UTC)) -> str:
     if identity_provider is None:
@@ -103,6 +104,9 @@ def promote(repo: Path, remote: str, auth: dict[str, Any], signature: str,
     if trust_sources.freeze.exists() or (repo / ".aao-freeze").exists():
         raise RuntimeError("integrator frozen")
     registry = json.loads(trust_sources.trust_registry.read_text())
+    per_pr_registry_fields = {"ci_candidate_sha", "attribution_resolved", "repo", "pr_number", "pr_head"}
+    if per_pr_registry_fields.intersection(registry):
+        raise ValueError("trust registry contains per-PR fields")
     if not isinstance(observed_repo, str) or not observed_repo or not isinstance(observed_pr_number, int):
         raise ValueError("observed repository and PR number are required")
     ledger_keys = registry["ledger_keys"]
@@ -209,20 +213,11 @@ def promote(repo: Path, remote: str, auth: dict[str, Any], signature: str,
         "heartbeat_valid": heartbeat_ok, "ra03_pass": ra03, "ra09_pass": ra09,
         "ra02_pass": ra02, "ledger": {"veto": bool(active_vetoes(rows, ledger_keys))},
         "git_version": version, "changed_paths": changed}
-    reasons = validate(auth, signature, state)
-    if not all((ra01, ra02, ra03, ra07, ra09)):
-        reasons.append("required RA status pending")
-    if reasons:
-        raise ValueError("authorization rejected: " + "; ".join(reasons))
+    # Verify staged identity before authorization validation so CI for M is only
+    # accepted once M's authorized tree and parent list have been established.
     tree = _git(repo, "merge-tree", "--write-tree", base, head).splitlines()[0]
-    if tree != auth["merge_result_tree_sha"]:
-        raise ValueError("computed merge tree differs from authorization")
     expected_parents = auth["expected_parents"]
-    if staged_commit is None:
-        commit = subprocess.run(["git", "-C", str(repo), "commit-tree", tree,
-            *[arg for parent in expected_parents for arg in ("-p", parent)]],
-            input=message + "\n", check=True, capture_output=True, text=True).stdout.strip()
-    else:
+    if staged_commit is not None:
         try:
             staged_tree = _git(repo, "show", "-s", "--format=%T", staged_commit)
             staged_parents = _git(repo, "show", "-s", "--format=%P", staged_commit).split()
@@ -232,6 +227,22 @@ def promote(repo: Path, remote: str, auth: dict[str, Any], signature: str,
             raise ValueError("staged commit tree differs from authorized merge tree")
         if staged_parents != expected_parents:
             raise ValueError("staged commit parents differ from authorized parents")
+    if ci_verified_sha == auth.get("candidate_sha") or (
+        staged_commit is not None and ci_verified_sha == staged_commit
+    ):
+        state["ci_candidate_sha"] = auth["candidate_sha"]
+    reasons = validate(auth, signature, state)
+    if not all((ra01, ra02, ra03, ra07, ra09)):
+        reasons.append("required RA status pending")
+    if reasons:
+        raise ValueError("authorization rejected: " + "; ".join(reasons))
+    if tree != auth["merge_result_tree_sha"]:
+        raise ValueError("computed merge tree differs from authorization")
+    if staged_commit is None:
+        commit = subprocess.run(["git", "-C", str(repo), "commit-tree", tree,
+            *[arg for parent in expected_parents for arg in ("-p", parent)]],
+            input=message + "\n", check=True, capture_output=True, text=True).stdout.strip()
+    else:
         commit = staged_commit
     if not identity_provider.push_identity(ref, base, commit):
         raise RuntimeError("unattributed push")

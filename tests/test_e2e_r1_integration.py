@@ -14,6 +14,7 @@ from test_manifest_audit import manifest as make_manifest
 from aao.authorization_issuer import issue_authorization
 from aao.independent_audit import AuditError
 from aao.integration_authorization import FIELDS, canonical
+from aao.integration_authorization import sign as sign_authorization
 from aao.integrator import TrustSources, promote
 
 
@@ -83,9 +84,8 @@ def _bare_chain(env, data, output, tmp_path):
         "enabled_risk_classes": enabled,
         "required_checks_by_risk_class": {risk: required for risk in enabled},
         "policy_id": policy.get("policy_id", policy["version"]),
-        "policy_sha256": anchor["policy_sha256"], "attribution_resolved": True,
+        "policy_sha256": anchor["policy_sha256"],
         "trusted_auditor_revisions": policy["trusted_auditor_revisions"],
-        "ci_candidate_sha": data["candidate_sha"],
         "auditor_models": {}, "author_models": {}, "protected_paths": protected,
     }
     registry = env["state"] / "integrator-trust.json"
@@ -136,10 +136,41 @@ def test_r1_signed_audit_issues_exact_authorization(audit_setup, tmp_path):
     assert (output / "authorization.json").is_file()
     assert (output / "authorization.sig").is_file()
     bare, sources, doc, sig = _bare_chain(env, data, output, tmp_path)
+    registry_digest = hashlib.sha256(sources.trust_registry.read_bytes()).hexdigest()
+    registry_data = json.loads(sources.trust_registry.read_text())
+    assert not {"ci_candidate_sha", "attribution_resolved", "repo", "pr_number", "pr_head"}.intersection(registry_data)
+    sources.trust_registry.write_text(json.dumps({**registry_data, "ci_candidate_sha": data["candidate_sha"]}))
+    with pytest.raises(ValueError, match="trust registry contains per-PR fields"):
+        promote(env["repo"], "origin", doc, sig, sources, identity_provider=_identity(),
+                observed_repo=doc["repo"], observed_pr_number=doc["pr_number"],
+                ci_verified_sha=data["candidate_sha"], now=lambda: datetime.now(UTC))
+    sources.trust_registry.write_text(json.dumps(registry_data))
     with pytest.raises(ValueError, match="repository or PR mismatch"):
         promote(env["repo"], "origin", doc, sig, sources, identity_provider=_identity(),
                 observed_repo=doc["repo"], observed_pr_number=doc["pr_number"] + 1,
+                ci_verified_sha=data["candidate_sha"], now=lambda: datetime.now(UTC))
+    env["heartbeat"]()
+    with pytest.raises(ValueError, match="CI evidence is for another candidate"):
+        promote(env["repo"], "origin", doc, sig, sources, identity_provider=_identity(),
+                observed_repo=doc["repo"], observed_pr_number=doc["pr_number"],
+                ci_verified_sha="f" * 40, now=lambda: datetime.now(UTC))
+    staged = subprocess.run(["git", "-C", str(env["repo"]), "commit-tree", data["result_tree"],
+                             "-p", data["target_sha"], "-p", data["candidate_sha"]],
+                            input="staged for negative CI check\n", check=True,
+                            capture_output=True, text=True).stdout.strip()
+    env["heartbeat"]()
+    with pytest.raises(ValueError, match="CI evidence is for another candidate"):
+        promote(env["repo"], "origin", doc, sig, sources, identity_provider=_identity(),
+                observed_repo=doc["repo"], observed_pr_number=doc["pr_number"],
+                staged_commit=staged, ci_verified_sha="f" * 40,
                 now=lambda: datetime.now(UTC))
+    env["heartbeat"]()
+    unattributed = {**doc, "attribution": []}
+    unattributed_sig = sign_authorization(unattributed, str(env["key"]))
+    with pytest.raises(ValueError, match="actor attribution inconclusive"):
+        promote(env["repo"], "origin", unattributed, unattributed_sig, sources, identity_provider=_identity(),
+                observed_repo=doc["repo"], observed_pr_number=doc["pr_number"],
+                ci_verified_sha=data["candidate_sha"], now=lambda: datetime.now(UTC))
     assert subprocess.run(["git", "--git-dir", str(bare), "rev-parse", "refs/heads/main"],
                           check=True, capture_output=True, text=True).stdout.strip() == data["target_sha"]
     env["heartbeat"]()  # integrator consumes heartbeat sequence even on rejected attempts
@@ -149,6 +180,7 @@ def test_r1_signed_audit_issues_exact_authorization(audit_setup, tmp_path):
     with pytest.raises(RuntimeError, match="remote base moved"):
         promote(env["repo"], "origin", doc, sig, sources, identity_provider=_identity(),
                 observed_repo=doc["repo"], observed_pr_number=doc["pr_number"],
+                ci_verified_sha=doc["candidate_sha"],
                 before_push=move_main_after_authorization, now=lambda: datetime.now(UTC))
     assert subprocess.run(["git", "--git-dir", str(bare), "rev-parse", "refs/heads/main"],
                           check=True, capture_output=True, text=True).stdout.strip() == data["candidate_sha"]
@@ -157,7 +189,9 @@ def test_r1_signed_audit_issues_exact_authorization(audit_setup, tmp_path):
     env["heartbeat"]()
     commit = promote(env["repo"], "origin", doc, sig, sources, identity_provider=_identity(),
                      observed_repo=doc["repo"], observed_pr_number=doc["pr_number"],
+                     ci_verified_sha=data["candidate_sha"],
                      now=lambda: datetime.now(UTC))
+    assert hashlib.sha256(sources.trust_registry.read_bytes()).hexdigest() == registry_digest
     _assert_bare(bare, commit, data["target_sha"], data["candidate_sha"], data["result_tree"])
 
 
@@ -185,7 +219,8 @@ def test_integrator_rejects_staged_commit_mismatch(audit_setup, tmp_path, mismat
     with pytest.raises(ValueError, match=f"staged commit {mismatch}"):
         promote(env["repo"], "origin", doc, sig, sources, identity_provider=_identity(),
                 observed_repo=doc["repo"], observed_pr_number=doc["pr_number"],
-                staged_commit=staged, now=lambda: datetime.now(UTC))
+                staged_commit=staged, ci_verified_sha=staged,
+                now=lambda: datetime.now(UTC))
 
 
 def test_issuer_rejects_tampered_report_signature(audit_setup):
@@ -242,6 +277,7 @@ def test_integrator_refuses_signed_supervisor_pending_veto(audit_setup, tmp_path
     with pytest.raises(ValueError, match="candidate has an unresolved pending veto"):
         promote(env["repo"], "origin", doc, sig, sources, identity_provider=_identity(),
                 observed_repo=doc["repo"], observed_pr_number=doc["pr_number"],
+                ci_verified_sha=data["candidate_sha"],
                 now=lambda: datetime.now(UTC))
     assert subprocess.run(["git", "--git-dir", str(bare), "rev-parse", "refs/heads/main"],
                           check=True, capture_output=True, text=True).stdout.strip() == data["target_sha"]

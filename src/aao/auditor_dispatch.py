@@ -76,8 +76,6 @@ def dispatch_once(inbox: str | Path, reports: str | Path, key: str | Path,
             results.append({"id": request_id, "status": "ignored", "reason": "request is not a regular file"}); continue
         audit_dir = reports / request_id / "audit"
         gate_path = reports / request_id / "gate.json"
-        if (audit_dir / "report.json").is_file() or gate_path.is_file():
-            results.append({"id": request_id, "status": "ignored", "reason": "request already has a report"}); continue
         try:
             raw = _read_request(path)
             request = json.loads(raw)
@@ -85,6 +83,9 @@ def dispatch_once(inbox: str | Path, reports: str | Path, key: str | Path,
                 raise ValueError("invalid request schema")
             kind = request.get("type")
             if kind == "audit":
+                if (audit_dir / "report.json").is_file():
+                    results.append({"id": request_id, "status": "ignored",
+                                    "reason": "request already has a report"}); continue
                 if set(request) != {"schema", "type", "repo", "pr_number", "manifest"}:
                     raise ValueError("unexpected audit request fields")
                 manifest = request["manifest"]
@@ -115,6 +116,14 @@ def dispatch_once(inbox: str | Path, reports: str | Path, key: str | Path,
                 if set(request) != {"schema", "type", "id", "promoted_sha", "repo", "pr_number"}:
                     raise ValueError("unexpected gate request fields")
                 audit_id, sha, repo = request["id"], request["promoted_sha"], request["repo"]
+                if gate_path.is_file():
+                    try:
+                        previous_gate = json.loads(gate_path.read_text())
+                    except (OSError, ValueError):
+                        previous_gate = None
+                    if isinstance(previous_gate, dict) and previous_gate.get("promoted_sha") == sha:
+                        results.append({"id": request_id, "status": "ignored",
+                                        "reason": "gate already published for promoted SHA"}); continue
                 if not isinstance(audit_id, str) or not _ID.fullmatch(audit_id):
                     raise ValueError("invalid audit id")
                 if not isinstance(sha, str) or not re.fullmatch(r"[0-9a-f]{40}", sha):

@@ -362,7 +362,7 @@ def _auth_fixture(tmp_path):
     return private, public, doc, state, sign(doc, str(private))
 
 
-@pytest.mark.parametrize("field", ["enabled_risk_classes", "policy_id", "attribution_resolved", "ci_candidate_sha", "protected_paths"])
+@pytest.mark.parametrize("field", ["enabled_risk_classes", "policy_id", "ci_candidate_sha", "protected_paths"])
 def test_authorization_rejects_missing_snapshot_fields(tmp_path, field):
     _, _, d, s, sig = _auth_fixture(tmp_path)
     broken = dict(s)
@@ -443,16 +443,15 @@ def test_authorization_rejects_missing_class_check_registration(tmp_path):
 
 
 @pytest.mark.parametrize(
-    "attribution,author_models,resolved",
-    [([], {"author": "author-model"}, True),
-     ([{"sha": "candidate", "principal": "unregistered", "source": "ledger", "evidence_sha256": "x"}], {}, True),
-     ([{"sha": "candidate", "principal": "author", "source": "ledger", "evidence_sha256": "x"}], {"author": "author-model"}, False)],
+    "attribution,author_models",
+    [([], {"author": "author-model"}),
+     ([{"sha": "candidate", "principal": "unregistered", "source": "ledger", "evidence_sha256": "x"}], {}),
+     ([{"sha": "candidate", "principal": "author", "source": "ledger", "evidence_sha256": "x"}], {})],
 )
-def test_authorization_rejects_empty_or_unresolved_attribution(tmp_path, attribution, author_models, resolved):
+def test_authorization_rejects_empty_or_unresolved_attribution(tmp_path, attribution, author_models):
     _, _, d, s, _ = _auth_fixture(tmp_path)
     d["attribution"] = attribution
     s["author_models"] = author_models
-    s["attribution_resolved"] = resolved
     sig = sign(d, str(tmp_path / "key.pem"))
     assert "actor attribution inconclusive" in validate(d, sig, s)
 
@@ -795,11 +794,11 @@ def _git_fixture(tmp_path):
          "scope":"scope", "known_limitations":[], "residual_risks":[], "permitted_operations":[],
          "prohibited_operations":[], "findings":[], "expediente_sha256":"expediente", "verdict":"APPROVE",
          "issued_at":"2026-01-01T00:00:00+00:00", "expires_at":"2026-01-02T00:00:00+00:00"}
-    state = {"repo":"r", "pr_number":1, "pr_head":head, "target_ref":d["target_ref"], "target_sha":base,
+    state = {"target_ref":d["target_ref"], "target_sha":base,
          "merge_tree_sha":tree, "policy_sha256":"h", "trusted_keys":{"k":str(auditor_public)},
          "trusted_auditors":{"a":["k"]}, "trusted_auditor_revisions":["rev"], "required_checks_by_risk_class":{"R2":["unit"]},
-         "enabled_risk_classes":["R2"], "policy_id":"p", "attribution_resolved":True,
-         "ci_candidate_sha":head, "protected_paths":{}, "changed_paths":[], "git_version":git(r,"--version").removeprefix("git version "), "auditor_models":{"a":"auditor-model"},
+         "enabled_risk_classes":["R2"], "policy_id":"p",
+         "protected_paths":{}, "changed_paths":[], "git_version":git(r,"--version").removeprefix("git version "), "auditor_models":{"a":"auditor-model"},
          "author_models":{"author":"author-model"}, "ra03_pass":True, "ra09_pass":True}
     resolver_dir = tmp_path / "resolver"
     resolver_dir.mkdir()
@@ -810,7 +809,7 @@ def _git_fixture(tmp_path):
     anchor.write_text(verify(ledger, {"ledger":str(ledger_public)})[-1]["hash"] if ledger.exists() and ledger.stat().st_size else "0"*64)
     hb=signed_heartbeat(1,"2026-01-01T00:00:00+00:00",str(supervisor_private),key_id="supervisor",expires_at="2026-01-01T02:00:00+00:00",ledger_path=ledger,trusted_keys={"ledger":{"public_key":str(ledger_public)}}, state_path=tmp_path / "heartbeat-state.json", integrator_key_id="integrator")
     heartbeat.write_text(json.dumps(hb))
-    registry={**state,"repo":"r","pr_number":1,"ledger_keys":{"ledger":{"public_key":str(ledger_public)}, "integrator":{"public_key":str(_integrator_public),"can_record_incidents":True}, "auditor":{"public_key":str(auditor_public),"can_resolve_pending":True}},"supervisor_key_id":"supervisor","supervisor_public_key":str(supervisor_public),"heartbeat_max_age_seconds":3600,
+    registry={**state,"ledger_keys":{"ledger":{"public_key":str(ledger_public)}, "integrator":{"public_key":str(_integrator_public),"can_record_incidents":True}, "auditor":{"public_key":str(auditor_public),"can_resolve_pending":True}},"supervisor_key_id":"supervisor","supervisor_public_key":str(supervisor_public),"heartbeat_max_age_seconds":3600,
               "target_refs":["refs/heads/main"],"integrator_identity":"integrator","protected_paths":{},"ra_status":{"RA-01":"PASS","RA-02":"PASS","RA-03":"PASS","RA-07":"PASS","RA-09":"PASS"}}
     registry["integrator_key_id"] = "integrator"
     # Expose local fixture-only signing paths so negative cases can re-sign the
@@ -828,6 +827,7 @@ def _git_fixture(tmp_path):
     def fixture_promote(*args, **kwargs):
         kwargs.setdefault("observed_repo", d["repo"])
         kwargs.setdefault("observed_pr_number", d["pr_number"])
+        kwargs.setdefault("ci_verified_sha", d["candidate_sha"])
         return promote(*args, **kwargs)
     return fixture_promote, r, bare, base, head, tree, d, sources, sign(d,str(auditor_private))
 
@@ -1509,7 +1509,6 @@ def test_integrator_rejects_rename_of_protected_path(tmp_path):
     auth["protected_paths_sha256"] = hashlib.sha256(canonical([{"path":"docs/CONSTITUTION.md", "minimum_risk_class":"R3"}])).hexdigest()
     registry = json.loads(sources.trust_registry.read_text())
     registry["protected_paths"] = {"docs/CONSTITUTION.md":"R3"}
-    registry["ci_candidate_sha"] = head
     sources.trust_registry.write_text(json.dumps(registry))
     with pytest.raises(ValueError, match="protected path risk class insufficient"):
         promote(repo, "origin", auth, sign(auth, registry["test_auditor_private_key"]), sources,

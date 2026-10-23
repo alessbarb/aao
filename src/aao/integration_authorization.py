@@ -144,8 +144,7 @@ def validate(document: dict[str, Any], signature: str, state: dict[str, Any]) ->
         if isinstance(entry, dict) and isinstance(entry.get("principal"), str) and entry["principal"].strip()
     }
     attribution_resolved = (
-        state.get("attribution_resolved") is True
-        and bool(attribution_entries)
+        bool(attribution_entries)
         and all(
             isinstance(entry, dict)
             and isinstance(entry.get("principal"), str)

@@ -34,6 +34,7 @@
 ## Detalles de implementación (etapa runtime)
 
 - **M es único.** El integrador construye M una sola vez y lo empuja a staging. Los checks corren sobre ese M, y a `main` se promueve el mismo M: `promote` acepta `staged_commit` y verifica `tree(M) == merge_result_tree_sha` y que los padres sean `[base, candidato]`. Si M se recalculara, `commit-tree` daría otro SHA, porque incluye la fecha.
+- **The trust registry is static; no per-PR data is stored in it.** CI evidence is derived from the SHA verified by the pipeline, and attribution is derived from the auditor-signed authorization.
 - **Inbox del auditor.** `/var/lib/aao-audit-inbox/<id>.json`, escrito solo por el integrador (`<id>` = `[0-9a-f]{64}`). Hay dos tipos de petición:
   - `audit`: `{repo, pr_number, manifest}`;
   - `gate`: `{id, promoted_sha}`.
