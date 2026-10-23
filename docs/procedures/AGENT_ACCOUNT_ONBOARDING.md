@@ -49,16 +49,18 @@ done
 Para el paquete de la cadena R1 y la raíz inicial, Antigravity actúa como auditor no recusado bajo el uid **`aao-auditor-alt`**. Nunca bajo `aao-impl-ag`, nunca bajo tu cuenta, y sin copiar `~/.antigravity`, `~/.gemini` ni ninguna sesión.
 
 ```bash
-# 1. Una vez: inicia sesión de agy COMO el auditor alternativo. El navegador o el código de dispositivo
-#    los completas tú; las credenciales quedan solo en el home de ese uid.
-sudo -u aao-auditor-alt -H agy
+# 1. Una vez: inicia sesión de agy COMO el auditor alternativo. `sudo -u ... -H agy` lanza agy directamente,
+#    sin shell de login (la cuenta sigue con nologin). El navegador o el código de dispositivo los completas tú;
+#    las credenciales quedan solo en el home de ese uid (el ejecutor comprueba que no hay nada ajeno ahí).
+sudo -u aao-auditor-alt -H env -i HOME=/home/aao-auditor-alt PATH=/usr/bin:/bin:/usr/local/bin agy
 # 2. Instala el ejecutor revisado (root, solo lectura para el rol).
 sudo install -d -o root -g root -m 0755 /opt/aao-audit
 sudo install -o root -g root -m 0755 scripts/audit/run_agy_audit.sh /opt/aao-audit/
 sudo install -o root -g root -m 0644 docs/audit-prompts/r1-chain.md /opt/aao-audit/
 # 3. Auditoría: base 97ad4f1 (último SHA auditado de la pila F4), cabeza = PR #49, que incluye #48.
 sudo -u aao-auditor-alt -H /opt/aao-audit/run_agy_audit.sh \
-  97ad4f13655aae2b736c7ba6b3d8d666e51d4680 <SHA de cabeza de #49> /opt/aao-audit/r1-chain.md
+  97ad4f13655aae2b736c7ba6b3d8d666e51d4680 <SHA de cabeza de #49>
+# El ejecutor solo acepta /opt/aao-audit/r1-chain.md con el sha256 revisado, fijado en el propio script.
 ```
 
 El ejecutor hace lo siguiente:
