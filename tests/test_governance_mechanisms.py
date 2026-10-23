@@ -962,6 +962,74 @@ def test_supervisor_marker_registry_is_cumulative_and_signed(tmp_path, monkeypat
         _read_state(state, registry["test_supervisor_private_key"])
 
 
+def test_supervisor_refuses_to_sign_after_ledger_truncation_between_heartbeats(tmp_path, monkeypatch):
+    monkeypatch.setattr("aao.pending_veto._check_parents", lambda path, uid: None)
+    from aao.supervisor import signed_heartbeat
+    promote, repo, bare, _base, head, _tree, auth, sources, signature = _git_fixture(tmp_path)
+    registry = json.loads(sources.trust_registry.read_text())
+    veto = append(sources.ledger, {"type": "veto", "candidate_sha": head, "reason": "test"},
+        "auditor", registry["test_auditor_private_key"], registry["ledger_keys"])
+    # The supervisor incident key is distinct from the integrator and is authorized to record incidents.
+    incident_dir = tmp_path / "incident-key"; incident_dir.mkdir()
+    incident_private, incident_public = keypair(incident_dir)
+    registry["ledger_keys"]["supervisor"] = {"public_key": str(incident_public), "can_record_incidents": True}
+    state = tmp_path / "supervisor-state.json"
+    signed_heartbeat(1, "2026-01-01T00:00:00+00:00", str(incident_private),
+        key_id="supervisor", expires_at="2026-01-01T02:00:00+00:00", ledger_path=sources.ledger,
+        trusted_keys=registry["ledger_keys"], state_path=state)
+    _set_supervisor_heartbeat(sources, head, [], ledger_head=veto["hash"])
+    sources.ledger.write_text("")
+    with pytest.raises(ValueError, match="ledger truncated or rewritten since last heartbeat"):
+        signed_heartbeat(2, "2026-01-01T00:01:00+00:00", str(incident_private),
+            key_id="supervisor", expires_at="2026-01-01T02:00:00+00:00", ledger_path=sources.ledger,
+            trusted_keys=registry["ledger_keys"], state_path=state)
+    assert verify(sources.ledger, registry["ledger_keys"])[-1]["type"] == "incident"
+    _assert_integrator_rejects_without_main_change(promote, repo, bare, auth, signature, sources,
+        "ledger")
+
+
+def test_supervisor_does_not_prune_pending_marker_for_integrator_key(tmp_path, monkeypatch):
+    monkeypatch.setattr("aao.pending_veto._check_parents", lambda path, uid: None)
+    from aao.supervisor import signed_heartbeat
+    _promote, _repo, _bare, _base, head, _tree, _auth, sources, _signature = _git_fixture(tmp_path)
+    digest = _add_pending_veto_marker(sources, head)
+    registry = json.loads(sources.trust_registry.read_text())
+    state = tmp_path / "state.json"
+    signed_heartbeat(1, "2026-01-01T00:00:00+00:00", registry["test_supervisor_private_key"],
+        key_id="supervisor", expires_at="2026-01-01T02:00:00+00:00", ledger_path=sources.ledger,
+        trusted_keys=registry["ledger_keys"], state_path=state)
+    # A reused integrator key must not become a pending-veto resolver by registry aliasing.
+    integrator_public = registry["ledger_keys"]["integrator"]["public_key"]
+    registry["ledger_keys"]["auditor"]["public_key"] = integrator_public
+    append(sources.ledger, {"type": "audit-verdict", "candidate_sha": head,
+        "resolves_pending": [digest]}, "auditor", str(sources.integrator_private_key), registry["ledger_keys"])
+    with pytest.raises(ValueError, match="integrator public key is shared with a reserved ledger authority"):
+        signed_heartbeat(1, "2026-01-01T00:00:00+00:00", registry["test_supervisor_private_key"],
+            key_id="supervisor", expires_at="2026-01-01T02:00:00+00:00", ledger_path=sources.ledger,
+            trusted_keys=registry["ledger_keys"], state_path=state)
+    from aao.supervisor import _read_state
+    assert _read_state(state, registry["test_supervisor_private_key"])["pending_markers"][head] == [digest]
+
+
+def test_supervisor_rejects_integrator_key_with_pending_resolution_capability(tmp_path, monkeypatch):
+    monkeypatch.setattr("aao.pending_veto._check_parents", lambda path, uid: None)
+    from aao.supervisor import signed_heartbeat
+    _promote, _repo, _bare, _base, head, _tree, _auth, sources, _signature = _git_fixture(tmp_path)
+    digest = _add_pending_veto_marker(sources, head)
+    registry = json.loads(sources.trust_registry.read_text())
+    state = tmp_path / "state.json"
+    signed_heartbeat(1, "2026-01-01T00:00:00+00:00", registry["test_supervisor_private_key"],
+        key_id="supervisor", expires_at="2026-01-01T02:00:00+00:00", ledger_path=sources.ledger,
+        trusted_keys=registry["ledger_keys"], state_path=state)
+    registry["ledger_keys"]["integrator"]["can_resolve_pending"] = True
+    append(sources.ledger, {"type": "audit-verdict", "candidate_sha": head,
+        "resolves_pending": [digest]}, "integrator", str(sources.integrator_private_key), registry["ledger_keys"])
+    with pytest.raises(ValueError, match="integrator key has a reserved ledger capability"):
+        signed_heartbeat(2, "2026-01-01T00:01:00+00:00", registry["test_supervisor_private_key"],
+            key_id="supervisor", expires_at="2026-01-01T02:00:00+00:00", ledger_path=sources.ledger,
+            trusted_keys=registry["ledger_keys"], state_path=state)
+
+
 def test_integrator_proceeds_when_pending_veto_resolved_in_ledger(tmp_path, monkeypatch):
     monkeypatch.setattr("aao.pending_veto._check_parents", lambda path, uid: None)
     promote, repo, _bare, _base, head, tree, auth, sources, signature = _git_fixture(tmp_path)

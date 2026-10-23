@@ -93,14 +93,24 @@ which is the safe direction.
 running as the auditor uid, or root, can delete markers. If that uid is shared
 by more than one actor, a party other than the vetoing one can remove a veto,
 and the gate reads a missing marker as no veto. File permissions alone cannot
-close this. F4-01a only narrows A-2 to markers and ledger state already
-recorded by the supervisor. A marker removed before the next heartbeat is
-outside that snapshot; the exposure window is bounded by the heartbeat
-validity period. This depends on exclusive custody of the supervisor uid. P1's
+close this. F4-01a only narrows A-2 to pending markers observed by the
+supervisor and a verified ledger head captured in its signed heartbeat. Before
+signing a later heartbeat, the supervisor requires its previous non-genesis
+head to remain in the current verified chain; otherwise it records a
+continuity incident and refuses to sign. Resolution rows are accepted only
+from verified `can_resolve_pending` keys, excluding the integrator key. A
+marker removed before the next heartbeat is outside that snapshot; the
+exposure window is bounded by the heartbeat validity period. This depends on
+exclusive custody of the supervisor uid. P1's
 execution does not by itself close the logic gap. The integrator path uses this
 signed snapshot; the manifest gate still uses the older external anchor.
 F4-01b, independently advancing the gate's anchor, remains pending. This
 revision is **not** a candidate for `trusted_auditor_revisions`.
+
+**Supervisor-state migration:** legacy `state.json` files without a valid
+signature fail closed. They are not automatically imported, repaired, or
+deleted; preserve them for investigation and use an authorized migration
+procedure before initializing replacement signed state.
 
 ## 4. Gate (`python -m aao.manifest_audit gate --manifest M --report R --signature S [--promoted-sha P]`)
 

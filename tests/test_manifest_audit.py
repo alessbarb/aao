@@ -464,10 +464,31 @@ def test_pending_veto_marker_is_written_before_any_analysis(env):
     path, _ = manifest(env)
     assert audit(env, path)["verdict"] == "approve"
 
+    def exploding_runner(tree, argv):
+        raise RuntimeError("analysis interrupted")
+
+    with pytest.raises(RuntimeError):
+        audit(env, path, run="veto", key_path=_rogue_key(env), veto_reason="unsafe", runner=exploding_runner)
+    assert "candidate has an unresolved pending veto (recorded without custody)" in gate(env, path)[1]
+
 
 def test_pending_veto_marker_uses_supervisor_readable_modes(env):
     path, _ = manifest(env)
     audit(env, path, run="veto", key_path=_rogue_key(env), veto_reason="unsafe")
+    directory = env["state"] / "ledger.jsonl.pending-vetoes"
+    marker = next(directory.iterdir())
+    assert directory.stat().st_mode & 0o777 == 0o750
+    assert marker.stat().st_mode & 0o777 == 0o640
+
+
+def test_pending_veto_modes_ignore_restrictive_umask(env, monkeypatch):
+    monkeypatch.setattr("aao.manifest_audit._check_parents", lambda path, owners: None)
+    path, _ = manifest(env)
+    previous = os.umask(0o077)
+    try:
+        audit(env, path, run="veto", key_path=_rogue_key(env), veto_reason="unsafe")
+    finally:
+        os.umask(previous)
     directory = env["state"] / "ledger.jsonl.pending-vetoes"
     marker = next(directory.iterdir())
     assert directory.stat().st_mode & 0o777 == 0o750

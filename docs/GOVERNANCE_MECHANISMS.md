@@ -2,7 +2,9 @@
 
 This work implements local mechanisms only. It does not activate GOV-REV-002, certify identity, or authorize a merge. GitHub, network, sudo and external publication are out of scope. No claim of independent custody is made.
 
-**F4-01a limitation:** the integrator uses the supervisor's signed heartbeat snapshot to detect only veto markers and ledger state already recorded by that supervisor. A marker deleted before the next heartbeat is not covered; the exposure window is bounded by the heartbeat's validity period. This mitigation depends on exclusive custody of the supervisor uid. It narrows, but does not close, A-2. The manifest gate still uses its older external ledger anchor; F4-01b, which advances that anchor independently, remains pending. P1 having run does not remove these logic limits.
+**F4-01a limitation:** the integrator uses the supervisor's signed heartbeat snapshot to detect veto markers observed by the supervisor and a verified ledger head. On each heartbeat the supervisor requires its prior non-genesis head to remain in the currently verified ledger chain; otherwise it records a continuity incident and refuses to sign. Resolution rows are accepted only from verified `can_resolve_pending` signers, with the integrator key excluded from that authority. A marker deleted before the next heartbeat is not covered; the exposure window is bounded by the heartbeat's validity period. This mitigation depends on exclusive custody of the supervisor uid. It narrows, but does not close, A-2. The manifest gate still uses its older external ledger anchor; F4-01b, which advances that anchor independently, remains pending. P1 having run does not remove these logic limits.
+
+**Supervisor-state migration:** legacy `state.json` files without a valid signature fail closed and are not imported or repaired automatically. An operator must preserve the file for investigation and initialize a new signed state only through an authorized migration procedure; do not delete or rewrite it as an automatic recovery.
 
 | Policy requirement | Prototype / evidence | Status |
 |---|---|---|
