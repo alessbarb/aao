@@ -14,15 +14,22 @@ base=$1 head=$2
 [[ $base =~ ^[0-9a-f]{40}$ && $head =~ ^[0-9a-f]{40}$ ]] || { echo "full 40-hex SHAs required" >&2; exit 2; }
 home=$(getent passwd "$me" | cut -d: -f6)
 [[ $HOME == "$home" ]] || { echo "refusing: HOME=$HOME is not $me's home ($home)" >&2; exit 1; }
-[[ $(stat -c '%u %a' "$AGY") == "0 755" && $(stat -c '%u' /usr/local/bin) == 0 ]] || { echo "refusing: $AGY must be root:0755" >&2; exit 1; }
+[[ ! -L $AGY && $(stat -c '%u %a' "$AGY") == "0 755" ]] || { echo "refusing: $AGY must be a root:0755 regular file" >&2; exit 1; }
+# Every ancestor of the binary root-owned and not group/other writable (no replacing the entry).
+for d in /usr/local/bin /usr/local /usr /; do
+  [[ ! -L $d && $(stat -c '%u' "$d") == 0 && $(( 0$(stat -c '%a' "$d") & 022 )) == 0 ]] \
+    || { echo "refusing: $d lets another account replace $AGY" >&2; exit 1; }
+done
 # The reviewed prompt: root-owned, not group/other writable, exact digest.
 [[ $(stat -c '%u %a' "$PROMPT") == "0 644" ]] || { echo "refusing: $PROMPT must be root:0644" >&2; exit 1; }
 [[ $(sha256sum "$PROMPT" | cut -d' ' -f1) == "$PROMPT_SHA256" ]] || { echo "refusing: $PROMPT is not the reviewed prompt" >&2; exit 1; }
 # agy session state must belong to this uid only (no copied or shared session).
-for d in "$home/.antigravity" "$home/.gemini" "$home/.config/antigravity"; do
-  [[ -e $d ]] || continue
-  bad=$(find "$d" \( ! -uid "$(id -u)" -o -perm /022 \) -print -quit)
-  [[ -z $bad ]] || { echo "refusing: $bad is not exclusively $me's" >&2; exit 1; }
+for d in "$home/.antigravity" "$home/.gemini" "$home/.config" "$home/.config/antigravity"; do
+  [[ -e $d || -L $d ]] || continue
+  [[ ! -L $d && $(realpath -e "$d") == "$home"/* ]] || { echo "refusing: $d is a symlink or leaves $home" >&2; exit 1; }
+  # No symlinks at all (they could point at another account's session), only this uid, no group/other write.
+  bad=$(find "$d" -xdev \( -type l -o ! -uid "$(id -u)" -o -perm /022 \) -print -quit)
+  [[ -z $bad ]] || { echo "refusing: $bad is a symlink or not exclusively $me's" >&2; exit 1; }
 done
 out="$home/aao-audits/$head"; [[ ! -e $out ]] || { echo "refusing: $out exists (one audit per SHA)" >&2; exit 1; }
 mkdir -p -m 0700 "$out"
