@@ -1,0 +1,17 @@
+{
+  "url": "https://github.com/alessbarb/aao",
+  "hook_attributes": {
+    "active": false
+  },
+  "public": false,
+  "default_events": [],
+  "name": "aao-supervisor",
+  "default_permissions": {
+    "contents": "read",
+    "pull_requests": "read",
+    "checks": "read",
+    "actions": "read",
+    "metadata": "read"
+  },
+  "description": "AAO supervisor (read-only watcher). Canonical repo."
+}

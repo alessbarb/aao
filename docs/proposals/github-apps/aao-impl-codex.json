@@ -1,0 +1,16 @@
+{
+  "url": "https://github.com/alessbarb/aao",
+  "hook_attributes": {
+    "active": false
+  },
+  "public": false,
+  "default_events": [],
+  "name": "aao-impl-codex",
+  "default_permissions": {
+    "contents": "write",
+    "pull_requests": "write",
+    "workflows": "write",
+    "metadata": "read"
+  },
+  "description": "AAO implementer. contents/workflows write is for its FORK in the aao-agents org only; on the canonical repo it must be installed with pull requests access only (no contents write)."
+}
