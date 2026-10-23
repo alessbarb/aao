@@ -2,7 +2,8 @@
 """Verify one GitHub App's API authentication as its own Linux account (P2). Read-only on GitHub.
 
 Run once per App, as the App's uid, from the root-owned copy installed in /opt/aao-p2:
-    sudo -u <linux_uid> -H /usr/bin/python3 -I /opt/aao-p2/verify_app_auth.py <app>
+    sudo -u <linux_uid> -H /usr/bin/python3 -I /opt/aao-p2/verify_app_auth.py <app> [--fork OWNER/REPO]
+Implementer Apps need --fork: the one repository (a fork of the canonical repo) they may reach.
 Reads app_id, installation_id, linux_uid and key_file from the reviewed registry next to this script,
 and the expected permissions from the reviewed manifest in ./github-apps/. Prints one JSON record.
 Never prints the private key, the JWT or the installation token; the token is revoked before exit.
@@ -95,7 +96,7 @@ def _read_key(path: Path, uid: int, home: Path) -> bytes:
         os.close(fd)
 
 
-def verify(app: str) -> tuple[bool, dict]:
+def verify(app: str, fork: str | None = None) -> tuple[bool, dict]:
     manifest = MANIFESTS / f"{app}.json"
     if not all(_trusted(p) for p in (HERE, REGISTRY, MANIFESTS, manifest)):
         return False, {"app": app, "error": "registry/manifests must be root-owned and not group/other-writable"}
@@ -178,16 +179,18 @@ def verify(app: str) -> tuple[bool, dict]:
             and rec["repository_selection"] == "selected"
     else:
         checks["implementer_cannot_reach_canonical"] = canonical not in rec["accessible_repositories"]
-        checks["implementer_only_forks_of_canonical"] = bool(repos) and rec["repository_selection"] == "selected" \
-            and all(forks_of_canonical) and len(forks_of_canonical) == len(repos)
+        rec["expected_fork"] = fork
+        checks["implementer_only_its_fork"] = fork is not None and repos == [fork] \
+            and rec["repository_selection"] == "selected" and forks_of_canonical == [True]
     return "error" not in rec and all(checks.values()), rec
 
 
 def main() -> int:
-    if len(sys.argv) != 2:
+    args = sys.argv[1:]
+    if len(args) not in (1, 3) or (len(args) == 3 and args[1] != "--fork"):
         print(__doc__, file=sys.stderr)
         return 2
-    ok, rec = verify(sys.argv[1])
+    ok, rec = verify(args[0], args[2] if len(args) == 3 else None)
     rec["result"] = "PASS" if ok else "FAIL"
     rec["checked_at"] = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
     print(json.dumps(rec, sort_keys=True))

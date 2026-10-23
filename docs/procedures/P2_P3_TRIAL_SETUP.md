@@ -65,7 +65,7 @@ Las Apps de la primera pasada se comprueban a posteriori con `scripts/github_app
 
 **Quién:** el CEO (sudo, P5 (a)). Cada comprobación corre **como el uid que custodia la clave**; nadie más lee la clave.
 **Qué hace:** con la clave de la App firma un JWT, comprueba `GET /app` (id, slug, permisos frente al manifiesto revisado), la instalación (`app_id`, cuenta, permisos, no suspendida), obtiene un token de instalación, lista los repositorios accesibles y revoca el token. Solo lectura en GitHub. No imprime clave, JWT ni token.
-**Repos esperados:** integrador, auditores, supervisor, notifier y PM solo `autoaiorg/aao` (`selected`). Los implementadores **nunca** el repo canónico (solo su fork, A-10/A-11).
+**Repos esperados:** integrador, auditores, supervisor, notifier y PM solo `autoaiorg/aao` (`selected`). Los implementadores: exactamente su fork de `autoaiorg/aao` (`--fork`), nunca el canónico (A-10/A-11).
 
 ```bash
 REPO=$HOME/workspace/repos/active/aao
@@ -78,18 +78,21 @@ for m in $(git -C "$REPO" ls-tree --name-only "$REV" docs/proposals/github-apps/
   git -C "$REPO" show "$REV:$m" | sudo install -o root -g root -m 0644 /dev/stdin "/opt/aao-p2/github-apps/$(basename "$m")"
 done
 out=~/aao-p2-app-auth-$(date +%Y%m%dT%H%M%S).jsonl
-while read -r app uid; do
-  sudo -u "$uid" -H /usr/bin/python3 -I /opt/aao-p2/verify_app_auth.py "$app" | tee -a "$out"
+# Tercera columna: el fork de cada implementador (OWNER/REPO), o "-" si aún no existe.
+# Con "-", la autenticación se comprueba igual, pero el alcance del implementador da FAIL (no demostrado).
+while read -r app uid fork; do
+  extra=(); [[ $fork != - ]] && extra=(--fork "$fork")
+  sudo -u "$uid" -H /usr/bin/python3 -I /opt/aao-p2/verify_app_auth.py "$app" "${extra[@]}" | tee -a "$out"
 done <<'APPS'
-aao-integrator aao-integrator
-aao-auditor aao-auditor
-aao-auditor-alt aao-auditor-alt
-aao-supervisor aao-supervisor
-aao-notifier aao-notifier
-aao-pm aao-pm
-aao-impl-claude aao-impl-claude
-aao-impl-codex aao-impl-codex
-aao-impl-agy aao-impl-ag
+aao-integrator aao-integrator -
+aao-auditor aao-auditor -
+aao-auditor-alt aao-auditor-alt -
+aao-supervisor aao-supervisor -
+aao-notifier aao-notifier -
+aao-pm aao-pm -
+aao-impl-claude aao-impl-claude -
+aao-impl-codex aao-impl-codex -
+aao-impl-agy aao-impl-ag -
 APPS
 grep -c '"result": "PASS"' "$out"   # debe dar 9
 ```

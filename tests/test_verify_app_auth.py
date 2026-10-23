@@ -70,7 +70,7 @@ def test_pass_and_no_secret_in_output(tmp_path, monkeypatch):
 
 def test_implementer_reaching_canonical_fails(tmp_path, monkeypatch):
     mod, _, _ = _load(tmp_path, monkeypatch, repos=["org/aao"], canonical_only=False)
-    ok, rec = mod.verify("aao-x")
+    ok, rec = mod.verify("aao-x", "org/aao")
     assert not ok and rec["checks"]["implementer_cannot_reach_canonical"] is False
 
 
@@ -102,14 +102,16 @@ def test_linux_user_mapping():
 
 def test_implementer_on_fork_passes(tmp_path, monkeypatch):
     mod, _, _ = _load(tmp_path, monkeypatch, repos=["agents/aao"], canonical_only=False)
-    ok, rec = mod.verify("aao-x")
+    ok, rec = mod.verify("aao-x", "agents/aao")
     assert ok, rec
+    assert mod.verify("aao-x")[0] is False  # no expected fork given: scope not demonstrated
+    assert mod.verify("aao-x", "agents/other")[0] is False
 
 
 @pytest.mark.parametrize("repos,parent", [([], "org/aao"), (["agents/aao"], None), (["agents/aao"], "else/aao")])
 def test_implementer_without_fork_of_canonical_fails(tmp_path, monkeypatch, repos, parent):
     mod, _, _ = _load(tmp_path, monkeypatch, repos=repos, canonical_only=False, parent=parent)
-    assert mod.verify("aao-x")[0] is False
+    assert mod.verify("aao-x", "agents/aao")[0] is False
 
 
 def test_inconsistent_total_count_fails(tmp_path, monkeypatch):
