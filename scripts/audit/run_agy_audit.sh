@@ -28,8 +28,11 @@ for d in "$home/.antigravity" "$home/.gemini" "$home/.config" "$home/.config/ant
   [[ -e $d || -L $d ]] || continue
   [[ ! -L $d && $(realpath -e "$d") == "$home"/* ]] || { echo "refusing: $d is a symlink or leaves $home" >&2; exit 1; }
   # No symlinks at all (they could point at another account's session), only this uid, no group/other write.
-  bad=$(find "$d" -xdev \( -type l -o ! -uid "$(id -u)" -o -perm /022 \) -print -quit)
+  bad=$(find "$d" \( -type l -o ! -uid "$(id -u)" -o -perm /022 \) -print -quit)
   [[ -z $bad ]] || { echo "refusing: $bad is a symlink or not exclusively $me's" >&2; exit 1; }
+  # No other filesystem mounted inside (its content could be another account's session).
+  foreign=$(find "$d" -printf '%D %p\n' | awk -v dev="$(stat -c %d "$home")" '$1 != dev {print $2; exit}')
+  [[ -z $foreign ]] || { echo "refusing: $foreign is on another filesystem" >&2; exit 1; }
 done
 out="$home/aao-audits/$head"; [[ ! -e $out ]] || { echo "refusing: $out exists (one audit per SHA)" >&2; exit 1; }
 mkdir -p -m 0700 "$out"
