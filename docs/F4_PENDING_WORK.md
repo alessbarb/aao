@@ -50,6 +50,11 @@ Pruebas complementarias:
 
 La PR #30 cierra F4-02 en el gate de manifiestos. El integrador de F3a (#26) lee los vetos del ledger de gobierno, pero **no** las marcas de veto pendiente. Antes de activarlo, el integrador debe tratar como bloqueante cualquier marca sin resolver del candidato, con la misma prueba negativa y validación por mutación.
 
+**Estado de F4-02b:** implementado en la PR #34 (`958a458`) y aprobado por el auditor principal (Claude aislado) en la ronda 2. La ronda 1 había dado REJECT por A3-01: el integrador podía resolver sus propios vetos pendientes. Puntos B que se arrastran:
+- **B4-01:** rechazar un registro de confianza que conceda `can_resolve_pending` a la clave del integrador o que repita su clave pública bajo otro id.
+- **B4-02:** toda fila con `resolves_pending`, aunque esté vacío, exige la capacidad. Hay que documentar la migración del registro antes de compartir el ledger.
+- **T-02:** añadir una prueba de control positiva a la de custodia de los directorios padre, de modo que la ruta sin parches también pase en un árbol seguro.
+
 ## F4-03: P2 (identidades y permisos de GitHub)
 
 Ver `docs/proposals/P2_GITHUB_IDENTITIES_AND_PERMISSIONS.md`. Las pruebas A-01 a A-14 son las que llevan RA-02, RA-03 y RA-09 a PASS.
