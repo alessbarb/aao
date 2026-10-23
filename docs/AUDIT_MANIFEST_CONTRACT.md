@@ -219,14 +219,15 @@ following:
    - signed by the anchored supervisor key;
    - of type `heartbeat`;
    - not expired, not older than 1 h and not issued in the future;
-   - well-formed `ledger_head`, `pending_markers` and `state_sha256`.
+   - `ledger_head` and `state_sha256` are 64 lowercase hex characters; `pending_markers` maps 40-hex
+     candidate SHAs to lists of 64-hex digests.
 2. The verified ledger terminal hash equals the heartbeat `ledger_head`:
    - if the head is an earlier row or genesis, the result is "not yet anchored";
    - otherwise, "truncated or rewritten".
 3. No marker that the supervisor recorded for the candidate has disappeared
    without a resolution in a verified row signed by a `can_resolve_pending` key.
 
-Any failure denies promotion.
+Any failure denies promotion. The gate reads the ledger and the markers **once** per decision, and every check uses that snapshot (A-3).
 
 **Limitations (B):**
 

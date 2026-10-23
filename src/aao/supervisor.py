@@ -7,6 +7,7 @@ import fcntl
 import hashlib
 import json
 import os
+import re
 import stat
 import subprocess
 import tempfile
@@ -175,12 +176,14 @@ def verify_heartbeat(event: Any, public_key: str, key_id: str, now: datetime,
     within its validity window (declared limitation)."""
     if not isinstance(event, dict) or event.get("type") != "heartbeat" or event.get("key_id") != key_id:
         raise ValueError("heartbeat type or key id is not the anchored supervisor")
+    hex64 = re.compile(r"[0-9a-f]{64}")
     for field in ("ledger_head", "state_sha256"):
-        if not isinstance(event.get(field), str) or len(event[field]) != 64:
+        if not isinstance(event.get(field), str) or not hex64.fullmatch(event[field]):
             raise ValueError(f"heartbeat {field} is missing or malformed")
     markers = event.get("pending_markers")
-    if not isinstance(markers, dict) or any(not isinstance(c, str) or not isinstance(d, list) or
-                                            any(not isinstance(x, str) for x in d) for c, d in markers.items()):
+    if not isinstance(markers, dict) or any(
+            not isinstance(c, str) or not re.fullmatch(r"[0-9a-f]{40}", c) or not isinstance(d, list) or
+            any(not isinstance(x, str) or not hex64.fullmatch(x) for x in d) for c, d in markers.items()):
         raise ValueError("heartbeat pending_markers is missing or malformed")
     try:
         issued = datetime.fromisoformat(event["issued_at"])

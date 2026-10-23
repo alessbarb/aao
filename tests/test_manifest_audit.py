@@ -583,3 +583,26 @@ def test_gate_waits_for_entries_not_yet_anchored_by_the_supervisor(env):
     audit(env, path)              # new signed entry, not anchored yet
     assert any("ledger not yet anchored by the supervisor" in r for r in gate(env, path, refresh=False)[1])
     assert gate(env, path) == (True, ())
+
+
+def test_gate_uses_one_snapshot_so_a_marker_deleted_between_reads_still_blocks(env, monkeypatch):
+    # A-3 (Codex second-line review of F4-01b): delete the marker right after the gate reads it.
+    path, _ = manifest(env)
+    audit(env, path)
+    audit(env, path, run="veto", key_path=_rogue_key(env), veto_reason="unsafe")
+    env["heartbeat"]()
+    real = manifest_audit.pending_vetoes
+    calls = []
+
+    def read_then_delete(anchor, candidate_sha):
+        result = real(anchor, candidate_sha)
+        calls.append(len(result))
+        for marker in (env["state"] / "ledger.jsonl.pending-vetoes").iterdir():
+            marker.unlink()
+        return result
+
+    monkeypatch.setattr(manifest_audit, "pending_vetoes", read_then_delete)
+    conformant, reasons = gate(env, path, refresh=False)
+    assert not conformant
+    assert calls == [1]  # a single read of the markers per gate decision
+    assert "candidate has an unresolved pending veto (recorded without custody)" in reasons
