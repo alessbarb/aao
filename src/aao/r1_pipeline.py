@@ -153,7 +153,12 @@ def integrator_tick(github: Any, git_remote: str, mirror: str | Path, inbox: str
             if not staged:
                 staged = subprocess.run(["git", "-C", str(mirror), "commit-tree", manifest["result_tree"],
                                          "-p", base, "-p", candidate], input="R1 staged merge\n",
-                                        check=True, capture_output=True, text=True).stdout.strip()
+                                        check=True, capture_output=True, text=True,
+                                        env={**os.environ,
+                                             "GIT_AUTHOR_NAME": "aao-integrator",
+                                             "GIT_AUTHOR_EMAIL": "aao-integrator@users.noreply.github.com",
+                                             "GIT_COMMITTER_NAME": "aao-integrator",
+                                             "GIT_COMMITTER_EMAIL": "aao-integrator@users.noreply.github.com"}).stdout.strip()
                 staged_ref = f"refs/heads/aao-staging/{number}-{staged}"
                 _git(mirror, "push", git_remote, f"{staged}:{staged_ref}")
                 state.update(status="staged", staged_commit=staged, staged_ref=staged_ref)

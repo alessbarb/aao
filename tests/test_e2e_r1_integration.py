@@ -115,7 +115,7 @@ def audit_setup(_base_audit_env, monkeypatch):  # noqa: F811
     return _base_audit_env
 
 
-def test_r1_signed_audit_issues_exact_authorization(audit_setup, tmp_path):
+def test_r1_signed_audit_issues_exact_authorization(audit_setup, tmp_path, monkeypatch):
     env = audit_setup
     env["configure"](policy_overrides={
         "auditors": {"aao-auditor": "auditor-key"},
@@ -187,10 +187,16 @@ def test_r1_signed_audit_issues_exact_authorization(audit_setup, tmp_path):
     subprocess.run(["git", "--git-dir", str(bare), "update-ref", "refs/heads/main",
                     data["target_sha"]], check=True)
     env["heartbeat"]()
+    monkeypatch.setenv("HOME", "/nonexistent")
+    monkeypatch.setenv("GIT_CONFIG_GLOBAL", "/dev/null")
     commit = promote(env["repo"], "origin", doc, sig, sources, identity_provider=_identity(),
                      observed_repo=doc["repo"], observed_pr_number=doc["pr_number"],
                      ci_verified_sha=data["candidate_sha"],
                      now=lambda: datetime.now(UTC))
+    assert _git(env["repo"], "show", "-s", "--format=%an <%ae>%n%cn <%ce>", commit).splitlines() == [
+        "aao-integrator <aao-integrator@users.noreply.github.com>",
+        "aao-integrator <aao-integrator@users.noreply.github.com>",
+    ]
     assert hashlib.sha256(sources.trust_registry.read_bytes()).hexdigest() == registry_digest
     _assert_bare(bare, commit, data["target_sha"], data["candidate_sha"], data["result_tree"])
 
