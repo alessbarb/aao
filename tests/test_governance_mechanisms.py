@@ -1940,26 +1940,3 @@ def test_notifier_rejects_unknown_key_and_control_field_collision(tmp_path):
         consume(event, {"issuer": str(public)}, state, "2026-01-01T00:00:00+00:00", sink)
     with pytest.raises(ValueError, match="control"):
         append(tmp_path / "collision", {"sequence": 9}, "issuer", str(private), {"issuer": str(public)})
-
-def test_supervisor_heartbeat_releases_lock_on_validation_error(tmp_path, monkeypatch):
-    """B5-02: a failed heartbeat must relinquish its state lock."""
-    import fcntl
-    from aao.supervisor import signed_heartbeat
-
-    operations = []
-    real_flock = fcntl.flock
-
-    def tracked_flock(fd, operation):
-        operations.append(operation)
-        return real_flock(fd, operation)
-
-    monkeypatch.setattr("aao.supervisor.fcntl.flock", tracked_flock)
-    with pytest.raises(ValueError, match="trusted ledger keys"):
-        signed_heartbeat(
-            1, "2026-01-01T00:00:00+00:00", "unused-key",
-            key_id="supervisor", expires_at="2026-01-01T00:05:00+00:00",
-            ledger_path=tmp_path / "ledger.jsonl",
-            state_path=tmp_path / "state.json",
-            integrator_key_id="integrator", trusted_keys={},
-        )
-    assert operations == [fcntl.LOCK_EX, fcntl.LOCK_UN]

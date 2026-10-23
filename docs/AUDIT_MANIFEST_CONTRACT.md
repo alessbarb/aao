@@ -80,7 +80,7 @@ ledger verification fails closed.
 writes a pending-veto marker to `<ledger_path>.pending-vetoes/`, **before any
 analysis**, so the analysis window is covered. There is no mutual exclusion
 between the gate and the start of an audit run. The directory
-has the same custody as the ledger: auditor uid, `0700`, markers `0600`, file
+is owned by the auditor uid, mode `0750` (group read for the supervisor, never group write), markers `0640`, file
 name bound to the marker digest. If the marker cannot be written, the run fails.
 The gate denies any candidate with a marker that no verified ledger entry
 lists in `resolves_pending`. It also denies when the markers cannot be
@@ -103,9 +103,17 @@ marker removed before the next heartbeat is outside that snapshot; the
 exposure window is bounded by the heartbeat validity period. This depends on
 exclusive custody of the supervisor uid. P1's
 execution does not by itself close the logic gap. The integrator path uses this
-signed snapshot; the manifest gate still uses the older external anchor.
-F4-01b, independently advancing the gate's anchor, remains pending. This
-revision is **not** a candidate for `trusted_auditor_revisions`.
+signed snapshot, and since F4-01b the manifest gate does too (section 9).
+**Remaining A-2 window (stack review, 2026-10-23):** a marker written and then
+deleted by another process of the auditor uid **before** the next heartbeat is
+never observed. Two conditions close it:
+- runtime exclusivity of the auditor uid, so only the auditor service runs as
+  `aao-auditor`;
+- a synchronous hand-off of every veto to the supervisor's custody before the
+  veto run returns (F4-03).
+
+Until both hold, this revision is **not** a candidate for
+`trusted_auditor_revisions`.
 
 **Supervisor-state migration:** legacy `state.json` files without a valid
 signature fail closed. They are not automatically imported, repaired, or
@@ -207,3 +215,33 @@ host/VM.
   evidence comes from P1 and the F2 verifier.
 - **SL-06 (tamper tests):** added rewrite-with-recomputed-chain, forged-key and
   truncation-below-anchor tests; each validated by mutation.
+
+
+## 9. Supervisor custody on the gate path (F4-01b, 2026-10-23)
+
+The trust anchor also pins `supervisor_public_key`, `supervisor_key_id` and
+`supervisor_heartbeat_path`. Before deciding, `verify_promotion` checks the
+following:
+
+1. The supervisor heartbeat is valid:
+   - signed by the anchored supervisor key;
+   - of type `heartbeat`;
+   - not expired, not older than 1 h and not issued in the future;
+   - `ledger_head` and `state_sha256` are 64 lowercase hex characters; `pending_markers` maps 40-hex
+     candidate SHAs to lists of 64-hex digests.
+2. The verified ledger terminal hash equals the heartbeat `ledger_head`:
+   - if the head is an earlier row or genesis, the result is "not yet anchored";
+   - otherwise, "truncated or rewritten".
+3. No marker that the supervisor recorded for the candidate has disappeared
+   without a resolution in a verified row signed by a `can_resolve_pending` key.
+
+Any failure denies promotion. The gate reads the ledger and the markers **once** per decision, and every check uses that snapshot (A-3).
+
+**Limitations (B):**
+
+- The gate keeps no sequence file, so an older heartbeat that is still valid
+  is accepted within its validity window.
+- Entries and markers written after the last heartbeat and removed before the
+  next one are not seen.
+- This depends on the custody of the supervisor uid and its key (P1 created
+  the uid; the runtime services are pending).
