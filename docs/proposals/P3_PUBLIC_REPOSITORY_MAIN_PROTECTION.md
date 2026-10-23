@@ -72,7 +72,7 @@ Sin cambios respecto a P2, salvo:
 - `aao-auditor` y `aao-auditor-alt`: añadir **`statuses: write`** a `checks: write`, porque el ruleset exige que la App fuente tenga `statuses: write`.
 - `aao-integrator`: además, `contents: write` sobre las ramas `aao-staging/**`, que ya cubre su permiso `contents: write`.
 - Implementadores: siguen **sin** escritura en el canónico. Trabajan en **forks públicos** de la organización `aao-agents` y abren las PR hacia el canónico. Con el repo público, el fork ya no depende de la configuración de forks privados.
-- **El ruleset se hereda en la red de forks:** las exclusiones de las reglas de push solo las tiene quien puede saltárselas en el repo raíz. Esto refuerza la separación.
+- **Herencia en forks: no se da por supuesta.** La documentación de GitHub solo extiende a la red de forks las exclusiones de los ***push rulesets***, que restringen rutas, extensiones y tamaños de archivo. Los rulesets de rama y de etiqueta (A, B y C) **no** protegen las ramas de los forks. La separación de los implementadores **no depende de esa herencia**: depende de que sus Apps no tengan escritura en el canónico (P2 §4) y de que el ruleset A proteja `main` del canónico. Un fork es un repositorio aparte, y lo que pase en él no llega a `main` sin el integrador.
 
 ## 5. Pruebas negativas obligatorias (en un repo público de ensayo, antes del canónico)
 
