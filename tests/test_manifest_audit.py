@@ -459,16 +459,21 @@ def test_veto_that_cannot_record_its_marker_raises(env):
     directory.chmod(0o700)
 
 
-def test_pending_veto_marker_is_written_before_any_analysis(env):
+def test_pending_veto_marker_is_written_before_any_analysis(env, monkeypatch):
     # A-1 (Codex review of #30): the marker must exist even if the run fails during analysis.
     path, _ = manifest(env)
+    monkeypatch.setattr("aao.manifest_audit._check_parents", lambda _path, _owners: None)
+    monkeypatch.setattr("aao.pending_veto._check_parents", lambda _path, _owners: None)
     assert audit(env, path)["verdict"] == "approve"
 
-    def exploding_runner(tree, argv):
+    def exploding_derive(_manifest, _clone):
+        assert list((env["state"] / "ledger.jsonl.pending-vetoes").glob("*.json"))
         raise RuntimeError("analysis interrupted")
 
-    with pytest.raises(RuntimeError):
-        audit(env, path, run="veto", key_path=_rogue_key(env), veto_reason="unsafe", runner=exploding_runner)
+    with pytest.MonkeyPatch.context() as local_monkeypatch:
+        local_monkeypatch.setattr(manifest_audit, "_derive", exploding_derive)
+        with pytest.raises(RuntimeError, match="analysis interrupted"):
+            audit(env, path, run="veto", key_path=_rogue_key(env), veto_reason="unsafe")
     assert "candidate has an unresolved pending veto (recorded without custody)" in gate(env, path)[1]
 
 

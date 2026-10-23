@@ -599,11 +599,68 @@ def test_supervisor_signs_events_and_heartbeat_for_notifier(tmp_path):
                      ledger_path=ledger, trusted_keys={"k": {"public_key": str(public), "can_authorize": True}}, now="2026-01-01T00:00:00+00:00")
     heartbeat = signed_heartbeat(2, "2026-01-01T00:00:00+00:00", str(private), key_id="k",
                                  expires_at="2026-01-01T00:05:00+00:00", ledger_path=ledger,
-                                 trusted_keys={"k": {"public_key": str(public), "can_authorize": True}})
+                                 trusted_keys={"k": {"public_key": str(public), "can_authorize": True}}, state_path=tmp_path / "heartbeat-state.json", integrator_key_id="integrator")
     sink = FileSink(tmp_path / "sink.jsonl")
     consume(events[0], {"k": str(public)}, tmp_path / "notify.json", "2026-01-01T00:00:01+00:00", sink)
     consume(heartbeat, {"k": str(public)}, tmp_path / "notify.json", "2026-01-01T00:00:01+00:00", sink)
     assert len((tmp_path / "sink.jsonl").read_text().splitlines()) == 2
+
+
+def test_supervisor_requires_state_path(tmp_path):
+    from aao.supervisor import signed_heartbeat
+    private, public = keypair(tmp_path)
+    ledger = tmp_path / "ledger.jsonl"
+    ledger.touch()
+    with pytest.raises(TypeError, match="state_path"):
+        signed_heartbeat(1, "2026-01-01T00:00:00+00:00", str(private), key_id="k",
+            expires_at="2026-01-01T00:05:00+00:00", ledger_path=ledger,
+            trusted_keys={"unused": str(public)}, integrator_key_id="integrator")
+
+
+def test_supervisor_requires_integrator_key_id(tmp_path):
+    from aao.supervisor import signed_heartbeat
+    private, public = keypair(tmp_path)
+    ledger = tmp_path / "ledger.jsonl"
+    ledger.touch()
+    with pytest.raises(TypeError, match="integrator_key_id"):
+        signed_heartbeat(1, "2026-01-01T00:00:00+00:00", str(private), key_id="k",
+            expires_at="2026-01-01T00:05:00+00:00", ledger_path=ledger,
+            state_path=tmp_path / "state.json", trusted_keys={"unused": str(public)})
+
+
+def test_supervisor_rejects_state_with_wrong_owner_or_mode(tmp_path, monkeypatch):
+    from aao.supervisor import signed_heartbeat
+    private, public = keypair(tmp_path)
+    ledger = tmp_path / "ledger.jsonl"
+    ledger.touch()
+    state = tmp_path / "state.json"
+    state.write_text("{}")
+    state.chmod(0o644)
+    with pytest.raises(ValueError, match="supervisor state must be owned by supervisor uid and mode 0600"):
+        signed_heartbeat(1, "2026-01-01T00:00:00+00:00", str(private), key_id="k",
+            expires_at="2026-01-01T00:05:00+00:00", ledger_path=ledger, state_path=state,
+            trusted_keys={"unused": str(public)}, integrator_key_id="integrator")
+    state.chmod(0o600)
+    monkeypatch.setattr("aao.supervisor.os.geteuid", lambda: state.stat().st_uid + 1)
+    with pytest.raises(ValueError, match="supervisor state must be owned by supervisor uid and mode 0600"):
+        signed_heartbeat(1, "2026-01-01T00:00:00+00:00", str(private), key_id="k",
+            expires_at="2026-01-01T00:05:00+00:00", ledger_path=ledger, state_path=state,
+            trusted_keys={"unused": str(public)}, integrator_key_id="integrator")
+
+
+def test_integrator_rejects_heartbeat_without_state_continuity(tmp_path):
+    from aao.integrator import _heartbeat
+    from aao.supervisor import _sign
+    private, public = keypair(tmp_path)
+    heartbeat = tmp_path / "heartbeat.json"
+    heartbeat.write_text(json.dumps(_sign({
+        "sequence": 1, "key_id": "supervisor", "issued_at": "2026-01-01T00:00:00+00:00",
+        "expires_at": "2026-01-01T00:05:00+00:00", "type": "heartbeat",
+        "ledger_head": "0" * 64, "pending_markers": {},
+    }, str(private))))
+    now = __import__("datetime").datetime(2026, 1, 1, 0, 1, tzinfo=__import__("datetime").timezone.utc)
+    assert _heartbeat(heartbeat, {"supervisor_key_id": "supervisor",
+        "supervisor_public_key": str(public)}, now) is None
 
 
 def test_supervisor_detects_protected_change_in_real_merge_using_minimum_class(tmp_path):
@@ -751,7 +808,7 @@ def _git_fixture(tmp_path):
     anchor.write_text("0"*64)
     from aao.governance_ledger import verify
     anchor.write_text(verify(ledger, {"ledger":str(ledger_public)})[-1]["hash"] if ledger.exists() and ledger.stat().st_size else "0"*64)
-    hb=signed_heartbeat(1,"2026-01-01T00:00:00+00:00",str(supervisor_private),key_id="supervisor",expires_at="2026-01-01T02:00:00+00:00",ledger_path=ledger,trusted_keys={"ledger":{"public_key":str(ledger_public)}})
+    hb=signed_heartbeat(1,"2026-01-01T00:00:00+00:00",str(supervisor_private),key_id="supervisor",expires_at="2026-01-01T02:00:00+00:00",ledger_path=ledger,trusted_keys={"ledger":{"public_key":str(ledger_public)}}, state_path=tmp_path / "heartbeat-state.json", integrator_key_id="integrator")
     heartbeat.write_text(json.dumps(hb))
     registry={**state,"repo":"r","pr_number":1,"ledger_keys":{"ledger":{"public_key":str(ledger_public)}, "integrator":{"public_key":str(_integrator_public),"can_record_incidents":True}, "auditor":{"public_key":str(auditor_public),"can_resolve_pending":True}},"supervisor_key_id":"supervisor","supervisor_public_key":str(supervisor_public),"heartbeat_max_age_seconds":3600,
               "target_refs":["refs/heads/main"],"integrator_identity":"integrator","protected_paths":{},"ra_status":{"RA-01":"PASS","RA-02":"PASS","RA-03":"PASS","RA-07":"PASS","RA-09":"PASS"}}
@@ -837,9 +894,12 @@ def _add_pending_veto_marker(sources, candidate_sha):
 def _set_supervisor_heartbeat(sources, candidate_sha, digests, *, ledger_head="0" * 64):
     from aao.supervisor import _sign, signed_heartbeat
     registry = json.loads(sources.trust_registry.read_text())
+    state_path = sources.trust_registry.parent / "heartbeat-state.json"
+    state_path.unlink(missing_ok=True)
     event = signed_heartbeat(2, "2026-01-01T00:00:00+00:00", registry["test_supervisor_private_key"],
         key_id="supervisor", expires_at="2026-01-01T02:00:00+00:00",
-        ledger_path=sources.ledger, trusted_keys=registry["ledger_keys"])
+        ledger_path=sources.ledger, trusted_keys=registry["ledger_keys"], state_path=state_path,
+        integrator_key_id="integrator")
     if ledger_head != event["ledger_head"] or digests:
         event = _sign({**{k: v for k, v in event.items() if k != "signature"},
                        "ledger_head": ledger_head, "pending_markers": {candidate_sha: digests}},
@@ -946,12 +1006,15 @@ def test_supervisor_marker_registry_is_cumulative_and_signed(tmp_path, monkeypat
     state = tmp_path / "supervisor" / "events" / "state.json"
     first = signed_heartbeat(1, "2026-01-01T00:00:00+00:00", registry["test_supervisor_private_key"],
         key_id="supervisor", expires_at="2026-01-01T02:00:00+00:00", ledger_path=sources.ledger,
-        trusted_keys=registry["ledger_keys"], state_path=state)
+        trusted_keys=registry["ledger_keys"], state_path=state, integrator_key_id="integrator")
+    assert first["state_sha256"] == hashlib.sha256(canonical({})).hexdigest()
+    prior_state_bytes = state.read_bytes()
     marker_digests = first["pending_markers"][head]
     next((Path(str(sources.ledger) + ".pending-vetoes")).glob("*.json")).unlink()
     second = signed_heartbeat(2, "2026-01-01T00:01:00+00:00", registry["test_supervisor_private_key"],
         key_id="supervisor", expires_at="2026-01-01T02:00:00+00:00", ledger_path=sources.ledger,
-        trusted_keys=registry["ledger_keys"], state_path=state)
+        trusted_keys=registry["ledger_keys"], state_path=state, integrator_key_id="integrator")
+    assert second["state_sha256"] == hashlib.sha256(prior_state_bytes).hexdigest()
     assert second["pending_markers"][head] == marker_digests
     assert second["ledger_head"] == "0" * 64
     assert second["signature"] != first["signature"]
@@ -976,13 +1039,13 @@ def test_supervisor_refuses_to_sign_after_ledger_truncation_between_heartbeats(t
     state = tmp_path / "supervisor-state.json"
     signed_heartbeat(1, "2026-01-01T00:00:00+00:00", str(incident_private),
         key_id="supervisor", expires_at="2026-01-01T02:00:00+00:00", ledger_path=sources.ledger,
-        trusted_keys=registry["ledger_keys"], state_path=state)
+        trusted_keys=registry["ledger_keys"], state_path=state, integrator_key_id="integrator")
     _set_supervisor_heartbeat(sources, head, [], ledger_head=veto["hash"])
     sources.ledger.write_text("")
     with pytest.raises(ValueError, match="ledger truncated or rewritten since last heartbeat"):
         signed_heartbeat(2, "2026-01-01T00:01:00+00:00", str(incident_private),
             key_id="supervisor", expires_at="2026-01-01T02:00:00+00:00", ledger_path=sources.ledger,
-            trusted_keys=registry["ledger_keys"], state_path=state)
+            trusted_keys=registry["ledger_keys"], state_path=state, integrator_key_id="integrator")
     assert verify(sources.ledger, registry["ledger_keys"])[-1]["type"] == "incident"
     _assert_integrator_rejects_without_main_change(promote, repo, bare, auth, signature, sources,
         "ledger")
@@ -997,7 +1060,7 @@ def test_supervisor_does_not_prune_pending_marker_for_integrator_key(tmp_path, m
     state = tmp_path / "state.json"
     signed_heartbeat(1, "2026-01-01T00:00:00+00:00", registry["test_supervisor_private_key"],
         key_id="supervisor", expires_at="2026-01-01T02:00:00+00:00", ledger_path=sources.ledger,
-        trusted_keys=registry["ledger_keys"], state_path=state)
+        trusted_keys=registry["ledger_keys"], state_path=state, integrator_key_id="integrator")
     # A reused integrator key must not become a pending-veto resolver by registry aliasing.
     integrator_public = registry["ledger_keys"]["integrator"]["public_key"]
     registry["ledger_keys"]["auditor"]["public_key"] = integrator_public
@@ -1006,7 +1069,7 @@ def test_supervisor_does_not_prune_pending_marker_for_integrator_key(tmp_path, m
     with pytest.raises(ValueError, match="integrator public key is shared with a reserved ledger authority"):
         signed_heartbeat(1, "2026-01-01T00:00:00+00:00", registry["test_supervisor_private_key"],
             key_id="supervisor", expires_at="2026-01-01T02:00:00+00:00", ledger_path=sources.ledger,
-            trusted_keys=registry["ledger_keys"], state_path=state)
+            trusted_keys=registry["ledger_keys"], state_path=state, integrator_key_id="integrator")
     from aao.supervisor import _read_state
     assert _read_state(state, registry["test_supervisor_private_key"])["pending_markers"][head] == [digest]
 
@@ -1020,14 +1083,14 @@ def test_supervisor_rejects_integrator_key_with_pending_resolution_capability(tm
     state = tmp_path / "state.json"
     signed_heartbeat(1, "2026-01-01T00:00:00+00:00", registry["test_supervisor_private_key"],
         key_id="supervisor", expires_at="2026-01-01T02:00:00+00:00", ledger_path=sources.ledger,
-        trusted_keys=registry["ledger_keys"], state_path=state)
+        trusted_keys=registry["ledger_keys"], state_path=state, integrator_key_id="integrator")
     registry["ledger_keys"]["integrator"]["can_resolve_pending"] = True
     append(sources.ledger, {"type": "audit-verdict", "candidate_sha": head,
         "resolves_pending": [digest]}, "integrator", str(sources.integrator_private_key), registry["ledger_keys"])
     with pytest.raises(ValueError, match="integrator key has a reserved ledger capability"):
         signed_heartbeat(2, "2026-01-01T00:01:00+00:00", registry["test_supervisor_private_key"],
             key_id="supervisor", expires_at="2026-01-01T02:00:00+00:00", ledger_path=sources.ledger,
-            trusted_keys=registry["ledger_keys"], state_path=state)
+            trusted_keys=registry["ledger_keys"], state_path=state, integrator_key_id="integrator")
 
 
 def test_integrator_proceeds_when_pending_veto_resolved_in_ledger(tmp_path, monkeypatch):
@@ -1060,7 +1123,7 @@ def test_supervisor_refuses_to_emit_heartbeat_without_verified_ledger(tmp_path):
     with pytest.raises(ValueError, match="requires a ledger path"):
         signed_heartbeat(1, "2026-01-01T00:00:00+00:00", str(private), key_id="supervisor",
                          expires_at="2026-01-01T00:05:00+00:00", ledger_path=None,
-                         trusted_keys={"unused": "unused"})
+                         trusted_keys={"unused": "unused"}, state_path=tmp_path / "heartbeat-state.json", integrator_key_id="integrator")
 
 
 def test_integrator_rejects_signed_heartbeat_missing_ledger_custody_state(tmp_path):
@@ -1068,7 +1131,7 @@ def test_integrator_rejects_signed_heartbeat_missing_ledger_custody_state(tmp_pa
     promote, repo, bare, _base, _head, _tree, auth, sources, signature = _git_fixture(tmp_path)
     registry = json.loads(sources.trust_registry.read_text())
     event = _sign({"sequence": 2, "key_id": "supervisor", "issued_at": "2026-01-01T00:00:00+00:00",
-        "expires_at": "2026-01-01T02:00:00+00:00", "type": "heartbeat"},
+        "expires_at": "2026-01-01T02:00:00+00:00", "type": "heartbeat", "state_sha256": "0" * 64},
         registry["test_supervisor_private_key"])
     sources.heartbeat.write_text(json.dumps(event))
     _assert_integrator_rejects_without_main_change(promote, repo, bare, auth, signature, sources,
@@ -1247,7 +1310,8 @@ def test_integrator_rejects_replayed_heartbeat_sequence(tmp_path):
     ledger = tmp_path / "empty-ledger.jsonl"; ledger.touch()
     heartbeat.write_text(json.dumps(signed_heartbeat(4, "2026-01-01T00:00:00+00:00",
         str(private), key_id="supervisor", expires_at="2026-01-01T00:05:00+00:00", ledger_path=ledger,
-        trusted_keys={"unused": str(public)})))
+        trusted_keys={"unused": str(public)}, state_path=tmp_path / "heartbeat-state.json",
+        integrator_key_id="integrator")))
     now = __import__("datetime").datetime(2026, 1, 1, 0, 1, tzinfo=__import__("datetime").timezone.utc)
     assert not _heartbeat(heartbeat, {"supervisor_key_id": "supervisor",
         "supervisor_public_key": str(public)}, now)
@@ -1261,7 +1325,8 @@ def test_integrator_rejects_heartbeat_older_than_one_hour_even_if_registry_allow
     ledger = tmp_path / "empty-ledger.jsonl"; ledger.touch()
     heartbeat.write_text(json.dumps(signed_heartbeat(1, "2026-01-01T00:00:00+00:00",
         str(private), key_id="supervisor", expires_at="2026-01-01T03:00:00+00:00", ledger_path=ledger,
-        trusted_keys={"unused": str(public)})))
+        trusted_keys={"unused": str(public)}, state_path=tmp_path / "heartbeat-state.json",
+        integrator_key_id="integrator")))
     now = __import__("datetime").datetime(2026, 1, 1, 1, 0, 1, tzinfo=__import__("datetime").timezone.utc)
     assert not _heartbeat(heartbeat, {"supervisor_key_id": "supervisor",
         "supervisor_public_key": str(public), "heartbeat_max_age_seconds": 7200}, now)
@@ -1275,7 +1340,8 @@ def test_integrator_rejects_heartbeat_issued_in_the_future(tmp_path):
     ledger = tmp_path / "empty-ledger.jsonl"; ledger.touch()
     heartbeat.write_text(json.dumps(signed_heartbeat(1, "2026-01-01T00:02:00+00:00",
         str(private), key_id="supervisor", expires_at="2026-01-01T01:00:00+00:00", ledger_path=ledger,
-        trusted_keys={"unused": str(public)})))
+        trusted_keys={"unused": str(public)}, state_path=tmp_path / "heartbeat-state.json",
+        integrator_key_id="integrator")))
     now = __import__("datetime").datetime(2026, 1, 1, 0, 0, tzinfo=__import__("datetime").timezone.utc)
     assert not _heartbeat(heartbeat, {"supervisor_key_id": "supervisor",
         "supervisor_public_key": str(public)}, now)
@@ -1522,7 +1588,7 @@ def test_integrator_blocks_on_heartbeat_with_unknown_key_id(tmp_path):
         2, "2026-01-01T00:00:00+00:00", str(private), key_id="unknown-supervisor",
         expires_at="2026-01-01T02:00:00+00:00",
         ledger_path=sources.ledger, trusted_keys=json.loads(sources.trust_registry.read_text())["ledger_keys"],
-    )
+        state_path=tmp_path / "unknown-supervisor-state.json", integrator_key_id="integrator")
     sources.heartbeat.write_text(json.dumps(event))
 
     _assert_integrator_rejects_without_main_change(
@@ -1667,7 +1733,7 @@ def test_integrator_refuses_stale_supervisor_heartbeat(tmp_path):
         expires_at="2026-01-01T00:30:00+00:00",
         ledger_path=sources.ledger,
         trusted_keys=json.loads(sources.trust_registry.read_text())["ledger_keys"],
-    )
+        state_path=tmp_path / "heartbeat-state.json", integrator_key_id="integrator")
     sources.heartbeat.write_text(json.dumps(expired))
     identity = type("Identity", (), {
         "__call__": lambda self: "integrator",

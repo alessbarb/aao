@@ -4,8 +4,10 @@ from __future__ import annotations
 
 import base64
 import fcntl
+import hashlib
 import json
 import os
+import stat
 import subprocess
 import tempfile
 from datetime import datetime, timedelta
@@ -37,8 +39,13 @@ def _public_key_der(path: str) -> bytes:
 
 
 def _read_state(path: Path, private_key: str) -> dict[str, Any]:
-    if not path.exists():
+    try:
+        metadata = path.lstat()
+    except FileNotFoundError:
         return {}
+    if (not stat.S_ISREG(metadata.st_mode) or metadata.st_uid != os.geteuid() or
+            stat.S_IMODE(metadata.st_mode) != 0o600):
+        raise ValueError("supervisor state must be owned by supervisor uid and mode 0600")
     state = json.loads(path.read_text())
     try:
         signature = base64.b64decode(state.pop("signature"), validate=True)
@@ -162,20 +169,21 @@ def inspect(
 
 def signed_heartbeat(sequence: int, issued_at: str, private_key: str, *, key_id: str,
                      expires_at: str, ledger_path: Path,
-                     trusted_keys: dict[str, Any] | None = None, state_path: Path | None = None,
-                     integrator_key_id: str = "integrator") -> dict[str, Any]:
+                     state_path: Path, integrator_key_id: str,
+                     trusted_keys: dict[str, Any] | None = None) -> dict[str, Any]:
     """Sign supervisor state; when given custody inputs, refresh the durable registry."""
     if ledger_path is None:
         raise ValueError("supervisor requires a ledger path")
     prior: dict[str, Any] = {}
-    lock = None
-    if state_path:
-        state_path.parent.mkdir(parents=True, exist_ok=True)
-        lock = (state_path.with_name(state_path.name + ".lock")).open("a")
-        fcntl.flock(lock, fcntl.LOCK_EX)
-        prior = _read_state(state_path, private_key)
+    state_path.parent.mkdir(parents=True, exist_ok=True)
+    lock = (state_path.with_name(state_path.name + ".lock")).open("a")
+    fcntl.flock(lock, fcntl.LOCK_EX)
+    prior = _read_state(state_path, private_key)
+    prior_state_bytes = state_path.read_bytes() if state_path.exists() else canonical({})
     if not trusted_keys:
         raise ValueError("supervisor requires trusted ledger keys")
+    if not isinstance(integrator_key_id, str) or not integrator_key_id:
+        raise ValueError("supervisor requires an integrator key id")
     integrator = trusted_keys.get(integrator_key_id)
     if isinstance(integrator, dict) and integrator.get("public_key"):
         if integrator.get("can_resolve_pending") is True or integrator.get("can_authorize") is True:
@@ -193,8 +201,7 @@ def signed_heartbeat(sequence: int, issued_at: str, private_key: str, *, key_id:
         message = "ledger truncated or rewritten since last heartbeat"
         incidents = list(prior.get("incidents", []))
         incidents.append({"type": "incident", "message": message, "issued_at": issued_at})
-        if state_path:
-            _write_state(state_path, {**prior, "incidents": incidents}, private_key)
+        _write_state(state_path, {**prior, "incidents": incidents}, private_key)
         incident_key = trusted_keys.get(key_id)
         if isinstance(incident_key, dict) and incident_key.get("can_record_incidents") is True:
             append(ledger_path, {"type": "incident", "id": f"ledger-continuity-{sequence}",
@@ -212,13 +219,11 @@ def signed_heartbeat(sequence: int, issued_at: str, private_key: str, *, key_id:
         markers[candidate] = sorted(set(markers.get(candidate, [])) | set(digests))
     event = {"sequence": sequence, "key_id": key_id, "issued_at": issued_at,
              "expires_at": expires_at, "type": "heartbeat", "ledger_head": head,
-             "pending_markers": markers}
+             "pending_markers": markers, "state_sha256": hashlib.sha256(prior_state_bytes).hexdigest()}
     signed = _sign(event, private_key)
-    if state_path:
-        state_path.parent.mkdir(parents=True, exist_ok=True)
-        state = {**prior, "sequence": max(sequence, int(prior.get("sequence", 0))),
-                 "ledger_head": head, "pending_markers": markers}
-        _write_state(state_path, state, private_key)
-        fcntl.flock(lock, fcntl.LOCK_UN)
-        lock.close()
+    state = {**prior, "sequence": max(sequence, int(prior.get("sequence", 0))),
+             "ledger_head": head, "pending_markers": markers}
+    _write_state(state_path, state, private_key)
+    fcntl.flock(lock, fcntl.LOCK_UN)
+    lock.close()
     return signed

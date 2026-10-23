@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import base64
 import json
+import re
 import subprocess
 from collections.abc import Callable
 from dataclasses import dataclass
@@ -64,6 +65,8 @@ def _heartbeat(path: Path, registry: dict[str, Any], now: datetime) -> dict[str,
     event = json.loads(path.read_text())
     key_id = registry["supervisor_key_id"]
     if event.get("key_id") != key_id or event.get("type") != "heartbeat":
+        return None
+    if not isinstance(event.get("state_sha256"), str) or not re.fullmatch(r"[0-9a-f]{64}", event["state_sha256"]):
         return None
     expiry = datetime.fromisoformat(event["expires_at"])
     issued = datetime.fromisoformat(event["issued_at"])
