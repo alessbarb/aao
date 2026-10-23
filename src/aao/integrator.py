@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import base64
 import json
+import re
 import subprocess
 from collections.abc import Callable
 from dataclasses import dataclass
@@ -60,18 +61,20 @@ def _git(repo: Path, *args: str) -> str:
     return subprocess.run(["git", "-C", str(repo), *args], check=True, capture_output=True, text=True).stdout.strip()
 
 
-def _heartbeat(path: Path, registry: dict[str, Any], now: datetime) -> bool:
+def _heartbeat(path: Path, registry: dict[str, Any], now: datetime) -> dict[str, Any] | None:
     event = json.loads(path.read_text())
     key_id = registry["supervisor_key_id"]
     if event.get("key_id") != key_id or event.get("type") != "heartbeat":
-        return False
+        return None
+    if not isinstance(event.get("state_sha256"), str) or not re.fullmatch(r"[0-9a-f]{64}", event["state_sha256"]):
+        return None
     expiry = datetime.fromisoformat(event["expires_at"])
     issued = datetime.fromisoformat(event["issued_at"])
     sequence_path = path.with_suffix(path.suffix + ".sequence")
     prior = int(sequence_path.read_text()) if sequence_path.exists() else 0
     if (event.get("sequence", 0) <= prior or now >= expiry or issued > now.replace(microsecond=0) + __import__("datetime").timedelta(seconds=60)
             or (now - issued).total_seconds() > min(3600, registry.get("heartbeat_max_age_seconds", 3600))):
-        return False
+        return None
     signature = base64.b64decode(event["signature"], validate=True)
     signed = {k: v for k, v in event.items() if k != "signature"}
     import tempfile
@@ -83,7 +86,7 @@ def _heartbeat(path: Path, registry: dict[str, Any], now: datetime) -> bool:
             check=False, capture_output=True).returncode == 0
     if valid:
         sequence_path.write_text(str(event["sequence"]))
-    return valid
+    return event if valid else None
 
 
 def promote(repo: Path, remote: str, auth: dict[str, Any], signature: str,
@@ -98,8 +101,26 @@ def promote(repo: Path, remote: str, auth: dict[str, Any], signature: str,
     registry = json.loads(trust_sources.trust_registry.read_text())
     ledger_keys = registry["ledger_keys"]
     _validate_integrator_key_separation(registry)
-    anchor = trust_sources.ledger_anchor.read_text().strip()
-    rows = verify(trust_sources.ledger, ledger_keys, anchor)
+    rows = verify(trust_sources.ledger, ledger_keys)
+    current_time = now()
+    if current_time.tzinfo is None:
+        raise ValueError("clock must return timezone-aware datetime")
+    heartbeat = _heartbeat(trust_sources.heartbeat, registry, current_time)
+    if heartbeat is None:
+        raise ValueError("valid supervisor heartbeat unavailable")
+    heartbeat_ok = True
+    supervisor_head = heartbeat.get("ledger_head")
+    supervisor_markers = heartbeat.get("pending_markers")
+    if (not isinstance(supervisor_head, str) or not isinstance(supervisor_markers, dict) or
+            any(not isinstance(candidate, str) or not isinstance(digests, list) or
+                any(not isinstance(digest, str) for digest in digests)
+                for candidate, digests in supervisor_markers.items())):
+        raise ValueError("valid supervisor heartbeat unavailable: missing ledger custody state")
+    terminal = rows[-1]["hash"] if rows else "0" * 64
+    if terminal != supervisor_head:
+        if supervisor_head == "0" * 64 or supervisor_head in {row["hash"] for row in rows}:
+            raise ValueError("ledger not yet anchored")
+        raise ValueError("ledger truncated or rewritten")
     try:
         markers = pending_vetoes(Path(str(trust_sources.ledger) + ".pending-vetoes"), auth["candidate_sha"],
                                  trust_sources.ledger.stat().st_uid)
@@ -115,6 +136,13 @@ def promote(repo: Path, remote: str, auth: dict[str, Any], signature: str,
             if not isinstance(key_entry, dict) or key_entry.get("can_resolve_pending") is not True:
                 raise ValueError("resolves_pending signer is not an enabled authority")
             resolved.update(values)
+    seen = set(supervisor_markers.get(auth["candidate_sha"], []))
+    present = set(markers)
+    deleted = seen - present - resolved
+    if deleted:
+        raise ValueError("pending veto marker deleted")
+    if seen - resolved:
+        raise ValueError("candidate has an unresolved pending veto")
     if any(digest not in resolved for digest in markers):
         raise ValueError("candidate has an unresolved pending veto")
     incident_resolvers = registry.get("incident_resolvers")
@@ -127,10 +155,6 @@ def promote(repo: Path, remote: str, auth: dict[str, Any], signature: str,
         raise ValueError("active ledger veto")
     if open_incidents(rows):
         raise RuntimeError("open ledger incident")
-    current_time = now()
-    if current_time.tzinfo is None:
-        raise ValueError("clock must return timezone-aware datetime")
-    heartbeat_ok = _heartbeat(trust_sources.heartbeat, registry, current_time)
     ra = registry["ra_status"]
     ra01 = ra.get("RA-01") == "PASS"
     ra02 = ra.get("RA-02") == "PASS"
@@ -243,7 +267,8 @@ def promote(repo: Path, remote: str, auth: dict[str, Any], signature: str,
                 "observed_tree_sha": observed["tree_sha"],
                 "intended_parents": expected_parents,
                 "observed_parents": observed["parents"],
-            }, registry["integrator_key_id"], str(trust_sources.integrator_private_key), ledger_keys, anchor)
+            }, registry["integrator_key_id"], str(trust_sources.integrator_private_key), ledger_keys,
+                rows[-1]["hash"] if rows else "0" * 64)
             trust_sources.ledger_anchor.write_text(incident["hash"])
         except Exception as ledger_error:  # noqa: BLE001 - preserve freeze if recording itself fails.
             raise RuntimeError(f"post-publication incident; frozen; ledger recording failed: {ledger_error}") from error
