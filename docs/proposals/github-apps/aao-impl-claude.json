@@ -8,9 +8,8 @@
   "name": "aao-impl-claude",
   "default_permissions": {
     "contents": "write",
-    "pull_requests": "write",
     "workflows": "write",
     "metadata": "read"
   },
-  "description": "AAO implementer. contents/workflows write is for its FORK in the aao-agents org only; on the canonical repo it must be installed with pull requests access only (no contents write)."
+  "description": "AAO implementer. Install ONLY on its fork in the aao-agents organization; never on the canonical repository (App permissions are the same in every installation). Pull requests to the canonical repo are opened by aao-pm."
 }

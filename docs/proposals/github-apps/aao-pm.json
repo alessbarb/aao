@@ -8,9 +8,9 @@
   "name": "aao-pm",
   "default_permissions": {
     "issues": "write",
-    "pull_requests": "read",
+    "pull_requests": "write",
     "contents": "read",
     "metadata": "read"
   },
-  "description": "AAO provisional PM: issues/labels, read-only code. Canonical repo."
+  "description": "AAO provisional PM: opens pull requests to the canonical repo from implementer fork branches, manages issues/labels; read-only code."
 }

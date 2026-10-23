@@ -54,6 +54,21 @@ Cada implementador tiene **su propia App**. Así la atribución distingue a Code
 
 **Punto crítico (P3).** En un repositorio privado del plan gratuito no hay protección de rama. Cualquier App con `contents: write` en el canónico podría empujar a `main`. Por eso **solo el integrador tiene `contents: write` en el canónico**. Los implementadores escriben únicamente en el fork.
 
+
+## 4-bis. Corrección de la especificación (auditoría del harness, A6-05 y A6-06, 2026-10-23)
+
+**Hecho de GitHub:** los permisos se definen **por App**, no por instalación. Una App instalada en dos repositorios tiene los mismos permisos en ambos. Por tanto, la tabla del §4 con columnas por repositorio **no es realizable** para los implementadores.
+
+**Regla corregida:**
+
+- **Apps de implementador (`aao-impl-*`):** se instalan **solo en su fork**, nunca en el canónico. Permisos: `contents: write`, `workflows: write` y `metadata: read`. Sin `pull_requests`.
+- **Apertura de PR hacia el canónico:** la hace **`aao-pm`**, con `pull_requests: write`, `contents: read` e `issues: write` en el canónico. Abre la PR desde la rama del fork indicada por el implementador.
+  - La **autoría** sigue siendo verificable: los commits y los eventos de push del fork los hace la App del implementador, y el supervisor la atribuye con RA-02.
+  - El PM **no** puede escribir código en el canónico.
+- **Auditores:** `checks: write` **y `statuses: write`**. P3 §4 prevalece, porque el ruleset exige que la App fuente del check obligatorio tenga `statuses: write`. P3-04 comprueba que un status de otra App no satisface el check.
+- **A-14 (`workflows`)** se prueba **en el fork**, con la App del implementador, y en el canónico con `aao-integrator`. Ninguna otra App puede probarlo.
+- **A-10** compara los permisos de cada instalación con esta tabla corregida, según el repositorio en el que esté instalada la App.
+
 ## 5. Modelo de fork (prevención sin plan de pago)
 
 - **Propuesta:** crear una **organización gratuita** (p. ej. `aao-agents`) con un fork privado del repositorio. Las Apps de implementación se instalan con escritura solo en el fork. Las PR se abren desde `aao-agents:<rama>` hacia el canónico.
