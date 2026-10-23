@@ -3,8 +3,11 @@
 from __future__ import annotations
 
 import base64
+import fcntl
 import json
+import os
 import subprocess
+import tempfile
 from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Any
@@ -27,18 +30,51 @@ def _sign(event: dict[str, Any], private_key: str) -> dict[str, Any]:
     return {**event, "signature": base64.b64encode(signature).decode()}
 
 
-def _sequence(path: Path) -> int:
-    state = json.loads(path.read_text()) if path.exists() else {}
+def _read_state(path: Path, private_key: str) -> dict[str, Any]:
+    if not path.exists():
+        return {}
+    state = json.loads(path.read_text())
+    signature = base64.b64decode(state.pop("signature"), validate=True)
+    with tempfile.TemporaryDirectory() as directory:
+        root = Path(directory)
+        public, sig, message = root / "public.pem", root / "sig", root / "message"
+        subprocess.run(["openssl", "pkey", "-in", private_key, "-pubout", "-out", str(public)],
+                       check=True, capture_output=True)
+        sig.write_bytes(signature)
+        message.write_bytes(canonical(state))
+        result = subprocess.run(["openssl", "pkeyutl", "-verify", "-pubin", "-inkey", str(public),
+            "-sigfile", str(sig), "-in", str(message), "-rawin"], check=False, capture_output=True)
+    if result.returncode:
+        raise ValueError("supervisor state signature is invalid")
+    return state
+
+
+def _write_state(path: Path, state: dict[str, Any], private_key: str) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    fd, temporary = tempfile.mkstemp(prefix=path.name + ".", dir=path.parent)
+    try:
+        with os.fdopen(fd, "w") as handle:
+            json.dump(_sign(state, private_key), handle, sort_keys=True)
+            handle.flush()
+            os.fsync(handle.fileno())
+        os.replace(temporary, path)
+    finally:
+        if os.path.exists(temporary):
+            os.unlink(temporary)
+
+
+def _sequence(path: Path, private_key: str) -> int:
+    state = _read_state(path, private_key)
     return int(state.get("sequence", 0))
 
 
-def _persist_sequence(path: Path, sequence: int) -> None:
+def _persist_sequence(path: Path, sequence: int, private_key: str) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
-    state = json.loads(path.read_text()) if path.exists() else {}
-    state["sequence"] = sequence
-    temporary = path.with_name(path.name + ".tmp")
-    temporary.write_text(json.dumps(state, sort_keys=True))
-    temporary.replace(path)
+    with (path.with_name(path.name + ".lock")).open("a") as lock:
+        fcntl.flock(lock, fcntl.LOCK_EX)
+        state = _read_state(path, private_key)
+        state["sequence"] = max(sequence, int(state.get("sequence", 0)))
+        _write_state(path, state, private_key)
 
 
 def inspect(
@@ -77,7 +113,7 @@ def inspect(
     protected = protected_path_registry or {".github/workflows/": "R2"}
     order = {"R1": 1, "R2": 2, "R3": 3}
     events = []
-    seq = max(sequence, _sequence(state_path))
+    seq = max(sequence, _sequence(state_path, private_key))
     timestamp = now or datetime.now().astimezone().isoformat()
     expiry = (datetime.fromisoformat(timestamp.replace("Z", "+00:00")) + timedelta(minutes=5)).isoformat()  # noqa: FURB162
     for sha in commits:
@@ -111,36 +147,39 @@ def inspect(
                 "protected_path_change": bool(changed_rules),
                 "protected_path_unauthorized": insufficient, "identity_mismatch": mismatch,
             }, private_key))
-    _persist_sequence(state_path, seq)
+    _persist_sequence(state_path, seq, private_key)
     return events
 
 
 def signed_heartbeat(sequence: int, issued_at: str, private_key: str, *, key_id: str,
-                     expires_at: str, ledger_path: Path | None = None,
+                     expires_at: str, ledger_path: Path,
                      trusted_keys: dict[str, Any] | None = None, state_path: Path | None = None,
                      ledger_head: str | None = None,
                      pending_markers: dict[str, list[str]] | None = None) -> dict[str, Any]:
     """Sign supervisor state; when given custody inputs, refresh the durable registry."""
+    if ledger_path is None:
+        raise ValueError("supervisor requires a ledger path")
     prior: dict[str, Any] = {}
-    if state_path and state_path.exists():
-        prior = json.loads(state_path.read_text())
+    lock = None
+    if state_path:
+        state_path.parent.mkdir(parents=True, exist_ok=True)
+        lock = (state_path.with_name(state_path.name + ".lock")).open("a")
+        fcntl.flock(lock, fcntl.LOCK_EX)
+        prior = _read_state(state_path, private_key)
     markers = {key: list(values) for key, values in prior.get("pending_markers", {}).items()}
     head = ledger_head or "0" * 64
-    if ledger_path is not None:
-        if not trusted_keys:
-            raise ValueError("supervisor requires trusted ledger keys")
-        rows = verify(ledger_path, trusted_keys)
-        head = rows[-1]["hash"] if rows else "0" * 64
-        resolved = {digest for row in rows if "resolves_pending" in row
-                    for digest in row["resolves_pending"]}
-        markers = {candidate: [digest for digest in digests if digest not in resolved]
-                   for candidate, digests in markers.items()}
-        markers = {candidate: digests for candidate, digests in markers.items() if digests}
-        current = all_pending_vetoes(Path(str(ledger_path) + ".pending-vetoes"), ledger_path.stat().st_uid)
-        for candidate, digests in current.items():
-            markers[candidate] = sorted(set(markers.get(candidate, [])) | set(digests))
-    elif pending_markers is not None:
-        markers = pending_markers
+    if not trusted_keys:
+        raise ValueError("supervisor requires trusted ledger keys")
+    rows = verify(ledger_path, trusted_keys)
+    head = rows[-1]["hash"] if rows else "0" * 64
+    resolved = {digest for row in rows if "resolves_pending" in row
+                for digest in row["resolves_pending"]}
+    markers = {candidate: [digest for digest in digests if digest not in resolved]
+               for candidate, digests in markers.items()}
+    markers = {candidate: digests for candidate, digests in markers.items() if digests}
+    current = all_pending_vetoes(Path(str(ledger_path) + ".pending-vetoes"), ledger_path.stat().st_uid)
+    for candidate, digests in current.items():
+        markers[candidate] = sorted(set(markers.get(candidate, [])) | set(digests))
     event = {"sequence": sequence, "key_id": key_id, "issued_at": issued_at,
              "expires_at": expires_at, "type": "heartbeat", "ledger_head": head,
              "pending_markers": markers}
@@ -149,7 +188,7 @@ def signed_heartbeat(sequence: int, issued_at: str, private_key: str, *, key_id:
         state_path.parent.mkdir(parents=True, exist_ok=True)
         state = {**prior, "sequence": max(sequence, int(prior.get("sequence", 0))),
                  "ledger_head": head, "pending_markers": markers}
-        temporary = state_path.with_name(state_path.name + ".tmp")
-        temporary.write_text(json.dumps(state, sort_keys=True))
-        temporary.replace(state_path)
+        _write_state(state_path, state, private_key)
+        fcntl.flock(lock, fcntl.LOCK_UN)
+        lock.close()
     return signed

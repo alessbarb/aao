@@ -2,6 +2,8 @@
 
 This work implements local mechanisms only. It does not activate GOV-REV-002, certify identity, or authorize a merge. GitHub, network, sudo and external publication are out of scope. No claim of independent custody is made.
 
+**F4-01a limitation:** the integrator uses the supervisor's signed heartbeat snapshot to detect only veto markers and ledger state already recorded by that supervisor. A marker deleted before the next heartbeat is not covered; the exposure window is bounded by the heartbeat's validity period. This mitigation depends on exclusive custody of the supervisor uid. It narrows, but does not close, A-2. The manifest gate still uses its older external ledger anchor; F4-01b, which advances that anchor independently, remains pending. P1 having run does not remove these logic limits.
+
 | Policy requirement | Prototype / evidence | Status |
 |---|---|---|
 | §6.1–6.2 signed authorization | `integration_authorization.py`; fail-closed snapshot reasons | Prototype; callers must supply authenticated state |

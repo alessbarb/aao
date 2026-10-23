@@ -60,18 +60,18 @@ def _git(repo: Path, *args: str) -> str:
     return subprocess.run(["git", "-C", str(repo), *args], check=True, capture_output=True, text=True).stdout.strip()
 
 
-def _heartbeat(path: Path, registry: dict[str, Any], now: datetime) -> bool:
+def _heartbeat(path: Path, registry: dict[str, Any], now: datetime) -> dict[str, Any] | None:
     event = json.loads(path.read_text())
     key_id = registry["supervisor_key_id"]
     if event.get("key_id") != key_id or event.get("type") != "heartbeat":
-        return False
+        return None
     expiry = datetime.fromisoformat(event["expires_at"])
     issued = datetime.fromisoformat(event["issued_at"])
     sequence_path = path.with_suffix(path.suffix + ".sequence")
     prior = int(sequence_path.read_text()) if sequence_path.exists() else 0
     if (event.get("sequence", 0) <= prior or now >= expiry or issued > now.replace(microsecond=0) + __import__("datetime").timedelta(seconds=60)
             or (now - issued).total_seconds() > min(3600, registry.get("heartbeat_max_age_seconds", 3600))):
-        return False
+        return None
     signature = base64.b64decode(event["signature"], validate=True)
     signed = {k: v for k, v in event.items() if k != "signature"}
     import tempfile
@@ -83,7 +83,7 @@ def _heartbeat(path: Path, registry: dict[str, Any], now: datetime) -> bool:
             check=False, capture_output=True).returncode == 0
     if valid:
         sequence_path.write_text(str(event["sequence"]))
-    return valid
+    return event if valid else None
 
 
 def promote(repo: Path, remote: str, auth: dict[str, Any], signature: str,
@@ -102,10 +102,10 @@ def promote(repo: Path, remote: str, auth: dict[str, Any], signature: str,
     current_time = now()
     if current_time.tzinfo is None:
         raise ValueError("clock must return timezone-aware datetime")
-    heartbeat_ok = _heartbeat(trust_sources.heartbeat, registry, current_time)
-    if not heartbeat_ok:
+    heartbeat = _heartbeat(trust_sources.heartbeat, registry, current_time)
+    if heartbeat is None:
         raise ValueError("valid supervisor heartbeat unavailable")
-    heartbeat = json.loads(trust_sources.heartbeat.read_text())
+    heartbeat_ok = True
     supervisor_head = heartbeat.get("ledger_head")
     supervisor_markers = heartbeat.get("pending_markers")
     if (not isinstance(supervisor_head, str) or not isinstance(supervisor_markers, dict) or

@@ -105,13 +105,13 @@ def record_pending_veto(anchor: dict[str, Any], candidate_sha: str, manifest_sha
     try:
         if not directory.exists():
             _check_parents(directory, (anchor["auditor_uid"],))
-            directory.mkdir(mode=0o700)
+            directory.mkdir(mode=0o750)
         marker = {"schema": "aao.pending-veto.v1", "candidate_sha": candidate_sha,
                   "manifest_sha256": manifest_sha256, "reason": reason}
         data = _canonical(marker)
         digest = _sha(data)
         path = directory / f"{candidate_sha}-{digest}.json"
-        descriptor = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW, 0o600)
+        descriptor = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW, 0o640)
         with os.fdopen(descriptor, "wb") as handle:
             handle.write(data)
     except FileExistsError:
