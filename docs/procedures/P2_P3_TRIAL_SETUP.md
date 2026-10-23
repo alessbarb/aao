@@ -13,6 +13,8 @@
 cd ~/workspace/repos/active/aao && git fetch origin && git checkout <SHA revisado de esta PR>
 sudo install -d -o root -g root -m 0755 /opt/aao-p2
 sudo install -o root -g root -m 0755 scripts/github_apps/exchange_manifest_code.py /opt/aao-p2/
+sudo install -d -o root -g root -m 0755 /opt/aao-p2/github-apps
+sudo install -o root -g root -m 0644 docs/proposals/github-apps/*.json /opt/aao-p2/github-apps/
 gh repo create alessbarb/aao-governance-trial --public --description "AAO P2/P3 trial (disposable)" --add-readme
 ```
 

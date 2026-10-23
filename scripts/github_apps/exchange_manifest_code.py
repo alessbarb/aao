@@ -34,6 +34,13 @@ def main() -> int:
     if os.geteuid() == 0 or ROLE_FOR_APP.get(app) != user:
         print(f"refusing: {app} must be exchanged by its role account, not {user}", file=sys.stderr)
         return 1
+    # Read the reviewed manifest BEFORE using the single-use code, so a missing manifest never burns it.
+    try:
+        expected = json.loads((MANIFESTS / f"{app}.json").read_text(encoding="utf-8"))["default_permissions"]
+    except (OSError, ValueError, KeyError) as error:
+        print(f"refusing: reviewed manifest for {app} unavailable in {MANIFESTS} ({error}); code not used",
+              file=sys.stderr)
+        return 1
     request = urllib.request.Request(f"{API}/app-manifests/{code}/conversions", method="POST",
                                      headers={"Accept": "application/vnd.github+json"})
     with urllib.request.urlopen(request, timeout=30) as response:
@@ -41,7 +48,6 @@ def main() -> int:
     if data.get("slug") != app and data.get("name") != app:
         print(f"refusing: GitHub returned app {data.get('slug')!r}, expected {app!r}", file=sys.stderr)
         return 1
-    expected = json.loads((MANIFESTS / f"{app}.json").read_text(encoding="utf-8"))["default_permissions"]
     if data.get("permissions") != expected:
         # The form is a local file and could have been altered: never keep a key for an App whose
         # permissions differ from the reviewed manifest. The App must be deleted and recreated.
