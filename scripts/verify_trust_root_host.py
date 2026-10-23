@@ -175,35 +175,44 @@ POLKIT_DIRS = ("/etc/polkit-1/rules.d", "/usr/share/polkit-1/rules.d", "/usr/loc
 
 
 def _package_pristine(path: Path) -> bool:
-    """path belongs to a dpkg package and `dpkg --verify` reports no change to it."""
+    """path is a regular file of an installed dpkg package and `dpkg --verify` reports no change to it."""
+    if path.is_symlink() or not path.is_file():
+        return False
     owner = subprocess.run(["dpkg", "-S", str(path)], check=False, capture_output=True, text=True)
     if owner.returncode:
         return False
     package = owner.stdout.split(":", 1)[0].strip()
-    verify = subprocess.run(["dpkg", "--verify", package], check=False, capture_output=True, text=True).stdout
-    return str(path) not in verify
+    verify = subprocess.run(["dpkg", "--verify", package], check=False, capture_output=True, text=True)
+    return verify.returncode == 0 and str(path) not in verify.stdout
 
 
 def polkit_grants(target: str) -> list[str]:
     """Polkit paths to start processes as another uid (systemd-run --uid, transient units, machinectl shell).
 
-    Effective policy = implicit authorizations + JavaScript rules. Implicit authorizations must require an
-    admin (admins are the root-equivalent groups of E5). Any rule file, in every rules/localauthority
-    directory, that can return YES (or mentions these actions or the target) must be an unmodified file of
-    an installed package; a local or modified rule is a FAIL, since its dynamic effect is not evaluated."""
+    The verifier does not evaluate JavaScript rules, so it does not try to decide which rules are relevant:
+    EVERY file in every rules/localauthority directory must be an unmodified file of an installed package.
+    Implicit authorizations of the unit/machine actions must require an admin (E5's root-equivalent groups).
+    Any query that cannot be completed is a FAIL (fail closed)."""
     found = []
     for action in POLKIT_ACTIONS:
         shown = subprocess.run(["pkaction", "--action-id", action, "--verbose"], check=False, capture_output=True,
-                               text=True).stdout
-        for value in re.findall(r"implicit \w+:\s+(\S+)", shown):
-            if value not in ("auth_admin", "auth_admin_keep", "no"):
-                found.append(f"{action} implicit {value}")
-    pattern = re.compile(rf"{re.escape(target)}|org\.freedesktop\.(systemd1|machine1)|Result\.YES|ResultAny|=yes",
-                         re.IGNORECASE)
+                               text=True)
+        values = re.findall(r"implicit (any|inactive|active):\s+(\S+)", shown.stdout)
+        if shown.returncode == 1 and "No action with action id" in shown.stderr + shown.stdout:
+            continue  # action not registered: polkit denies it
+        if shown.returncode or len(values) != 3:
+            found.append(f"{action}: cannot read implicit authorizations (rc={shown.returncode})")
+            continue
+        found += [f"{action} implicit {kind} {value}" for kind, value in values
+                  if value not in ("auth_admin", "auth_admin_keep", "no")]
     for directory in POLKIT_DIRS:
-        for path in sorted(Path(directory).rglob("*")) if Path(directory).is_dir() else []:
-            if path.is_file() and pattern.search(path.read_text(errors="replace")) and not _package_pristine(path):
-                found.append(f"{path} (local or modified rule)")
+        try:
+            paths = sorted(Path(directory).rglob("*")) if Path(directory).exists() else []
+        except OSError as error:
+            found.append(f"{directory}: cannot list ({error})")
+            continue
+        found += [f"{path} (local or modified rule)" for path in paths
+                  if not path.is_dir() and not _package_pristine(path)]
     return found
 
 

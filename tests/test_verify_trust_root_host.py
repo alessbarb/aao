@@ -100,10 +100,19 @@ def test_local_polkit_rule_is_flagged(tmp_path, monkeypatch):
     rules = tmp_path / "rules.d"
     rules.mkdir()
     (rules / "10-local.rules").write_text('polkit.addRule(function(a, s) { return polkit.Result.YES; });')
-    (rules / "20-other.rules").write_text("// nothing relevant")
+    (rules / "20-other.rules").write_text('var r = polkit.Result["Y" + "ES"];')
     monkeypatch.setattr(verifier, "POLKIT_DIRS", (str(rules),))
     monkeypatch.setattr(verifier, "POLKIT_ACTIONS", ())
     monkeypatch.setattr(verifier, "_package_pristine", lambda path: False)
-    assert verifier.polkit_grants("aao-auditor") == [f"{rules / '10-local.rules'} (local or modified rule)"]
+    assert verifier.polkit_grants("aao-auditor") == [f"{rules / '10-local.rules'} (local or modified rule)",
+                                                     f"{rules / '20-other.rules'} (local or modified rule)"]
     monkeypatch.setattr(verifier, "_package_pristine", lambda path: True)
     assert verifier.polkit_grants("aao-auditor") == []
+
+
+def test_pkaction_failure_fails_closed(monkeypatch):
+    class Failed:
+        returncode, stdout, stderr = 127, "", "pkaction: command not found"
+    monkeypatch.setattr(verifier, "POLKIT_DIRS", ())
+    monkeypatch.setattr(verifier.subprocess, "run", lambda *a, **k: Failed())
+    assert verifier.polkit_grants("aao-auditor")
