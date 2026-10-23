@@ -43,3 +43,28 @@ done
 
   **Recomendación:** (a) hasta P2.
 - **Postgres de desarrollo:** sigue corriendo bajo tu cuenta en `127.0.0.1:54329`. Los agentes lo usan por TCP, sin el socket de `docker`.
+
+## Antigravity como auditor alternativo (resolución delegada en #25)
+
+Para el paquete de la cadena R1 y la raíz inicial, Antigravity actúa como auditor no recusado bajo el uid **`aao-auditor-alt`**. Nunca bajo `aao-impl-ag`, nunca bajo tu cuenta, y sin copiar `~/.antigravity`, `~/.gemini` ni ninguna sesión.
+
+```bash
+# 1. Una vez: inicia sesión de agy COMO el auditor alternativo. El navegador o el código de dispositivo
+#    los completas tú; las credenciales quedan solo en el home de ese uid.
+sudo -u aao-auditor-alt -H agy
+# 2. Instala el ejecutor revisado (root, solo lectura para el rol).
+sudo install -d -o root -g root -m 0755 /opt/aao-audit
+sudo install -o root -g root -m 0755 scripts/audit/run_agy_audit.sh /opt/aao-audit/
+sudo install -o root -g root -m 0644 docs/audit-prompts/r1-chain.md /opt/aao-audit/
+# 3. Auditoría: base 97ad4f1 (último SHA auditado de la pila F4), cabeza = PR #49, que incluye #48.
+sudo -u aao-auditor-alt -H /opt/aao-audit/run_agy_audit.sh \
+  97ad4f13655aae2b736c7ba6b3d8d666e51d4680 <SHA de cabeza de #49> /opt/aao-audit/r1-chain.md
+```
+
+El ejecutor hace lo siguiente:
+- se niega a correr con otro uid;
+- clona el repo público en el SHA fijado;
+- ejecuta agy en modo `plan` y `--sandbox`;
+- guarda `~/aao-audits/<sha>/{prompt.txt,report.md,attestation.json}`, donde `attestation.json` incluye el estado previo de agy de ese uid como evidencia de no participación.
+
+Pega los dos sha256 y el `report.md` en la PR.
