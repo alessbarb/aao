@@ -12,6 +12,7 @@ from typing import Any
 
 from aao.governance_ledger import active_vetoes, append, open_incidents, verify
 from aao.integration_authorization import canonical, validate
+from aao.pending_veto import PendingVetoError, pending_vetoes
 
 
 @dataclass(frozen=True)
@@ -22,6 +23,7 @@ class TrustSources:
     heartbeat: Path
     freeze: Path
     integrator_private_key: Path
+    pending_vetoes_dir: Path
 
 
 def _git(repo: Path, *args: str) -> str:
@@ -67,6 +69,19 @@ def promote(repo: Path, remote: str, auth: dict[str, Any], signature: str,
     ledger_keys = registry["ledger_keys"]
     anchor = trust_sources.ledger_anchor.read_text().strip()
     rows = verify(trust_sources.ledger, ledger_keys, anchor)
+    try:
+        markers = pending_vetoes(trust_sources.pending_vetoes_dir, auth["candidate_sha"],
+                                 trust_sources.ledger.stat().st_uid)
+    except (PendingVetoError, OSError, ValueError) as error:
+        raise ValueError(f"pending vetoes cannot be verified: {error}") from error
+    resolved: set[str] = set()
+    for row in rows:
+        values = row.get("resolves_pending") or []
+        if not isinstance(values, list) or any(not isinstance(value, str) for value in values):
+            raise ValueError("pending vetoes cannot be verified: malformed resolves_pending ledger field")
+        resolved.update(values)
+    if any(digest not in resolved for digest in markers):
+        raise ValueError("candidate has an unresolved pending veto")
     incident_resolvers = registry.get("incident_resolvers")
     if not isinstance(incident_resolvers, list) or any(
         row.get("type") == "incident-resolution" and row.get("key_id") not in incident_resolvers

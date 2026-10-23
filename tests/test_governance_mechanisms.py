@@ -758,11 +758,13 @@ def _git_fixture(tmp_path):
     # exact authorization/heartbeat after changing one field.
     registry["test_auditor_private_key"] = str(auditor_private)
     registry["test_supervisor_private_key"] = str(supervisor_private)
+    registry["test_ledger_private_key"] = str(_ledger_private)
     registry["incident_resolvers"] = ["resolver"]
     registry["ledger_keys"]["resolver"] = {"public_key": str(resolver_public), "can_resolve_incidents": True}
     reg=tmp_path/"registry.json"; reg.write_text(json.dumps(registry))
-    return promote, r, bare, base, head, tree, d, TrustSources(reg,ledger,anchor,heartbeat,freeze,
-        integrator_private), sign(d,str(auditor_private))
+    sources = TrustSources(reg, ledger, anchor, heartbeat, freeze, integrator_private,
+                           Path(str(ledger) + ".pending-vetoes"))
+    return promote, r, bare, base, head, tree, d, sources, sign(d,str(auditor_private))
 
 
 def _integrator_identity(name="integrator"):
@@ -814,6 +816,64 @@ def test_integrator_blocks_on_active_veto_in_ledger(tmp_path):
 
     _assert_integrator_rejects_without_main_change(
         promote, repo, bare, auth, signature, sources, "active ledger veto"
+    )
+
+
+def _add_pending_veto_marker(sources, candidate_sha):
+    directory = sources.pending_vetoes_dir
+    directory.mkdir(mode=0o700)
+    marker = {"schema": "aao.pending-veto.v1", "candidate_sha": candidate_sha,
+              "manifest_sha256": "a" * 64, "reason": "unattributed veto"}
+    data = canonical(marker)
+    digest = hashlib.sha256(data).hexdigest()
+    path = directory / f"{candidate_sha}-{digest}.json"
+    path.write_bytes(data)
+    path.chmod(0o600)
+    return digest
+
+
+def test_integrator_blocks_on_unresolved_pending_veto_marker(tmp_path, monkeypatch):
+    # The test runner's temporary root is group-writable; isolate this behavioral
+    # test from the separate production parent-custody check.
+    monkeypatch.setattr("aao.pending_veto._check_parents", lambda path, uid: None)
+    promote, repo, bare, _base, head, _tree, auth, sources, signature = _git_fixture(tmp_path)
+    _add_pending_veto_marker(sources, head)
+
+    _assert_integrator_rejects_without_main_change(
+        promote, repo, bare, auth, signature, sources, "candidate has an unresolved pending veto"
+    )
+
+
+def test_integrator_proceeds_when_pending_veto_resolved_in_ledger(tmp_path, monkeypatch):
+    monkeypatch.setattr("aao.pending_veto._check_parents", lambda path, uid: None)
+    promote, repo, _bare, _base, head, tree, auth, sources, signature = _git_fixture(tmp_path)
+    digest = _add_pending_veto_marker(sources, head)
+    with pytest.raises(ValueError, match="candidate has an unresolved pending veto"):
+        promote(repo, "origin", auth, signature, sources,
+            identity_provider=_integrator_identity(),
+            now=lambda: __import__("datetime").datetime(2026, 1, 1, 1,
+                tzinfo=__import__("datetime").timezone.utc))
+    registry = json.loads(sources.trust_registry.read_text())
+    resolved = append(sources.ledger, {"type": "pending-veto-resolution",
+        "candidate_sha": head, "resolves_pending": [digest]}, "ledger",
+        registry["test_ledger_private_key"], registry["ledger_keys"])
+    sources.ledger_anchor.write_text(resolved["hash"])
+
+    commit = promote(repo, "origin", auth, signature, sources,
+        identity_provider=_integrator_identity(),
+        now=lambda: __import__("datetime").datetime(2026, 1, 1, 1,
+            tzinfo=__import__("datetime").timezone.utc))
+    assert git(repo, "show", "-s", "--format=%T", commit) == tree
+
+
+def test_integrator_fails_closed_on_unverifiable_pending_veto_dir(tmp_path, monkeypatch):
+    monkeypatch.setattr("aao.pending_veto._check_parents", lambda path, uid: None)
+    promote, repo, bare, _base, head, _tree, auth, sources, signature = _git_fixture(tmp_path)
+    _add_pending_veto_marker(sources, head)
+    sources.pending_vetoes_dir.chmod(0o770)
+
+    _assert_integrator_rejects_without_main_change(
+        promote, repo, bare, auth, signature, sources, "pending vetoes cannot be verified"
     )
 
 
