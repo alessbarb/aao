@@ -27,7 +27,7 @@ python3 scripts/github_apps/create_app_form.py aao-integrator      # escribe /tm
 xdg-open /tmp/aao-create-aao-integrator.html                       # pulsa "Create GitHub App"
 # GitHub redirige a http://127.0.0.1:9/?code=XXXX&state=YYYY (la página no carga; es normal).
 # Comprueba que state coincide con el impreso y copia el valor de code:
-sudo -u aao-integrator -H python3 /opt/aao-p2/exchange_manifest_code.py aao-integrator XXXX
+sudo -u aao-integrator -H python3 /opt/aao-p2/exchange_manifest_code.py aao-integrator   # pega XXXX y pulsa Enter (stdin, no argv)
 ```
 
 - La clave privada solo la recibe el uid del rol (`~/.config/aao/<app>.pem`, en `0600`). Nunca pasa por tu cuenta ni por otra.
@@ -52,12 +52,58 @@ sudo useradd --system --create-home --shell /usr/sbin/nologin aao-probe-noworkfl
 crear_org() {
   python3 scripts/github_apps/create_app_form.py "$1" --org aao-agents && xdg-open "/tmp/aao-create-$1.html"
   read -r -p "code: " code
-  sudo -u "$1" -H python3 /opt/aao-p2/exchange_manifest_code.py "$1" "$code"
+  sudo -u "$1" -H python3 /opt/aao-p2/exchange_manifest_code.py "$1" <<<"$code"
 }
 for app in aao-impl-codex aao-impl-claude aao-impl-ag aao-probe-noworkflows; do crear_org "$app"; done
 ```
 
+> **Registro (2026-10-24):** las nueve Apps ya están creadas e instaladas; sus identificadores no secretos están en `deploy/github-apps/aao-github-apps-registry.json`. La App de Antigravity se llama **`aao-impl-agy`** (manifiesto `docs/proposals/github-apps/aao-impl-agy.json`) y su clave la custodia el usuario Linux **`aao-impl-ag`**. La autenticación API de cada App se comprueba con `scripts/github_apps/verify_app_auth.py` (§1-ter).
+
 Las Apps de la primera pasada se comprueban a posteriori con `scripts/github_apps/verify_app_permissions.sh <apps...>`; todas deben dar PASS.
+
+## 1-ter. Verificar la autenticación API de las nueve Apps
+
+**Quién:** el CEO (sudo, P5 (a)). Cada comprobación corre **como el uid que custodia la clave**; nadie más lee la clave.
+**Qué hace:** con la clave de la App firma un JWT, comprueba `GET /app` (id, slug, permisos frente al manifiesto revisado), la instalación (`app_id`, cuenta, permisos, no suspendida), obtiene un token de instalación, lista los repositorios accesibles y revoca el token. Solo lectura en GitHub. No imprime clave, JWT ni token.
+**Repos esperados:** integrador, auditores, supervisor, notifier y PM solo `autoaiorg/aao` (`selected`). Los implementadores: exactamente los forks indicados con `--fork` (de `autoaiorg/aao` o de su repo de ensayo), nunca el canónico (A-10/A-11).
+
+```bash
+REPO=$HOME/workspace/repos/active/aao
+REV=<SHA de main que contiene este script>
+git -C "$REPO" fetch -q origin && git -C "$REPO" cat-file -e "$REV^{commit}"
+sudo install -d -o root -g root -m 0755 /opt/aao-p2 /opt/aao-p2/github-apps
+git -C "$REPO" show "$REV:scripts/github_apps/verify_app_auth.py" | sudo install -o root -g root -m 0755 /dev/stdin /opt/aao-p2/verify_app_auth.py
+git -C "$REPO" show "$REV:deploy/github-apps/aao-github-apps-registry.json" | sudo install -o root -g root -m 0644 /dev/stdin /opt/aao-p2/aao-github-apps-registry.json
+for m in $(git -C "$REPO" ls-tree --name-only "$REV" docs/proposals/github-apps/ | grep '\.json$'); do
+  git -C "$REPO" show "$REV:$m" | sudo install -o root -g root -m 0644 /dev/stdin "/opt/aao-p2/github-apps/$(basename "$m")"
+done
+out=~/aao-p2-app-auth-$(date +%Y%m%dT%H%M%S).jsonl
+# Tercera columna: solo implementadores. Sustituye cada <forks-...> por TODOS los repos en los que está
+# instalada esa App, separados por comas: su fork de producción (padre autoaiorg/aao) y, si ya existe,
+# su fork de ensayo del paso 3 (padre autoaiorg/aao-governance-trial). Sus repos accesibles deben
+# coincidir exactamente con esa lista. Si aún no hay fork, pon "-": la autenticación se registra igual,
+# pero esa fila da FAIL (alcance no demostrado) y el total no llegará a 9.
+set -o pipefail; rc=0
+while read -r app uid forks; do
+  extra=(); [[ $forks != - ]] && for f in ${forks//,/ }; do extra+=(--fork "$f"); done
+  sudo -u "$uid" -H /usr/bin/python3 -I /opt/aao-p2/verify_app_auth.py "$app" "${extra[@]}" | tee -a "$out" || rc=1
+done <<'APPS'
+aao-integrator aao-integrator -
+aao-auditor aao-auditor -
+aao-auditor-alt aao-auditor-alt -
+aao-supervisor aao-supervisor -
+aao-notifier aao-notifier -
+aao-pm aao-pm -
+aao-impl-claude aao-impl-claude <forks-claude>
+aao-impl-codex aao-impl-codex <forks-codex>
+aao-impl-agy aao-impl-ag <forks-agy>
+APPS
+pass=$(grep -c '"result": "PASS"' "$out" || true)
+# Hacen falta las dos cosas: nueve registros PASS y que ninguna ejecución (ni su tubería) haya fallado.
+echo "PASS: $pass/9 rc=$rc"; if [[ $pass == 9 && $rc == 0 ]]; then echo "RESULT: PASS"; else echo "RESULT: FAIL"; false; fi
+```
+
+Pega el archivo `$out` completo en el issue de P2. No contiene secretos. Solo `RESULT: PASS` (9/9) demuestra la autenticación y el alcance de las nueve Apps; con forks en `-`, las filas de implementadores dan FAIL, y sus `checks` individuales (`jwt_app_id`, `installation_token_issued`, `token_revoked`…) muestran si la autenticación pasó, pero no demuestran el alcance. Nueve PASS **no** son el ensayo P2/P3: RA sigue en PENDING y el integrador no se activa.
 
 ## 2. Instalar las Apps (solo en el repo de ensayo, por ahora)
 

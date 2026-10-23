@@ -5,7 +5,7 @@
   },
   "public": false,
   "default_events": [],
-  "name": "aao-impl-ag",
+  "name": "aao-impl-agy",
   "default_permissions": {
     "contents": "write",
     "workflows": "write",

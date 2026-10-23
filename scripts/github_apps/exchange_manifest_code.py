@@ -2,7 +2,8 @@
 """Exchange a GitHub App manifest code for the App credentials, as the role account (P2).
 
 Run ONLY as the role that will own the App, e.g.:
-    sudo -u aao-integrator -H python3 /opt/aao-p2/exchange_manifest_code.py aao-integrator <code>
+    sudo -u aao-integrator -H python3 /opt/aao-p2/exchange_manifest_code.py aao-integrator <<<"$code"
+The single-use code is read from stdin, never from argv (argv is visible in /proc).
 Stores the private key in ~/.config/aao/<app>.pem (0600, created exclusively) and
 non-secret metadata in ~/.config/aao/<app>.json. Never prints the key, the client
 secret or the webhook secret. Refuses to run as the CEO or as root.
@@ -20,16 +21,19 @@ MANIFESTS = Path(__file__).resolve().parent / "github-apps"
 ROLE_FOR_APP = {"aao-integrator": "aao-integrator", "aao-auditor": "aao-auditor",
                 "aao-auditor-alt": "aao-auditor-alt", "aao-supervisor": "aao-supervisor",
                 "aao-notifier": "aao-notifier", "aao-pm": "aao-pm", "aao-impl-codex": "aao-impl-codex",
-                "aao-impl-claude": "aao-impl-claude", "aao-impl-ag": "aao-impl-ag",
+                "aao-impl-claude": "aao-impl-claude", "aao-impl-agy": "aao-impl-ag",
                 # Disposable A-14 probe: its own uid, created by the CEO only for the trial.
                 "aao-probe-noworkflows": "aao-probe-noworkflows"}
 
 
 def main() -> int:
-    if len(sys.argv) != 3:
+    if len(sys.argv) != 2:
         print(__doc__)
         return 2
-    app, code = sys.argv[1], sys.argv[2]
+    app, code = sys.argv[1], sys.stdin.readline().strip()
+    if not code.isalnum():
+        print("refusing: expected the manifest code on stdin", file=sys.stderr)
+        return 2
     user = pwd.getpwuid(os.geteuid()).pw_name
     if os.geteuid() == 0 or ROLE_FOR_APP.get(app) != user:
         print(f"refusing: {app} must be exchanged by its role account, not {user}", file=sys.stderr)

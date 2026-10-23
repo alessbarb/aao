@@ -16,7 +16,7 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
-from .github_app_auth import ROLE_NAMES, GitHubAppClient, GitHubAuthError
+from .github_app_auth import ROLE_NAMES, GitHubAppClient, GitHubAuthError, linux_user
 
 NOT_RUN = {
     "A-07": "Manual CEO step: with the CEO token, push a commit to the canonical repository; verify governance-violation records the real actor.",
@@ -37,7 +37,7 @@ EXPECTED_PERMISSIONS = {
     # these Apps on the canonical repository. Their fork installation is narrower.
     "aao-impl-codex": {"contents": "write", "pull_requests": "write", "workflows": "write", "metadata": "read"},
     "aao-impl-claude": {"contents": "write", "pull_requests": "write", "workflows": "write", "metadata": "read"},
-    "aao-impl-ag": {"contents": "write", "pull_requests": "write", "workflows": "write", "metadata": "read"},
+    "aao-impl-agy": {"contents": "write", "pull_requests": "write", "workflows": "write", "metadata": "read"},
     "aao-probe-noworkflows": {"contents": "write", "metadata": "read"},
 }
 FORK_PERMISSIONS = {
@@ -45,7 +45,7 @@ FORK_PERMISSIONS = {
     "aao-auditor-alt": {"contents": "read", "metadata": "read"},
     "aao-impl-codex": {"contents": "write", "workflows": "write", "metadata": "read"},
     "aao-impl-claude": {"contents": "write", "workflows": "write", "metadata": "read"},
-    "aao-impl-ag": {"contents": "write", "workflows": "write", "metadata": "read"},
+    "aao-impl-agy": {"contents": "write", "workflows": "write", "metadata": "read"},
 }
 CANONICAL_REPO = "autoaiorg/aao"
 CHECK_WAIT_SECONDS = 300
@@ -64,7 +64,7 @@ def validate_role_uid(role: str) -> None:
     if role not in ROLE_NAMES:
         raise GitHubAuthError("unknown app role")
     try:
-        expected = pwd.getpwnam(role).pw_uid
+        expected = pwd.getpwnam(linux_user(role)).pw_uid
     except KeyError as exc:
         raise GitHubAuthError(f"role account {role} does not exist") from exc
     if expected != os.getuid():
@@ -226,7 +226,7 @@ def _denial_outcome(item: dict, unchanged: bool, rule: str, label: str) -> tuple
 
 
 def _merge_trial_pr(client: GitHubAppClient, base: str, evidence: list[dict]) -> tuple[str, str, list[dict]]:
-    if base.lower() == "/repos/autoaiorg/aao":
+    if base.lower() == f"/repos/{CANONICAL_REPO}":
         return "NOT RUN", "refusing to promote on the canonical repository; use the disposable trial", evidence
     pull_list = _api(client, "GET", f"{base}/pulls?state=open&per_page=100")
     evidence.append(pull_list)
@@ -342,7 +342,7 @@ def _run_test(test_id: str, owner: str, repo: str, role: str, client: GitHubAppC
     evidence: list[dict] = []
     if not _trial_repo_allowed(owner, repo):
         return "NOT RUN", "Repository is not explicitly listed in AAO_GITHUB_TRIAL_REPOS or is the canonical repository; no operation performed.", evidence
-    implementers = {"aao-impl-codex", "aao-impl-claude", "aao-impl-ag"}
+    implementers = {"aao-impl-codex", "aao-impl-claude", "aao-impl-agy"}
     required_roles = {
         "A-01": implementers, "A-02": implementers, "A-03": {"aao-integrator"},
         "A-04": {"aao-integrator"}, "A-05": {"aao-integrator"}, "A-09": {"aao-notifier"},
@@ -423,7 +423,7 @@ def _run_test(test_id: str, owner: str, repo: str, role: str, client: GitHubAppC
         is_trial_fork = is_fork and bool(expected_parent) and parent == expected_parent and not is_configured_canonical
         if is_fork and not (is_trial_fork or is_configured_canonical):
             return "INCONCLUSIVE", "target is a fork but its configured canonical parent was not established", evidence
-        if role in {"aao-impl-codex", "aao-impl-claude", "aao-impl-ag"} and not is_trial_fork:
+        if role in {"aao-impl-codex", "aao-impl-claude", "aao-impl-agy"} and not is_trial_fork:
             return "FAIL", "implementer App is installed on the trial canonical repository; it must be installed only on its verified fork", evidence
         item = _api(client, "GET", "/installation")
         evidence.append(item)
@@ -550,7 +550,7 @@ def _run_test(test_id: str, owner: str, repo: str, role: str, client: GitHubAppC
             unchanged = _verify_unchanged(client, base, before, evidence)
             status, reason = _denial_outcome(item, unchanged, "restrict updates", "CEO push")
             return status, reason, evidence
-        if test_id == "P3-02" and role not in ("aao-impl-codex", "aao-impl-claude", "aao-impl-ag"):
+        if test_id == "P3-02" and role not in ("aao-impl-codex", "aao-impl-claude", "aao-impl-agy"):
             return "NOT RUN", "Run with one of the implementer App roles to test its denial on canonical main.", evidence
         if test_id == "P3-12" and role != "aao-integrator":
             return "NOT RUN", "Run as aao-integrator with a non-fast-forward candidate on the disposable trial main.", evidence
@@ -618,7 +618,7 @@ def _run_test(test_id: str, owner: str, repo: str, role: str, client: GitHubAppC
         if role == "aao-auditor":
             actual_app = item["response"].get("app", {}).get("id") if isinstance(item["response"], dict) else None
             return ("PASS", "aao-audit check was accepted from the configured auditor app_id", evidence) if item["status"] in (200, 201) and actual_app == client.app_id else ("FAIL", "auditor check run rejected or returned a different app_id", evidence)
-        if role not in ("aao-impl-codex", "aao-impl-claude", "aao-impl-ag"):
+        if role not in ("aao-impl-codex", "aao-impl-claude", "aao-impl-agy"):
             return "NOT RUN", "Use aao-auditor for the positive source-attribution check or an implementer for the expected 403.", evidence
         denied = item["status"] == 403 and isinstance(item["response"], dict) and "resource not accessible" in item["response"].get("message", "").lower()
         return ("PASS", "implementer check-run publication denied with HTTP 403 permission reason", evidence) if denied else ("FAIL", "check-run publication was not denied for the expected permission reason", evidence)
@@ -709,7 +709,7 @@ def main(argv: list[str] | None = None) -> int:
     try:
         validate_role_uid(args.role)
         if not _trial_repo_allowed(*args.repo.split("/", 1)):
-            raise GitHubAuthError("--repo must be explicitly listed in AAO_GITHUB_TRIAL_REPOS and cannot be autoaiorg/aao")
+            raise GitHubAuthError("--repo must be explicitly listed in AAO_GITHUB_TRIAL_REPOS and cannot be " + CANONICAL_REPO)
         if args.role == "ceo":
             if args.test_id not in ("P3-01", "P3-09"):
                 raise GitHubAuthError("--role ceo is allowed only for P3-01 and P3-09")
