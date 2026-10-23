@@ -80,7 +80,7 @@ ledger verification fails closed.
 writes a pending-veto marker to `<ledger_path>.pending-vetoes/`, **before any
 analysis**, so the analysis window is covered. There is no mutual exclusion
 between the gate and the start of an audit run. The directory
-has the same custody as the ledger: auditor uid, `0700`, markers `0600`, file
+is owned by the auditor uid, mode `0750` (group read for the supervisor, never group write), markers `0640`, file
 name bound to the marker digest. If the marker cannot be written, the run fails.
 The gate denies any candidate with a marker that no verified ledger entry
 lists in `resolves_pending`. It also denies when the markers cannot be
@@ -103,9 +103,17 @@ marker removed before the next heartbeat is outside that snapshot; the
 exposure window is bounded by the heartbeat validity period. This depends on
 exclusive custody of the supervisor uid. P1's
 execution does not by itself close the logic gap. The integrator path uses this
-signed snapshot; the manifest gate still uses the older external anchor.
-F4-01b, independently advancing the gate's anchor, remains pending. This
-revision is **not** a candidate for `trusted_auditor_revisions`.
+signed snapshot, and since F4-01b the manifest gate does too (section 9).
+**Remaining A-2 window (stack review, 2026-10-23):** a marker written and then
+deleted by another process of the auditor uid **before** the next heartbeat is
+never observed. Two conditions close it:
+- runtime exclusivity of the auditor uid, so only the auditor service runs as
+  `aao-auditor`;
+- a synchronous hand-off of every veto to the supervisor's custody before the
+  veto run returns (F4-03).
+
+Until both hold, this revision is **not** a candidate for
+`trusted_auditor_revisions`.
 
 **Supervisor-state migration:** legacy `state.json` files without a valid
 signature fail closed. They are not automatically imported, repaired, or
