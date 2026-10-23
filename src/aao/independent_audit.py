@@ -266,14 +266,17 @@ def _ledger_entries(ledger: Path) -> list[dict[str, Any]]:
 def _append_ledger(ledger: Path, report: dict[str, Any], report_sha256: str) -> None:
     with ledger.open("a+", encoding="utf-8") as handle:
         fcntl.flock(handle, fcntl.LOCK_EX)
-        entries = _ledger_entries(ledger)
-        body = {
-            "seq": len(entries), "prev_sha256": entries[-1]["entry_sha256"] if entries else "0" * 64,
-            "candidate_sha": report["candidate_sha"], "report_sha256": report_sha256,
-            "verdict": report["verdict"], "veto": report["veto"], "auditor_id": report["auditor_id"],
-            "recorded_at": report["created_at"],
-        }
-        handle.write(json.dumps({**body, "entry_sha256": _sha(_canonical(body))}, sort_keys=True) + "\n")
+        try:
+            entries = _ledger_entries(ledger)
+            body = {
+                "seq": len(entries), "prev_sha256": entries[-1]["entry_sha256"] if entries else "0" * 64,
+                "candidate_sha": report["candidate_sha"], "report_sha256": report_sha256,
+                "verdict": report["verdict"], "veto": report["veto"], "auditor_id": report["auditor_id"],
+                "recorded_at": report["created_at"],
+            }
+            handle.write(json.dumps({**body, "entry_sha256": _sha(_canonical(body))}, sort_keys=True) + "\n")
+        finally:
+            fcntl.flock(handle, fcntl.LOCK_UN)
 
 
 LEGACY_RETIRED = ("legacy audit path retired: caller-supplied policy/key/ledger cannot approve or promote; "

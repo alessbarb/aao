@@ -86,6 +86,8 @@ def _request(inbox, kind):
 
 def test_stage2_and4_alternating_ticks_promote_the_exact_staged_commit(tmp_path, monkeypatch):
     remote, mirror, gh, inbox, reports, state, trust, base, head = _fixture(tmp_path)
+    monkeypatch.setenv("HOME", "/nonexistent")
+    monkeypatch.setenv("GIT_CONFIG_GLOBAL", "/dev/null")
 
     def fake_audit(manifest_path, output, key, **kwargs):
         output.mkdir(parents=True)
@@ -109,6 +111,10 @@ def test_stage2_and4_alternating_ticks_promote_the_exact_staged_commit(tmp_path,
     second = _tick(remote, mirror, gh, inbox, reports, state, trust)
     assert second[0]["status"] == "staged"
     staged = second[0]["staged_commit"]
+    assert _git(mirror, "show", "-s", "--format=%an <%ae>%n%cn <%ce>", staged).splitlines() == [
+        "aao-integrator <aao-integrator@users.noreply.github.com>",
+        "aao-integrator <aao-integrator@users.noreply.github.com>",
+    ]
     gate = _request(inbox, "gate")
     assert gate["promoted_sha"] == staged
     auditor_dispatch.dispatch_once(inbox, reports, tmp_path / "key", gh,
