@@ -23,7 +23,6 @@ class TrustSources:
     heartbeat: Path
     freeze: Path
     integrator_private_key: Path
-    pending_vetoes_dir: Path
 
 
 def _git(repo: Path, *args: str) -> str:
@@ -70,16 +69,20 @@ def promote(repo: Path, remote: str, auth: dict[str, Any], signature: str,
     anchor = trust_sources.ledger_anchor.read_text().strip()
     rows = verify(trust_sources.ledger, ledger_keys, anchor)
     try:
-        markers = pending_vetoes(trust_sources.pending_vetoes_dir, auth["candidate_sha"],
+        markers = pending_vetoes(Path(str(trust_sources.ledger) + ".pending-vetoes"), auth["candidate_sha"],
                                  trust_sources.ledger.stat().st_uid)
     except (PendingVetoError, OSError, ValueError) as error:
         raise ValueError(f"pending vetoes cannot be verified: {error}") from error
     resolved: set[str] = set()
     for row in rows:
-        values = row.get("resolves_pending") or []
-        if not isinstance(values, list) or any(not isinstance(value, str) for value in values):
-            raise ValueError("pending vetoes cannot be verified: malformed resolves_pending ledger field")
-        resolved.update(values)
+        if "resolves_pending" in row:
+            values = row["resolves_pending"]
+            if not isinstance(values, list) or any(not isinstance(value, str) for value in values):
+                raise ValueError("pending vetoes cannot be verified: malformed resolves_pending ledger field")
+            key_entry = ledger_keys.get(row.get("key_id"))
+            if not isinstance(key_entry, dict) or key_entry.get("can_resolve_pending") is not True:
+                raise ValueError("resolves_pending signer is not an enabled authority")
+            resolved.update(values)
     if any(digest not in resolved for digest in markers):
         raise ValueError("candidate has an unresolved pending veto")
     incident_resolvers = registry.get("incident_resolvers")

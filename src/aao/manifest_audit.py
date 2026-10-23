@@ -149,7 +149,9 @@ def _ledger_keys(anchor: dict[str, Any], directory: Path) -> dict[str, Any]:
     """Trusted signer registry for the audit ledger: only the anchored auditor key."""
     public = directory / "auditor.pub"
     public.write_text(anchor["auditor_public_key"], encoding="ascii")
-    return {anchor["policy"]["auditor_id"]: {"public_key": str(public)}}
+    return {anchor["policy"]["auditor_id"]: {
+        "public_key": str(public), "can_resolve_pending": True,
+    }}
 
 
 def ledger_rows(anchor: dict[str, Any]) -> list[dict[str, Any]]:

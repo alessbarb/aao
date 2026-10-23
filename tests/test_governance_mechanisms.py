@@ -751,7 +751,7 @@ def _git_fixture(tmp_path):
     anchor.write_text(verify(ledger, {"ledger":str(ledger_public)})[-1]["hash"] if ledger.exists() and ledger.stat().st_size else "0"*64)
     hb=signed_heartbeat(1,"2026-01-01T00:00:00+00:00",str(supervisor_private),key_id="supervisor",expires_at="2026-01-01T02:00:00+00:00")
     heartbeat.write_text(json.dumps(hb))
-    registry={**state,"repo":"r","pr_number":1,"ledger_keys":{"ledger":{"public_key":str(ledger_public)}, "integrator":{"public_key":str(_integrator_public),"can_record_incidents":True}},"supervisor_key_id":"supervisor","supervisor_public_key":str(supervisor_public),"heartbeat_max_age_seconds":3600,
+    registry={**state,"repo":"r","pr_number":1,"ledger_keys":{"ledger":{"public_key":str(ledger_public)}, "integrator":{"public_key":str(_integrator_public),"can_record_incidents":True}, "auditor":{"public_key":str(auditor_public),"can_resolve_pending":True}},"supervisor_key_id":"supervisor","supervisor_public_key":str(supervisor_public),"heartbeat_max_age_seconds":3600,
               "target_refs":["refs/heads/main"],"integrator_identity":"integrator","protected_paths":{},"ra_status":{"RA-01":"PASS","RA-02":"PASS","RA-03":"PASS","RA-07":"PASS","RA-09":"PASS"}}
     registry["integrator_key_id"] = "integrator"
     # Expose local fixture-only signing paths so negative cases can re-sign the
@@ -762,8 +762,7 @@ def _git_fixture(tmp_path):
     registry["incident_resolvers"] = ["resolver"]
     registry["ledger_keys"]["resolver"] = {"public_key": str(resolver_public), "can_resolve_incidents": True}
     reg=tmp_path/"registry.json"; reg.write_text(json.dumps(registry))
-    sources = TrustSources(reg, ledger, anchor, heartbeat, freeze, integrator_private,
-                           Path(str(ledger) + ".pending-vetoes"))
+    sources = TrustSources(reg, ledger, anchor, heartbeat, freeze, integrator_private)
     return promote, r, bare, base, head, tree, d, sources, sign(d,str(auditor_private))
 
 
@@ -820,8 +819,8 @@ def test_integrator_blocks_on_active_veto_in_ledger(tmp_path):
 
 
 def _add_pending_veto_marker(sources, candidate_sha):
-    directory = sources.pending_vetoes_dir
-    directory.mkdir(mode=0o700)
+    directory = Path(str(sources.ledger) + ".pending-vetoes")
+    directory.mkdir(mode=0o700, exist_ok=True)
     marker = {"schema": "aao.pending-veto.v1", "candidate_sha": candidate_sha,
               "manifest_sha256": "a" * 64, "reason": "unattributed veto"}
     data = canonical(marker)
@@ -854,9 +853,9 @@ def test_integrator_proceeds_when_pending_veto_resolved_in_ledger(tmp_path, monk
             now=lambda: __import__("datetime").datetime(2026, 1, 1, 1,
                 tzinfo=__import__("datetime").timezone.utc))
     registry = json.loads(sources.trust_registry.read_text())
-    resolved = append(sources.ledger, {"type": "pending-veto-resolution",
-        "candidate_sha": head, "resolves_pending": [digest]}, "ledger",
-        registry["test_ledger_private_key"], registry["ledger_keys"])
+    resolved = append(sources.ledger, {"type": "audit-verdict",
+        "candidate_sha": head, "resolves_pending": [digest]}, "auditor",
+        registry["test_auditor_private_key"], registry["ledger_keys"])
     sources.ledger_anchor.write_text(resolved["hash"])
 
     commit = promote(repo, "origin", auth, signature, sources,
@@ -866,11 +865,106 @@ def test_integrator_proceeds_when_pending_veto_resolved_in_ledger(tmp_path, monk
     assert git(repo, "show", "-s", "--format=%T", commit) == tree
 
 
+def test_integrator_rejects_pending_veto_resolution_signed_by_integrator_key(tmp_path, monkeypatch):
+    monkeypatch.setattr("aao.pending_veto._check_parents", lambda path, uid: None)
+    promote, repo, bare, _base, head, _tree, auth, sources, signature = _git_fixture(tmp_path)
+    digest = _add_pending_veto_marker(sources, head)
+    registry = json.loads(sources.trust_registry.read_text())
+    with pytest.raises(ValueError, match="resolves_pending signer is not an enabled authority"):
+        append(sources.ledger, {"type": "audit-verdict", "candidate_sha": head,
+              "resolves_pending": [digest]}, "integrator", str(sources.integrator_private_key),
+              registry["ledger_keys"])
+    # Exercise a previously signed unauthorized row as well: verification must reject it.
+    registry["ledger_keys"]["integrator"]["can_resolve_pending"] = True
+    forged = append(sources.ledger, {"type": "audit-verdict", "candidate_sha": head,
+                   "resolves_pending": [digest]}, "integrator", str(sources.integrator_private_key),
+                   registry["ledger_keys"])
+    registry["ledger_keys"]["integrator"].pop("can_resolve_pending")
+    sources.trust_registry.write_text(json.dumps(registry))
+    sources.ledger_anchor.write_text(forged["hash"])
+    _assert_integrator_rejects_without_main_change(
+        promote, repo, bare, auth, signature, sources, "resolves_pending signer is not an enabled authority"
+    )
+
+
+def test_integrator_ignores_pending_veto_marker_for_another_candidate(tmp_path, monkeypatch):
+    monkeypatch.setattr("aao.pending_veto._check_parents", lambda path, uid: None)
+    promote, repo, _bare, _base, _head, tree, auth, sources, signature = _git_fixture(tmp_path)
+    _add_pending_veto_marker(sources, "f" * 40)
+    commit = promote(repo, "origin", auth, signature, sources,
+        identity_provider=_integrator_identity(),
+        now=lambda: __import__("datetime").datetime(2026, 1, 1, 1,
+            tzinfo=__import__("datetime").timezone.utc))
+    assert git(repo, "show", "-s", "--format=%T", commit) == tree
+
+
+@pytest.mark.parametrize("value", ["bad", [1]])
+def test_ledger_rejects_malformed_resolves_pending(tmp_path, value):
+    from aao.governance_ledger import verify
+    keys = tmp_path / "key"; keys.mkdir()
+    private, public = keypair(keys)
+    trusted = {"auditor": {"public_key": str(public), "can_resolve_pending": True}}
+    ledger = tmp_path / "ledger.jsonl"; ledger.touch()
+    with pytest.raises(ValueError, match="malformed resolves_pending"):
+        append(ledger, {"type": "audit-verdict", "resolves_pending": value}, "auditor",
+               str(private), trusted)
+    # Manually construct a signed malformed row to exercise verify's independent guard.
+    import base64
+    payload = {"sequence": 1, "previous_hash": "0" * 64, "key_id": "auditor",
+               "type": "audit-verdict", "resolves_pending": value}
+    message = tmp_path / "message"
+    message.write_bytes(canonical(payload))
+    signature = subprocess.run(["openssl", "pkeyutl", "-sign", "-rawin", "-inkey", str(private),
+                                "-in", str(message)], check=True, capture_output=True).stdout
+    payload["signature"] = base64.b64encode(signature).decode()
+    payload["hash"] = hashlib.sha256(canonical(payload)).hexdigest()
+    ledger.write_bytes(canonical(payload) + b"\n")
+    with pytest.raises(ValueError, match="malformed resolves_pending"):
+        verify(ledger, trusted)
+
+
+def test_integrator_pending_veto_directory_is_derived_from_ledger(tmp_path, monkeypatch):
+    monkeypatch.setattr("aao.pending_veto._check_parents", lambda path, uid: None)
+    promote, repo, bare, _base, head, _tree, auth, sources, signature = _git_fixture(tmp_path)
+    derived = Path(str(sources.ledger) + ".pending-vetoes")
+    derived.mkdir(mode=0o700)
+    _add_pending_veto_marker(sources, head)
+    decoy = tmp_path / "decoy-pending-vetoes"
+    decoy.mkdir(mode=0o700)
+    _assert_integrator_rejects_without_main_change(
+        promote, repo, bare, auth, signature, sources, "candidate has an unresolved pending veto"
+    )
+
+
+def test_integrator_absent_pending_veto_directory_does_not_block(tmp_path):
+    # Absence is treated as no markers; deletion detection remains the accepted A-2 open issue.
+    promote, repo, _bare, _base, _head, tree, auth, sources, signature = _git_fixture(tmp_path)
+    assert not Path(str(sources.ledger) + ".pending-vetoes").exists()
+    commit = promote(repo, "origin", auth, signature, sources,
+        identity_provider=_integrator_identity(),
+        now=lambda: __import__("datetime").datetime(2026, 1, 1, 1,
+            tzinfo=__import__("datetime").timezone.utc))
+    assert git(repo, "show", "-s", "--format=%T", commit) == tree
+
+
+def test_integrator_pending_veto_parent_custody_without_patch(tmp_path):
+    promote, repo, bare, _base, head, _tree, auth, sources, signature = _git_fixture(tmp_path)
+    _add_pending_veto_marker(sources, head)
+    unsafe_parent = sources.ledger.parent
+    unsafe_parent.chmod(0o777)
+    try:
+        _assert_integrator_rejects_without_main_change(
+            promote, repo, bare, auth, signature, sources, "pending vetoes cannot be verified"
+        )
+    finally:
+        unsafe_parent.chmod(0o700)
+
+
 def test_integrator_fails_closed_on_unverifiable_pending_veto_dir(tmp_path, monkeypatch):
     monkeypatch.setattr("aao.pending_veto._check_parents", lambda path, uid: None)
     promote, repo, bare, _base, head, _tree, auth, sources, signature = _git_fixture(tmp_path)
     _add_pending_veto_marker(sources, head)
-    sources.pending_vetoes_dir.chmod(0o770)
+    Path(str(sources.ledger) + ".pending-vetoes").chmod(0o770)
 
     _assert_integrator_rejects_without_main_change(
         promote, repo, bare, auth, signature, sources, "pending vetoes cannot be verified"
