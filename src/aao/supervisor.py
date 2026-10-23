@@ -167,6 +167,43 @@ def inspect(
     return events
 
 
+def verify_heartbeat(event: Any, public_key: str, key_id: str, now: datetime,
+                     max_age_seconds: int = 3600) -> dict[str, Any]:
+    """Read-only check of a supervisor heartbeat (F4-01b gate path). Raises ValueError if not valid.
+
+    Unlike the integrator, a gate keeps no sequence file, so a still-valid older heartbeat is accepted
+    within its validity window (declared limitation)."""
+    if not isinstance(event, dict) or event.get("type") != "heartbeat" or event.get("key_id") != key_id:
+        raise ValueError("heartbeat type or key id is not the anchored supervisor")
+    for field in ("ledger_head", "state_sha256"):
+        if not isinstance(event.get(field), str) or len(event[field]) != 64:
+            raise ValueError(f"heartbeat {field} is missing or malformed")
+    markers = event.get("pending_markers")
+    if not isinstance(markers, dict) or any(not isinstance(c, str) or not isinstance(d, list) or
+                                            any(not isinstance(x, str) for x in d) for c, d in markers.items()):
+        raise ValueError("heartbeat pending_markers is missing or malformed")
+    try:
+        issued = datetime.fromisoformat(event["issued_at"])
+        expiry = datetime.fromisoformat(event["expires_at"])
+        signature = base64.b64decode(event["signature"], validate=True)
+    except (KeyError, TypeError, ValueError) as error:
+        raise ValueError(f"heartbeat timestamps or signature malformed: {error}") from error
+    if issued.tzinfo is None or expiry.tzinfo is None or now.tzinfo is None:
+        raise ValueError("heartbeat timestamps must be timezone-aware")
+    if now >= expiry or issued > now + timedelta(seconds=60) or (now - issued).total_seconds() > min(3600, max_age_seconds):
+        raise ValueError("heartbeat expired, too old or issued in the future")
+    signed = {k: v for k, v in event.items() if k != "signature"}
+    with tempfile.TemporaryDirectory() as directory:
+        sig, msg = Path(directory) / "sig", Path(directory) / "msg"
+        sig.write_bytes(signature)
+        msg.write_bytes(canonical(signed))
+        ok = subprocess.run(["openssl", "pkeyutl", "-verify", "-pubin", "-inkey", public_key, "-sigfile", str(sig),
+                             "-in", str(msg), "-rawin"], check=False, capture_output=True).returncode == 0
+    if not ok:
+        raise ValueError("heartbeat signature does not verify against the anchored supervisor key")
+    return event
+
+
 def signed_heartbeat(sequence: int, issued_at: str, private_key: str, *, key_id: str,
                      expires_at: str, ledger_path: Path,
                      state_path: Path, integrator_key_id: str,

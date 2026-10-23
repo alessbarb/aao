@@ -207,3 +207,32 @@ host/VM.
   evidence comes from P1 and the F2 verifier.
 - **SL-06 (tamper tests):** added rewrite-with-recomputed-chain, forged-key and
   truncation-below-anchor tests; each validated by mutation.
+
+
+## 9. Supervisor custody on the gate path (F4-01b, 2026-10-23)
+
+The trust anchor also pins `supervisor_public_key`, `supervisor_key_id` and
+`supervisor_heartbeat_path`. Before deciding, `verify_promotion` checks the
+following:
+
+1. The supervisor heartbeat is valid:
+   - signed by the anchored supervisor key;
+   - of type `heartbeat`;
+   - not expired, not older than 1 h and not issued in the future;
+   - well-formed `ledger_head`, `pending_markers` and `state_sha256`.
+2. The verified ledger terminal hash equals the heartbeat `ledger_head`:
+   - if the head is an earlier row or genesis, the result is "not yet anchored";
+   - otherwise, "truncated or rewritten".
+3. No marker that the supervisor recorded for the candidate has disappeared
+   without a resolution in a verified row signed by a `can_resolve_pending` key.
+
+Any failure denies promotion.
+
+**Limitations (B):**
+
+- The gate keeps no sequence file, so an older heartbeat that is still valid
+  is accepted within its validity window.
+- Entries and markers written after the last heartbeat and removed before the
+  next one are not seen.
+- This depends on the custody of the supervisor uid and its key (P1 created
+  the uid; the runtime services are pending).

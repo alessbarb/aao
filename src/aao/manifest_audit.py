@@ -47,7 +47,8 @@ _MANIFEST_FIELDS = {"schema", "repository", "target_ref", "target_sha", "candida
 _GIT_ENV = {"PATH": "/usr/bin:/bin", "HOME": "/nonexistent", "GIT_CONFIG_NOSYSTEM": "1",
             "GIT_CONFIG_GLOBAL": "/dev/null", "LANG": "C.UTF-8"}
 _ANCHOR_FIELDS = {"schema", "policy_path", "policy_sha256", "auditor_uid", "auditor_public_key", "ledger_path",
-                  "ledger_anchor_path", "attribution_path"}
+                  "ledger_anchor_path", "attribution_path",
+                  "supervisor_public_key", "supervisor_key_id", "supervisor_heartbeat_path"}
 ATTRIBUTION_SCHEMA = "aao.implementer-attribution.v1"
 
 
@@ -130,6 +131,29 @@ def pending_vetoes(anchor: dict[str, Any], candidate_sha: str) -> list[str]:
         return verify_pending_vetoes(directory, candidate_sha, anchor["auditor_uid"])
     except PendingVetoError as error:
         raise AuditError(str(error)) from error
+
+
+def _supervisor_custody(anchor: dict[str, Any], candidate_sha: str) -> None:
+    """F4-01b: the ledger terminal must equal the head the supervisor signed, and no marker the supervisor
+    has seen for this candidate may have disappeared without an authorized resolution."""
+    from aao.supervisor import verify_heartbeat
+
+    raw = Path(anchor["supervisor_heartbeat_path"]).read_bytes()
+    with tempfile.TemporaryDirectory(prefix="aao-supervisor-key-") as temporary:
+        public = Path(temporary) / "supervisor.pub"
+        public.write_text(anchor["supervisor_public_key"], encoding="ascii")
+        heartbeat = verify_heartbeat(json.loads(raw), str(public), anchor["supervisor_key_id"], datetime.now(UTC))
+    rows = ledger_rows(anchor)
+    terminal = rows[-1]["hash"] if rows else "0" * 64
+    if terminal != heartbeat["ledger_head"]:
+        if heartbeat["ledger_head"] == "0" * 64 or heartbeat["ledger_head"] in {r["hash"] for r in rows}:
+            raise AuditError("ledger not yet anchored by the supervisor")
+        raise AuditError("ledger truncated or rewritten since the supervisor anchored it")
+    resolved = {d for r in rows for d in r.get("resolves_pending") or []}
+    present = set(pending_vetoes(anchor, candidate_sha))
+    seen = set(heartbeat["pending_markers"].get(candidate_sha, []))
+    if seen - present - resolved:
+        raise AuditError("pending veto marker deleted after the supervisor recorded it")
 
 
 def attributed_implementers(anchor: dict[str, Any], candidate_sha: str) -> list[str]:
@@ -403,6 +427,10 @@ def verify_promotion(
             reasons.append(f"evidence {path} is unavailable or not auditor-owned")
     if not report.get("evidence_files"):
         reasons.append("report has no evidence")
+    try:
+        _supervisor_custody(anchor, manifest["candidate_sha"])
+    except (AuditError, OSError, ValueError) as error:
+        reasons.append(f"supervisor custody check failed: {error}")
     try:
         resolved = {d for e in ledger_rows(anchor) for d in e.get("resolves_pending") or []}
         open_markers = [d for d in pending_vetoes(anchor, manifest["candidate_sha"]) if d not in resolved]
