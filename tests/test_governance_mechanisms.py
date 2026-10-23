@@ -13,6 +13,10 @@ from aao.governance_ledger import active_vetoes, append, verify
 from aao.integration_authorization import canonical, sign, validate
 from aao.notifier import FileSink, consume
 
+# Same derivation as the integrator, so the signed git_version matches any runner (CI is not 2.43.0).
+GIT_VERSION = subprocess.run(["git", "--version"], check=True, capture_output=True, text=True).stdout.strip(
+).removeprefix("git version ")
+
 
 def keypair(tmp_path):
     private = tmp_path / "key.pem"
@@ -46,7 +50,7 @@ def test_authorization_fail_closed_and_signature(tmp_path):
         policy_sha256="policy",
         protected_paths_sha256=hashlib.sha256(canonical([])).hexdigest(),
         expected_parents=["b", "c"],
-        git_version="2.43.0",
+        git_version=GIT_VERSION,
         auditor_id="audit",
         auditor_key_id="k",
         auditor_code_revision="rev",
@@ -75,7 +79,7 @@ def test_authorization_fail_closed_and_signature(tmp_path):
         now="2026-01-01T01:00:00+00:00",
         heartbeat_valid=True,
         enabled_risk_classes=["R2"], policy_id="p", attribution_resolved=True,
-        ci_candidate_sha="c", protected_paths={}, changed_paths=[], git_version="2.43.0",
+        ci_candidate_sha="c", protected_paths={}, changed_paths=[], git_version=GIT_VERSION,
         auditor_models={"audit": "auditor-model"}, author_models={"author": "author-model"},
         ra03_pass=True,
         ra09_pass=True,
@@ -172,7 +176,7 @@ def supervisor_inspect(repo, authorized, sequence, private, tmp_path, **kwargs):
 
 def test_bare_remote_compare_and_swap_rejects_competing_main(tmp_path):
     bare = tmp_path / "remote.git"
-    subprocess.run(["git", "init", "--bare", str(bare)], check=True, capture_output=True)
+    subprocess.run(["git", "init", "--bare", "--initial-branch=main", str(bare)], check=True, capture_output=True)
     work = tmp_path / "work"
     subprocess.run(["git", "clone", str(bare), str(work)], check=True, capture_output=True)
     git(work, "config", "user.name", "test")
@@ -214,7 +218,7 @@ def test_bare_remote_compare_and_swap_rejects_competing_main(tmp_path):
 
 def test_supervisor_flags_direct_push_and_workflow_change(tmp_path):
     repo = tmp_path / "repo"
-    subprocess.run(["git", "init", str(repo)], check=True, capture_output=True)
+    subprocess.run(["git", "init", "--initial-branch=main", str(repo)], check=True, capture_output=True)
     git(repo, "config", "user.name", "direct pusher")
     git(repo, "config", "user.email", "push@example.invalid")
     (repo / "seed").write_text("seed\n")
@@ -245,7 +249,7 @@ def test_authorization_head_move_and_wrong_parent_are_rejected(tmp_path):
         "policy_sha256": "policy",
         "protected_paths_sha256": hashlib.sha256(canonical([])).hexdigest(),
         "expected_parents": ["base", "candidate"],
-        "git_version": "2.43.0",
+        "git_version": GIT_VERSION,
         "auditor_id": "audit",
         "auditor_key_id": "k",
         "auditor_code_revision": "rev",
@@ -275,7 +279,7 @@ def test_authorization_head_move_and_wrong_parent_are_rejected(tmp_path):
         "now": "2026-01-01T01:00:00+00:00",
         "heartbeat_valid": True,
         "enabled_risk_classes": ["R2"], "policy_id": "p", "attribution_resolved": True,
-        "ci_candidate_sha": "candidate", "protected_paths": {}, "changed_paths": [], "git_version": "2.43.0",
+        "ci_candidate_sha": "candidate", "protected_paths": {}, "changed_paths": [], "git_version": GIT_VERSION,
         "auditor_models": {"audit": "auditor-model"}, "author_models": {"author": "author-model"},
         "ra03_pass": True,
         "ra09_pass": True,
@@ -284,7 +288,7 @@ def test_authorization_head_move_and_wrong_parent_are_rejected(tmp_path):
     assert "PR head mismatch" in validate(doc, signature, {**state, "pr_head": "moved"})
     # A matching tree alone cannot authorize a commit with unexpected parents.
     repo = tmp_path / "parents"
-    subprocess.run(["git", "init", str(repo)], check=True, capture_output=True)
+    subprocess.run(["git", "init", "--initial-branch=main", str(repo)], check=True, capture_output=True)
     git(repo, "config", "user.name", "test")
     git(repo, "config", "user.email", "test@example.invalid")
     (repo / "f").write_text("same tree\n")
@@ -316,7 +320,7 @@ def _auth_fixture(tmp_path):
         "policy_sha256": "hash",
         "protected_paths_sha256": hashlib.sha256(canonical([])).hexdigest(),
         "expected_parents": ["base", "candidate"],
-        "git_version": "2.43.0",
+        "git_version": GIT_VERSION,
         "auditor_id": "auditor",
         "auditor_key_id": "key",
         "auditor_code_revision": "rev",
@@ -351,7 +355,7 @@ def _auth_fixture(tmp_path):
         "policy_id": "policy",
         "attribution_resolved": True,
         "ci_candidate_sha": "candidate",
-        "protected_paths": {}, "changed_paths": [], "git_version": "2.43.0",
+        "protected_paths": {}, "changed_paths": [], "git_version": GIT_VERSION,
         "auditor_models": {"auditor": "model-audit"},
         "author_models": {"author": "model-author"},
         "ra03_pass": True,
@@ -515,7 +519,7 @@ def test_ledger_rejects_entry_signed_by_unknown_key(tmp_path):
 
 def test_supervisor_matches_main_history_against_ledger_authorizations(tmp_path):
     r = tmp_path / "r"
-    subprocess.run(["git", "init", str(r)], check=True, capture_output=True)
+    subprocess.run(["git", "init", "--initial-branch=main", str(r)], check=True, capture_output=True)
     git(r, "config", "user.name", "x")
     git(r, "config", "user.email", "x@y")
     authorized = []
@@ -536,7 +540,7 @@ def test_supervisor_flags_merge_not_made_by_integrator_identity(tmp_path):
     # Supervisor reports unauthorized merge ancestry as a commit lacking an authorization.
 
     r = tmp_path / "r"
-    subprocess.run(["git", "init", str(r)], check=True, capture_output=True)
+    subprocess.run(["git", "init", "--initial-branch=main", str(r)], check=True, capture_output=True)
     git(r, "config", "user.name", "x")
     git(r, "config", "user.email", "x@y")
     (r / "f").write_text("x")
@@ -550,7 +554,7 @@ def test_supervisor_flags_merge_not_made_by_integrator_identity(tmp_path):
 
 def test_supervisor_flags_protected_path_change(tmp_path):
     r = tmp_path / "r"
-    subprocess.run(["git", "init", str(r)], check=True, capture_output=True)
+    subprocess.run(["git", "init", "--initial-branch=main", str(r)], check=True, capture_output=True)
     git(r, "config", "user.name", "x")
     git(r, "config", "user.email", "x@y")
     (r / "f").write_text("base")
@@ -582,7 +586,7 @@ def test_supervisor_signs_events_and_heartbeat_for_notifier(tmp_path):
     from aao.supervisor import inspect, signed_heartbeat
 
     repo = tmp_path / "signed-repo"
-    subprocess.run(["git", "init", str(repo)], check=True, capture_output=True)
+    subprocess.run(["git", "init", "--initial-branch=main", str(repo)], check=True, capture_output=True)
     git(repo, "config", "user.name", "test")
     git(repo, "config", "user.email", "test@example.invalid")
     (repo / "f").write_text("x")
@@ -608,7 +612,7 @@ def test_supervisor_detects_protected_change_in_real_merge_using_minimum_class(t
     from aao.supervisor import inspect
 
     repo = tmp_path / "merge-repo"
-    subprocess.run(["git", "init", "--bare", str(repo)], check=True, capture_output=True)
+    subprocess.run(["git", "init", "--bare", "--initial-branch=main", str(repo)], check=True, capture_output=True)
     work = tmp_path / "merge-work"
     subprocess.run(["git", "clone", str(repo), str(work)], check=True, capture_output=True)
     git(work, "config", "user.name", "test")
@@ -664,7 +668,7 @@ def test_identity_attribution_hook_records_pusher_uid_and_rejects_unattributed_p
     from aao.identity_attribution import install_uid_hook
 
     bare = tmp_path / "bare.git"
-    subprocess.run(["git", "init", "--bare", str(bare)], check=True, capture_output=True)
+    subprocess.run(["git", "init", "--bare", "--initial-branch=main", str(bare)], check=True, capture_output=True)
     log = tmp_path / "push.log"
     install_uid_hook(bare, log)
 
@@ -681,7 +685,7 @@ def test_identity_attribution_hook_records_pusher_uid_and_rejects_unattributed_p
     blocked = tmp_path / "blocked"
     blocked.mkdir()
     bad_bare = tmp_path / "bad.git"
-    subprocess.run(["git", "init", "--bare", str(bad_bare)], check=True, capture_output=True)
+    subprocess.run(["git", "init", "--bare", "--initial-branch=main", str(bad_bare)], check=True, capture_output=True)
     install_uid_hook(bad_bare, blocked)
     bad_work = tmp_path / "bad-work"
     subprocess.run(["git", "clone", str(bad_bare), str(bad_work)], check=True, capture_output=True)
@@ -700,7 +704,7 @@ def _git_fixture(tmp_path):
     from aao.supervisor import signed_heartbeat
 
     bare = tmp_path / "origin.git"
-    subprocess.run(["git", "init", "--bare", str(bare)], check=True, capture_output=True)
+    subprocess.run(["git", "init", "--bare", "--initial-branch=main", str(bare)], check=True, capture_output=True)
     r = tmp_path / "work"
     subprocess.run(["git", "clone", str(bare), str(r)], check=True, capture_output=True)
     git(r, "config", "user.name", "integrator")
@@ -729,7 +733,7 @@ def _git_fixture(tmp_path):
     d = {"repo":"r", "pr_number":1, "candidate_sha":head, "base_sha":base,
          "target_ref":"refs/heads/main", "merge_method":"merge-commit", "merge_result_tree_sha":tree,
          "risk_class":"R2", "assurance_level":"A", "policy_id":"p", "policy_sha256":"h",
-         "protected_paths_sha256":hashlib.sha256(canonical([])).hexdigest(), "expected_parents":[base,head], "git_version":"2.43.0",
+         "protected_paths_sha256":hashlib.sha256(canonical([])).hexdigest(), "expected_parents":[base,head], "git_version":GIT_VERSION,
          "auditor_id":"a", "auditor_key_id":"k", "auditor_code_revision":"rev",
          "attribution":[{"sha":head,"principal":"author","source":"ledger","evidence_sha256":"a"}],
          "checks_executed":[{"name":"unit","cmd":"pytest","result":"PASS","evidence_sha256":"e"}],
@@ -905,7 +909,7 @@ def test_ledger_rejects_authorization_row_from_key_without_can_authorize(tmp_pat
 
 def test_supervisor_ignores_unverified_authorization_rows(tmp_path):
     repo = tmp_path / "untrusted-auth-repo"
-    subprocess.run(["git", "init", str(repo)], check=True, capture_output=True)
+    subprocess.run(["git", "init", "--initial-branch=main", str(repo)], check=True, capture_output=True)
     git(repo, "config", "user.name", "test")
     git(repo, "config", "user.email", "test@example.invalid")
     (repo / "f").write_text("unauthorized\n")
@@ -1072,7 +1076,7 @@ def test_authorization_rejects_auditor_with_same_model_as_author_for_r2(tmp_path
 
 def test_supervisor_flags_merge_pushed_by_non_integrator_identity(tmp_path):
     repo = tmp_path / "wrong-pusher"
-    subprocess.run(["git", "init", str(repo)], check=True, capture_output=True)
+    subprocess.run(["git", "init", "--initial-branch=main", str(repo)], check=True, capture_output=True)
     git(repo, "config", "user.name", "test"); git(repo, "config", "user.email", "test@example.invalid")
     (repo / "f").write_text("merge\n")
     git(repo, "add", "f"); git(repo, "commit", "-m", "merge")
