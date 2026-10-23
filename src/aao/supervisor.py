@@ -185,6 +185,8 @@ def signed_heartbeat(sequence: int, issued_at: str, private_key: str, *, key_id:
     if not isinstance(integrator_key_id, str) or not integrator_key_id:
         raise ValueError("supervisor requires an integrator key id")
     integrator = trusted_keys.get(integrator_key_id)
+    if not isinstance(integrator, dict) or not integrator.get("public_key"):
+        raise ValueError("integrator key is absent from trusted ledger keys")
     if isinstance(integrator, dict) and integrator.get("public_key"):
         if integrator.get("can_resolve_pending") is True or integrator.get("can_authorize") is True:
             raise ValueError("integrator key has a reserved ledger capability")
