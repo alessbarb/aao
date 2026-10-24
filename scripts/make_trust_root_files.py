@@ -159,14 +159,23 @@ def main() -> int:
                                                                  "aao-impl-ag", "aao-pm"])
     parser.add_argument("--repo", required=True, help="owner/name of the repository the R1 loop serves")
     parser.add_argument("--out", type=Path, required=True)
+    parser.add_argument("--ra-status", action="append", default=[], metavar="RA-0x=PASS|PENDING",
+                        help="CEO decision recorded in the registry; every RA not given stays PENDING")
     args = parser.parse_args()
+    ra_status = {}
+    for item in args.ra_status:
+        ra, _, value = item.partition("=")
+        if ra in ra_status:
+            parser.error(f"duplicate --ra-status {ra}")
+        ra_status[ra] = value
     files = build(args.revision, json.loads(args.policy_template.read_text()), args.auditor_public_key.read_text(),
                   args.supervisor_public_key.read_text(), pwd.getpwnam("aao-auditor").pw_uid, args.developer,
                   attribution_writer_uid=pwd.getpwnam("aao-supervisor").pw_uid, repo=args.repo)
     files["registry.json"] = build_registry(
         files["policy.json"], files["trust-anchor.json"],
-        auditor_models={"aao-auditor": "claude", "aao-auditor-alt": "codex"},
-        author_models={"aao-impl-claude": "claude", "aao-impl-codex": "codex", "aao-impl-ag": "gemini"})
+        auditor_models={"aao-auditor": "claude", "aao-auditor-alt": "gemini"},
+        author_models={"aao-impl-claude": "claude", "aao-impl-codex": "codex", "aao-impl-ag": "gemini"},
+        ra_status=ra_status)
     files.update(build_runtime_configs(args.repo))
     args.out.mkdir(mode=0o700)
     for name, value in files.items():
