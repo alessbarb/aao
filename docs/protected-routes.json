@@ -1,0 +1,200 @@
+{
+ "schema": "aao.protected-routes.v1",
+ "approved_by": "CEO",
+ "approved_at": "2026-10-24T10:38:00Z",
+ "decision": "docs/proposals/RA01_RA02_TRUST_INPUTS.md",
+ "semantics": {
+  "directory": "entry ending in '/' covers everything below it",
+  "exact": "any other entry is an exact path unless it contains '*'",
+  "glob": "'*' matches any sequence without '/'; a pattern without '/' matches the basename in any directory",
+  "paths_considered": "added, modified, deleted and both sides of renamed files",
+  "overlap": "highest class wins; overlaps never lower a class"
+ },
+ "routes": [
+  {
+   "path": "docs/CONSTITUTION.md",
+   "minimum_risk_class": "R3"
+  },
+  {
+   "path": "docs/AUTONOMOUS_AUDIT_POLICY.md",
+   "minimum_risk_class": "R3"
+  },
+  {
+   "path": "docs/AUTONOMOUS_GOVERNANCE_POLICY.md",
+   "minimum_risk_class": "R3"
+  },
+  {
+   "path": "docs/GOV-REV-002*",
+   "minimum_risk_class": "R3"
+  },
+  {
+   "path": "docs/decisions/",
+   "minimum_risk_class": "R3"
+  },
+  {
+   "path": "docs/CEO-DEC-*",
+   "minimum_risk_class": "R3"
+  },
+  {
+   "path": "docs/protected-routes.json",
+   "minimum_risk_class": "R3"
+  },
+  {
+   "path": "scripts/make_trust_root_files.py",
+   "minimum_risk_class": "R3"
+  },
+  {
+   "path": "deploy/github-apps/aao-github-apps-registry.json",
+   "minimum_risk_class": "R3"
+  },
+  {
+   "path": "src/aao/independent_audit.py",
+   "minimum_risk_class": "R2"
+  },
+  {
+   "path": "src/aao/manifest_audit.py",
+   "minimum_risk_class": "R2"
+  },
+  {
+   "path": "src/aao/auditor_dispatch.py",
+   "minimum_risk_class": "R2"
+  },
+  {
+   "path": "src/aao/integrator.py",
+   "minimum_risk_class": "R2"
+  },
+  {
+   "path": "src/aao/integration_authorization.py",
+   "minimum_risk_class": "R2"
+  },
+  {
+   "path": "src/aao/r1_pipeline.py",
+   "minimum_risk_class": "R2"
+  },
+  {
+   "path": ".github/workflows/",
+   "minimum_risk_class": "R2"
+  },
+  {
+   "path": "policy*.json",
+   "minimum_risk_class": "R2"
+  },
+  {
+   "path": "src/aao/policy.py",
+   "minimum_risk_class": "R2"
+  },
+  {
+   "path": "src/aao/supervisor.py",
+   "minimum_risk_class": "R2"
+  },
+  {
+   "path": "src/aao/supervisor_service.py",
+   "minimum_risk_class": "R2"
+  },
+  {
+   "path": "src/aao/notifier.py",
+   "minimum_risk_class": "R2"
+  },
+  {
+   "path": "AGENTS.md",
+   "minimum_risk_class": "R2"
+  },
+  {
+   "path": "docs/AGENT_OPERATING_RULES.md",
+   "minimum_risk_class": "R2"
+  },
+  {
+   "path": "src/aao/pr_conformity.py",
+   "minimum_risk_class": "R2"
+  },
+  {
+   "path": "src/aao/review.py",
+   "minimum_risk_class": "R2"
+  },
+  {
+   "path": "src/aao/governance_ledger.py",
+   "minimum_risk_class": "R2"
+  },
+  {
+   "path": "src/aao/github_app_auth.py",
+   "minimum_risk_class": "R2"
+  },
+  {
+   "path": "deploy/systemd/",
+   "minimum_risk_class": "R2"
+  },
+  {
+   "path": "deploy/tmpfiles.d/",
+   "minimum_risk_class": "R2"
+  },
+  {
+   "path": "scripts/bootstrap/",
+   "minimum_risk_class": "R2"
+  },
+  {
+   "path": "scripts/identity_separation.sh",
+   "minimum_risk_class": "R2"
+  },
+  {
+   "path": "scripts/verify_trust_root_host.py",
+   "minimum_risk_class": "R2"
+  },
+  {
+   "path": "scripts/audit/",
+   "minimum_risk_class": "R2"
+  },
+  {
+   "path": "docs/audit-prompts/",
+   "minimum_risk_class": "R2"
+  },
+  {
+   "path": "pyproject.toml",
+   "minimum_risk_class": "R2"
+  },
+  {
+   "path": "setup.cfg",
+   "minimum_risk_class": "R2"
+  },
+  {
+   "path": "tox.ini",
+   "minimum_risk_class": "R2"
+  },
+  {
+   "path": "pytest.ini",
+   "minimum_risk_class": "R2"
+  },
+  {
+   "path": "ruff.toml",
+   "minimum_risk_class": "R2"
+  },
+  {
+   "path": ".ruff.toml",
+   "minimum_risk_class": "R2"
+  },
+  {
+   "path": "conftest.py",
+   "minimum_risk_class": "R2"
+  },
+  {
+   "path": "tests/conftest.py",
+   "minimum_risk_class": "R2"
+  },
+  {
+   "path": "db/postgres/011_sha_bound_reviews_and_veto.sql",
+   "minimum_risk_class": "R2"
+  }
+ ],
+ "required_check_publishers": {
+  "aao-audit": [
+   5448107
+  ],
+  "test": [
+   15368
+  ]
+ },
+ "push_principals": {
+  "aao-impl-claude[bot]": "claude",
+  "aao-impl-codex[bot]": "codex",
+  "aao-impl-agy[bot]": "antigravity"
+ }
+}
