@@ -1,0 +1,14 @@
+# Minimal CI for the disposable P2/P3 trial repository (autoaiorg/aao-governance-trial).
+# Publishes the `test` check that ruleset B requires, on every pushed branch and on PRs.
+name: test
+on:
+  push:
+  pull_request:
+permissions:
+  contents: read
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - run: test -f README.md
