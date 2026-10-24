@@ -134,9 +134,12 @@ def issue_authorization(
     if set(document) != set(authorization.FIELDS):
         raise AssertionError("issuer document fields diverged from integration_authorization.FIELDS")
     signature = authorization.sign(document, str(key))
-    output.mkdir(mode=0o700, parents=True, exist_ok=False)
-    (output / "authorization.json").write_bytes(authorization.canonical(document))
-    (output / "authorization.sig").write_text(signature + "\n", encoding="ascii")
+    output.mkdir(mode=0o750, parents=True, exist_ok=False)
+    for name, content in (("authorization.json", authorization.canonical(document)),
+                          ("authorization.sig", (signature + "\n").encode("ascii"))):
+        path = output / name
+        path.write_bytes(content)
+        path.chmod(0o640)
     return document
 
 

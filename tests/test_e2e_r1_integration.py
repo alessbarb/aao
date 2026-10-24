@@ -106,7 +106,10 @@ def _bare_chain(env, data, output, tmp_path):
     verification_dir.chmod(0o755)
     sources = TrustSources(registry, ledger, ledger_anchor, heartbeat,
                            env["state"] / "freeze", integrator_private,
-                           verification_path, verification_dir, os.getuid())
+                           heartbeat_sequence=env["state"] / "heartbeat.sequence",
+                           trust_verification=verification_path,
+                           trust_verification_root=verification_dir,
+                           trust_verification_owner_uid=os.getuid())
     doc = json.loads((output / "authorization.json").read_text())
     sig = (output / "authorization.sig").read_text().strip()
     return bare, sources, doc, sig

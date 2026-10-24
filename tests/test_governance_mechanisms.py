@@ -835,7 +835,10 @@ def _git_fixture(tmp_path):
     verification_path.chmod(0o644)
     verification_dir.chmod(0o755)
     sources = TrustSources(reg, ledger, anchor, heartbeat, freeze, integrator_private,
-                           verification_path, verification_dir, os.getuid())
+                           heartbeat_sequence=tmp_path / "heartbeat.sequence",
+                           trust_verification=verification_path,
+                           trust_verification_root=verification_dir,
+                           trust_verification_owner_uid=os.getuid())
     # Existing focused integrator cases exercise downstream gates with the
     # fixture's observed PR identity; dedicated coverage passes explicit
     # mismatching identities to the production entry point.
@@ -1363,7 +1366,9 @@ def test_integrator_rejects_replayed_heartbeat_sequence(tmp_path):
     from aao.supervisor import signed_heartbeat
     private, public = keypair(tmp_path)
     heartbeat = tmp_path / "heartbeat.json"
-    heartbeat.with_suffix(".json.sequence").write_text("4")
+    sequence = tmp_path / "integrator" / "heartbeat.sequence"
+    sequence.parent.mkdir()
+    sequence.write_text("4")
     ledger = tmp_path / "empty-ledger.jsonl"; ledger.touch()
     heartbeat.write_text(json.dumps(signed_heartbeat(4, "2026-01-01T00:00:00+00:00",
         str(private), key_id="supervisor", expires_at="2026-01-01T00:05:00+00:00", ledger_path=ledger,
@@ -1371,7 +1376,7 @@ def test_integrator_rejects_replayed_heartbeat_sequence(tmp_path):
         integrator_key_id="integrator")))
     now = __import__("datetime").datetime(2026, 1, 1, 0, 1, tzinfo=__import__("datetime").timezone.utc)
     assert not _heartbeat(heartbeat, {"supervisor_key_id": "supervisor",
-        "supervisor_public_key": str(public)}, now)
+        "supervisor_public_key": str(public)}, now, sequence)
 
 
 def test_integrator_rejects_heartbeat_older_than_one_hour_even_if_registry_allows_more(tmp_path):

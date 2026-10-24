@@ -26,6 +26,7 @@ def _integrator_config(tmp_path: Path) -> tuple[dict, Path]:
         "reports": str(tmp_path / "reports"), "state_dir": str(tmp_path / "state"),
         "trust_registry": str(registry), "ledger": str(tmp_path / "ledger"),
         "ledger_anchor": str(tmp_path / "ledger.anchor"), "heartbeat": str(tmp_path / "heartbeat"),
+        "heartbeat_sequence": str(tmp_path / "integrator" / "heartbeat.sequence"),
         "freeze": str(tmp_path / "freeze"), "integrator_private_key": str(tmp_path / "integrator.pem"),
     }
     return config, registry

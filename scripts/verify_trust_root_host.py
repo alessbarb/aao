@@ -50,6 +50,12 @@ CEO_USER = os.environ.get("AAO_CEO_USER", "alessbarb")
 ROOT_EQUIVALENT_GROUPS = ("sudo", "admin", "wheel", "docker", "lxd", "libvirt", "disk")
 UNITS = {"aao-auditor@probe.service": "aao-auditor@.service",
          "aao-auditor-dispatch.service": "aao-auditor-dispatch.service",
+         "aao-auditor-dispatch.path": "aao-auditor-dispatch.path",
+         "aao-auditor-dispatch.timer": "aao-auditor-dispatch.timer",
+         "aao-integrator-tick.service": "aao-integrator-tick.service",
+         "aao-integrator-tick.timer": "aao-integrator-tick.timer",
+         "aao-supervisor-attribution.service": "aao-supervisor-attribution.service",
+         "aao-supervisor-attribution.timer": "aao-supervisor-attribution.timer",
          "aao-supervisor-intake.service": "aao-supervisor-intake.service"}
 results: list[tuple[bool, str, str]] = []
 

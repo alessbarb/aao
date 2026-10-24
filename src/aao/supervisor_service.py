@@ -13,13 +13,14 @@ import stat
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Any
+from urllib.parse import quote
 
 from aao.supervisor import _sequence, serve_veto_intake, signed_heartbeat
 
 CONFIG_PATH = Path("/etc/aao-supervisor/config.json")
 CONFIG_SCHEMA = "aao.supervisor-config.v1"
 _FIELDS = {"schema", "auditor_uid", "ledger_path", "state_path", "heartbeat_path", "intake_socket",
-           "private_key", "key_id", "trust_registry", "validity_seconds"}
+           "private_key", "key_id", "trust_registry", "validity_seconds", "repository", "attribution_path"}
 
 
 def _read_owned(path: Path, owners: tuple[int, ...]) -> bytes:
@@ -65,14 +66,73 @@ def heartbeat(config: dict[str, Any]) -> dict[str, Any]:
         seconds=config["validity_seconds"])).isoformat(), **custody)
 
 
+def attribution(config: dict[str, Any], client: Any | None = None) -> int:
+    """Record only GitHub-sourced push actors and PR authors; API failure writes nothing."""
+    from aao.github_app_auth import GitHubAppClient
+    from aao.supervisor import record_attribution
+
+    repo = config["repository"]
+    if not isinstance(repo, str) or repo.count("/") != 1 or not all(repo.split("/")):
+        raise ValueError("supervisor repository must be configured as owner/name")
+    github = client if client is not None else GitHubAppClient("aao-supervisor")
+    owner, name = repo.split("/", 1)
+    if hasattr(github, "installation_token"):
+        github.installation_token(owner, name)
+    escaped = f"{quote(owner, safe='')}/{quote(name, safe='')}"
+
+    def get(path: str) -> Any:
+        response = github.request("GET", path)
+        status = getattr(response, "status", 200)
+        body = getattr(response, "body", response)
+        if not 200 <= status < 300 or not isinstance(body, list):
+            raise RuntimeError(f"GitHub attribution API failed (HTTP {status})")
+        return body
+
+    attributed: dict[str, set[str]] = {}
+    # Fetch both sources completely before writing any attribution.
+    events = get(f"/repos/{escaped}/events?per_page=100")
+    pulls = get(f"/repos/{escaped}/pulls?state=all&per_page=100")
+    for event in events:
+        if not isinstance(event, dict):
+            raise TypeError("malformed GitHub repository event")
+        if event.get("type") == "PushEvent":
+            actor = event.get("actor")
+            commits = event.get("payload", {}).get("commits") if isinstance(event.get("payload"), dict) else None
+            if not isinstance(actor, dict) or not isinstance(actor.get("login"), str) or not isinstance(commits, list):
+                raise ValueError("malformed GitHub push event")
+            for commit in commits:
+                sha = commit.get("sha") if isinstance(commit, dict) else None
+                if not isinstance(sha, str) or len(sha) != 40 or any(ch not in "0123456789abcdef" for ch in sha):
+                    raise ValueError("malformed commit in GitHub push event")
+                attributed.setdefault(sha, set()).add(actor["login"])
+    for pull in pulls:
+        if not isinstance(pull, dict):
+            raise TypeError("malformed GitHub pull request")
+        user = pull.get("user")
+        head = pull.get("head")
+        sha = head.get("sha") if isinstance(head, dict) else None
+        if (not isinstance(user, dict) or not isinstance(user.get("login"), str)
+                or not isinstance(sha, str) or len(sha) != 40
+                or any(ch not in "0123456789abcdef" for ch in sha)):
+            raise ValueError("malformed GitHub pull request author or head")
+        attributed.setdefault(sha, set()).add(user["login"])
+    for sha, principals in sorted(attributed.items()):
+        record_attribution(Path(config["attribution_path"]), sha, sorted(principals))
+    return len(attributed)
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description="AAO supervisor service (config path is fixed)")
-    parser.add_argument("command", choices=("serve", "heartbeat"))
+    parser.add_argument("command", choices=("serve", "heartbeat", "attribution"))
     args = parser.parse_args()
     config = load_config()
     if args.command == "heartbeat":
         event = heartbeat(config)
         print(json.dumps({"sequence": event["sequence"], "ledger_head": event["ledger_head"]}))
+        return 0
+    if args.command == "attribution":
+        count = attribution(config)
+        print(json.dumps({"status": "recorded", "candidates": count}))
         return 0
     serve_veto_intake(Path(config["intake_socket"]), auditor_uid=config["auditor_uid"],
                       validity_seconds=config["validity_seconds"], **_custody(config))

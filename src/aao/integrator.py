@@ -20,6 +20,7 @@ from aao.pending_veto import PendingVetoError, pending_vetoes
 TRUST_VERIFICATION_PATH = Path("/var/lib/aao-trust-verify/status.json")
 TRUST_VERIFICATION_ROOT = Path("/")
 TRUST_VERIFICATION_SCHEMA = "aao.trust-root-verification.v1"
+INTEGRATOR_HEARTBEAT_SEQUENCE = Path("/var/lib/aao-integrator/heartbeat.sequence")
 
 
 @dataclass(frozen=True)
@@ -30,6 +31,7 @@ class TrustSources:
     heartbeat: Path
     freeze: Path
     integrator_private_key: Path
+    heartbeat_sequence: Path = INTEGRATOR_HEARTBEAT_SEQUENCE
     # The production path and trust boundary are fixed. Tests may supply an
     # isolated status path and boundary; production callers use these defaults.
     trust_verification: Path = TRUST_VERIFICATION_PATH
@@ -140,7 +142,24 @@ def _git(repo: Path, *args: str) -> str:
     return subprocess.run(["git", "-C", str(repo), *args], check=True, capture_output=True, text=True).stdout.strip()
 
 
-def _heartbeat(path: Path, registry: dict[str, Any], now: datetime) -> dict[str, Any] | None:
+def _conditional_push(repo: Path, remote_url: str, ref: str, base: str, commit: str, token: str | None):
+    """Push with memory-only App credentials; Git argv and repository config stay credential-free."""
+    github_remote = "github.com" in remote_url.lower()
+    if not token and github_remote:
+        raise RuntimeError("GitHub installation token is unavailable")
+    env = {**os.environ, "GIT_TERMINAL_PROMPT": "0", "GIT_CONFIG_NOSYSTEM": "1",
+           "GIT_CONFIG_GLOBAL": "/dev/null", "GIT_CONFIG_COUNT": "2",
+           "GIT_CONFIG_KEY_0": "credential.helper", "GIT_CONFIG_VALUE_0": "",
+           "GIT_CONFIG_KEY_1": "http.https://github.com/.extraheader",
+           "GIT_CONFIG_VALUE_1": ("AUTHORIZATION: basic " +
+               base64.b64encode(f"x-access-token:{token}".encode()).decode("ascii")) if token else ""}
+    return subprocess.run(["git", "-C", str(repo), "push", "--atomic",
+        f"--force-with-lease={ref}:{base}", remote_url, f"{commit}:{ref}"], check=False,
+        capture_output=True, text=True, env=env)
+
+
+def _heartbeat(path: Path, registry: dict[str, Any], now: datetime,
+               sequence_path: Path = INTEGRATOR_HEARTBEAT_SEQUENCE) -> dict[str, Any] | None:
     event = json.loads(path.read_text())
     key_id = registry["supervisor_key_id"]
     if event.get("key_id") != key_id or event.get("type") != "heartbeat":
@@ -149,7 +168,6 @@ def _heartbeat(path: Path, registry: dict[str, Any], now: datetime) -> dict[str,
         return None
     expiry = datetime.fromisoformat(event["expires_at"])
     issued = datetime.fromisoformat(event["issued_at"])
-    sequence_path = path.with_suffix(path.suffix + ".sequence")
     prior = int(sequence_path.read_text()) if sequence_path.exists() else 0
     if (event.get("sequence", 0) <= prior or now >= expiry or issued > now.replace(microsecond=0) + __import__("datetime").timedelta(seconds=60)
             or (now - issued).total_seconds() > min(3600, registry.get("heartbeat_max_age_seconds", 3600))):
@@ -164,6 +182,8 @@ def _heartbeat(path: Path, registry: dict[str, Any], now: datetime) -> dict[str,
             registry["supervisor_public_key"], "-sigfile", str(sig), "-in", str(msg), "-rawin"],
             check=False, capture_output=True).returncode == 0
     if valid:
+        sequence_path.parent.mkdir(mode=0o700, parents=True, exist_ok=True)
+        sequence_path.parent.chmod(0o700)
         sequence_path.write_text(str(event["sequence"]))
     return event if valid else None
 
@@ -176,6 +196,7 @@ def promote(repo: Path, remote: str, auth: dict[str, Any], signature: str,
             staged_commit: str | None = None,
             ci_verified_sha: str | None = None,
             candidate_ref: str | None = None,
+            git_token: str | Callable[[], str] | None = None,
             now: Callable[[], datetime] = lambda: datetime.now(UTC)) -> str:
     if identity_provider is None:
         raise RuntimeError("identity provider is mandatory")
@@ -194,7 +215,8 @@ def promote(repo: Path, remote: str, auth: dict[str, Any], signature: str,
     if current_time.tzinfo is None:
         raise ValueError("clock must return timezone-aware datetime")
     _require_trust_root_verification(trust_sources, registry, current_time)
-    heartbeat = _heartbeat(trust_sources.heartbeat, registry, current_time)
+    heartbeat = _heartbeat(trust_sources.heartbeat, registry, current_time,
+                            getattr(trust_sources, "heartbeat_sequence", None))
     if heartbeat is None:
         raise ValueError("valid supervisor heartbeat unavailable")
     heartbeat_ok = True
@@ -343,8 +365,9 @@ def promote(repo: Path, remote: str, auth: dict[str, Any], signature: str,
         raise RuntimeError("remote base moved")
     if after_recheck:
         after_recheck()
-    result = subprocess.run(["git", "-C", str(repo), "push", "--atomic",
-        f"--force-with-lease={ref}:{base}", remote_url, f"{commit}:{ref}"], check=False, capture_output=True, text=True)
+    if callable(git_token):
+        git_token = git_token()
+    result = _conditional_push(repo, remote_url, ref, base, commit, git_token)
     if result.returncode:
         raise RuntimeError("conditional push rejected; no fallback: " + result.stderr)
     expected_tree = auth["merge_result_tree_sha"]

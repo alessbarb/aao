@@ -49,7 +49,7 @@ def _fixture(tmp_path):
     _run("git", "clone", "--mirror", str(remote), str(mirror))
     gh = FakeGitHub(base, head)
     inbox, reports, state = (tmp_path / name for name in ("inbox", "reports", "state"))
-    trust = TrustSources(*(tmp_path / f"trust-{i}" for i in range(6)))
+    trust = TrustSources(*(tmp_path / f"trust-{i}" for i in range(7)))
     return remote, mirror, gh, inbox, reports, state, trust, base, head
 
 
@@ -73,10 +73,10 @@ class FakeGitHub:
         self.checks[(sha, name)] = conclusion
 
 
-def _tick(remote, mirror, gh, inbox, reports, state, trust):
+def _tick(remote, mirror, gh, inbox, reports, state, trust, *, git_token=None):
     return r1_pipeline.integrator_tick(gh, str(remote), mirror, inbox, reports, state,
                                        trust, object(), lambda: __import__("datetime").datetime.now(
-                                           __import__("datetime").UTC))
+                                           __import__("datetime").UTC), git_token=git_token)
 
 
 def _request(inbox, kind):
@@ -125,11 +125,13 @@ def test_stage2_and4_alternating_ticks_promote_the_exact_staged_commit(tmp_path,
     def fake_promote(repo, git_remote, auth, signature, sources, **kwargs):
         assert kwargs["staged_commit"] == staged
         assert kwargs["ci_verified_sha"] == staged
+        assert kwargs["git_token"] == token
         _run("git", "--git-dir", str(remote), "update-ref", "refs/heads/main", staged, base)
         return staged
 
     monkeypatch.setattr(r1_pipeline, "promote", fake_promote)
-    final = _tick(remote, mirror, gh, inbox, reports, state, trust)
+    token = "test-installation-token"
+    final = _tick(remote, mirror, gh, inbox, reports, state, trust, git_token=token)
     assert final[0]["status"] == "promoted"
     assert _run("git", "--git-dir", str(remote), "rev-parse", "refs/heads/main") == staged
     assert _run("git", "--git-dir", str(remote), "show", "-s", "--format=%P", staged).split() == [base, head]
@@ -222,7 +224,7 @@ def test_real_r1_authorizes_and_promotes_over_alternating_ticks(tmp_path, audit_
     mirror = tmp_path / "mirror.git"
     _run("git", "clone", "--mirror", str(bare), str(mirror))
     output = tmp_path / "authorization"
-    trust = TrustSources(*(tmp_path / f"placeholder-{index}" for index in range(6)))
+    trust = TrustSources(*(tmp_path / f"placeholder-{index}" for index in range(7)))
     inbox, reports, state = (tmp_path / name for name in ("pipeline-inbox", "pipeline-reports", "pipeline-state"))
 
     class PipelineGitHub:
