@@ -73,7 +73,10 @@ REGISTRY=$SRC/deploy/github-apps/aao-github-apps-registry.json
 LOG=/var/log/aao-bootstrap/$(date +%Y%m%dT%H%M%S); ((APPLY)) && install -d -m 0755 "$LOG" || LOG=$(mktemp -d)
 echo "rev=$REV ceo=$CEO src=$SRC apply=$APPLY log=$LOG"
 # Fork scope of each implementer App (verify_app_auth --fork). Change here if the forks move.
-declare -A FORKS=([aao-impl-claude]=autoaiorg/aao-claude [aao-impl-codex]=autoaiorg/aao-codex [aao-impl-agy]=autoaiorg/aao-agy)
+# Space-separated: production fork, then trial fork (parent <owner>/aao-governance-trial).
+declare -A FORKS=([aao-impl-claude]="autoaiorg/aao-claude autoaiorg/aao-trial-claude"
+                  [aao-impl-codex]="autoaiorg/aao-codex autoaiorg/aao-trial-codex"
+                  [aao-impl-agy]="autoaiorg/aao-agy autoaiorg/aao-trial-agy")
 apps() { python3 -I -c 'import json,sys
 for a in json.load(open(sys.argv[1]))["apps"]: print(a["name"], a["linux_uid"], a["key_file"], int(a["app_id"]))' "$REGISTRY"; }
 
@@ -136,7 +139,7 @@ for m in "$SRC"/docs/proposals/github-apps/*.json; do run install -o root -g roo
 if ((APPLY)); then
   pass=0
   while read -r app uid _; do
-    extra=(); [[ -n ${FORKS[$app]:-} ]] && extra=(--fork "${FORKS[$app]}")
+    extra=(); for f in ${FORKS[$app]:-}; do extra+=(--fork "$f"); done
     if runuser -u "$uid" -- env -i HOME="$(getent passwd "$uid" | cut -d: -f6)" PATH=/usr/bin:/bin \
          /usr/bin/python3 -I /opt/aao-p2/verify_app_auth.py "$app" "${extra[@]}" >> "$LOG/app-auth.jsonl"; then
       pass=$((pass + 1))
