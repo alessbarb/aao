@@ -185,8 +185,10 @@ if ((TRUST_ROOT)); then
     [[ ! -L $f && $(stat -c %U "$f" 2>/dev/null) == aao-auditor-alt && $(( 0$(stat -c %a "$f") & 022 )) == 0 ]] \
       || die "$f missing, a symlink, or not exclusively aao-auditor-alt's: run the Antigravity audit of $REV first"
   done
-  [[ $(sha256sum "$A/report.md" | cut -d' ' -f1) == "$REPORT_SHA" ]] || die "$A/report.md is not the report you pinned"
-  python3 -I - "$A/attestation.json" "$A/report.md" "$REV" <<'PY' || die "the audit of $REV does not authorize the trust root"
+  # One root-owned snapshot of both files; every check below reads only that snapshot (no swap in between).
+  snap=$(mktemp -d); cat -- "$A/attestation.json" > "$snap/attestation.json"; cat -- "$A/report.md" > "$snap/report.md"
+  [[ $(sha256sum "$snap/report.md" | cut -d' ' -f1) == "$REPORT_SHA" ]] || die "$A/report.md is not the report you pinned"
+  python3 -I - "$snap/attestation.json" "$snap/report.md" "$REV" <<'PY' || die "the audit of $REV does not authorize the trust root"
 import hashlib, json, re, sys
 att, report, rev = json.load(open(sys.argv[1])), open(sys.argv[2], "rb").read(), sys.argv[3]
 assert att["head"] == att["checked_out_head"] == rev and att["os_user"] == "aao-auditor-alt" and att["auditor"] == "antigravity", "attestation is not for this REV"
@@ -196,7 +198,8 @@ verdicts = {re.sub(r"[\s*`]", "", line.split("Veredicto:", 1)[1]) for line in re
 assert verdicts == {"APPROVE-TECHNICAL"}, f"verdict is not APPROVE-TECHNICAL (the only favourable verdict of the pinned prompt): {sorted(verdicts) or 'none'}"
 print("audit verdict", sorted(verdicts))
 PY
-  echo "audit attestation sha256=$(sha256sum "$A/attestation.json" | cut -d' ' -f1)"
+  echo "audit attestation sha256=$(sha256sum "$snap/attestation.json" | cut -d' ' -f1) report sha256=$REPORT_SHA"
+  ((APPLY)) && cp -- "$snap/attestation.json" "$snap/report.md" "$LOG/"
   # Fresh hosts only: refuse before writing anything if any trust-root artifact already exists.
   for f in /etc/aao-audit/trust-anchor.json /etc/aao-audit/dispatch.json /etc/aao-audit/expected-revision \
            /etc/aao-supervisor/config.json /etc/aao-integrator/config.json /srv/aao/trust/registry.json \
