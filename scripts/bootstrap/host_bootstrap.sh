@@ -77,7 +77,10 @@ if [[ -n $KEYS_DIR ]]; then
 fi
 missing=0
 while read -r app uid key; do
-  home=$(getent passwd "$uid" | cut -d: -f6) || die "no account $uid"
+  if ! home=$(getent passwd "$uid" | cut -d: -f6); then
+    ((APPLY)) && die "no account $uid"
+    echo "pend $app key (account $uid is created by the identities phase)"; continue
+  fi
   [[ $key == "$home/.config/aao/$app.pem" ]] || die "registry key_file for $app is not $home/.config/aao/$app.pem"
   if [[ -f $key ]]; then
     [[ $(stat -c '%U %a' "$key") == "$uid 600" ]] || die "$key exists but is not $uid:0600"
@@ -119,7 +122,8 @@ if [[ -f $AGY_SRC ]]; then run install -o root -g root -m 0755 "$AGY_SRC" /usr/l
 run install -d -o root -g root -m 0755 /opt/aao-audit
 run install -o root -g root -m 0755 "$SRC/scripts/audit/run_agy_audit.sh" /opt/aao-audit/
 run install -o root -g root -m 0644 "$SRC/docs/audit-prompts/r1-chain.md" /opt/aao-audit/
-alt_home=$(getent passwd aao-auditor-alt | cut -d: -f6)
+alt_home=$(getent passwd aao-auditor-alt | cut -d: -f6 || true)
+[[ -n $alt_home ]] || { ((APPLY)) && die "no account aao-auditor-alt"; alt_home=/home/aao-auditor-alt; }
 # Only single read-only git commands; agy denies everything else in print mode (see the audit prompt).
 run runuser -u aao-auditor-alt -- env -i HOME="$alt_home" PATH=/usr/bin:/bin /usr/bin/python3 -I -c '
 import json, os
@@ -130,7 +134,7 @@ d.setdefault("permissions", {})["allow"] = ["command(git diff)", "command(git sh
                                             "command(git ls-files)", "command(git grep)"]
 fd = os.open(p, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
 os.write(fd, (json.dumps(d, indent=1) + "\n").encode()); os.close(fd)'
-if runuser -u aao-auditor-alt -- test -s "$alt_home/.gemini/antigravity-cli/antigravity-oauth-token"; then
+if [[ -n $(getent passwd aao-auditor-alt) ]] && runuser -u aao-auditor-alt -- test -s "$alt_home/.gemini/antigravity-cli/antigravity-oauth-token"; then
   echo "ok   agy session present for aao-auditor-alt"
 else
   echo "TODO agy login (interactive, once):"
