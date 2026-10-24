@@ -260,6 +260,8 @@ PY
     ((APPLY)) && printf '%064d\n' 0 | install -o root -g root -m 0644 /dev/stdin /etc/aao-audit/ledger.anchor
   fi
   ((APPLY)) && echo "$REV" | install -o root -g root -m 0644 /dev/stdin /etc/aao-audit/expected-revision
+  # Empty auditor ledger (zero rows verifies; matches the all-zero anchor). The heartbeat refuses a missing one.
+  run install -o aao-auditor -g aao-ledger-read -m 0640 /dev/null /var/lib/aao-auditor/ledger/governance.jsonl
   run systemctl daemon-reload
   run systemctl enable --now aao-supervisor-intake.service aao-supervisor-heartbeat.timer aao-supervisor-attribution.timer
   if ((APPLY)); then
