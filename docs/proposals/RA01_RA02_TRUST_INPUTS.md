@@ -1,6 +1,6 @@
 # Propuesta: datos de confianza para RA-01 y RA-02 (decisión del CEO)
 
-**Estado: PROPUESTA DEL PM, pendiente de decisión del CEO (R3).** No rige hasta que el CEO la apruebe. Su aprobación no pone ningún RA en PASS: después hay que implementar, probar (NT-01, NT-02), auditar y regenerar la raíz de confianza.
+**Estado: APROBADA POR EL CEO (R3), 2026-10-24 12:38 CEST.** El CEO aprobó todas las filas del §1, `aao-audit` solo desde `aao-auditor` (5448107) y la correspondencia entre principales e implementadores del §2. La lista normativa es [`docs/protected-routes.json`](../protected-routes.json). Su aprobación no pone ningún RA en PASS: después hay que implementar, probar (NT-01, NT-02), auditar y regenerar la raíz de confianza.
 
 **Por qué hace falta.** Codex se detuvo en el límite que le correspondía (#73). Lo que falta no es código, sino datos R3 que solo puede fijar el CEO:
 - **RA-01.** El §3.4.3 de la política no es una lista ejecutable. Mezcla conceptos («el integrador», «código del supervisor») con rutas, e incluye filas condicionadas a P5. Además, las dos copias que existen no coinciden con él:
@@ -46,7 +46,7 @@
 
 | Check | App autorizada (id) |
 |---|---|
-| `aao-audit` | `aao-auditor` (5448107); **¿también `aao-auditor-alt` (5448148)?** |
+| `aao-audit` | `aao-auditor` (5448107) únicamente (decisión del CEO) |
 | `test` | GitHub Actions (15368) |
 
 **Correspondencia entre principal de GitHub e implementador** (NT-02-3 y NT-02-10). La atribución solo se resuelve si el principal que empujó es exactamente uno de estos:
