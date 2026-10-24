@@ -25,7 +25,7 @@ def canonical(value: object) -> bytes:
 
 def build(revision: str, template: dict, auditor_pub: str, supervisor_pub: str, auditor_uid: int,
           developer_users: list[str], supervisor_key_id: str = "aao-supervisor",
-          attribution_writer_uid: int | None = None) -> dict[str, dict]:
+          attribution_writer_uid: int | None = None, repo: str | None = None) -> dict[str, dict]:
     if not re.fullmatch(r"[0-9a-f]{40}", revision):
         raise ValueError("revision must be a full lowercase SHA")
     policy = {**template, "auditor_id": "aao-auditor", "auditor_os_user": "aao-auditor",
@@ -43,6 +43,8 @@ def build(revision: str, template: dict, auditor_pub: str, supervisor_pub: str, 
               "supervisor_heartbeat_path": HEARTBEAT, "supervisor_intake_socket": INTAKE_SOCKET}
     config = {"schema": "aao.supervisor-config.v1", "auditor_uid": auditor_uid, "ledger_path": LEDGER,
               "state_path": "/var/lib/aao-supervisor/state.json", "heartbeat_path": HEARTBEAT,
+              "attribution_path": "/var/lib/aao-supervisor/attribution/attribution.json",
+              "repository": repo or "",
               "intake_socket": INTAKE_SOCKET, "private_key": "/var/lib/aao-supervisor/keys/supervisor-ed25519.pem",
               "key_id": supervisor_key_id, "trust_registry": "/srv/aao/trust/registry.json", "validity_seconds": 600}
     return {"policy.json": policy, "trust-anchor.json": anchor, "supervisor-config.json": config}
@@ -97,6 +99,7 @@ def build_runtime_configs(repo: str) -> dict[str, dict]:
                   "reports": "/var/lib/aao-auditor/reports", "state_dir": "/var/lib/aao-integrator/state",
                   "trust_registry": "/srv/aao/trust/registry.json", "ledger": LEDGER,
                   "ledger_anchor": "/etc/aao-audit/ledger.anchor", "heartbeat": HEARTBEAT,
+                  "heartbeat_sequence": "/var/lib/aao-integrator/heartbeat.sequence",
                   "freeze": "/var/lib/aao-integrator/freeze",
                   "integrator_private_key": "/var/lib/aao-integrator/integrator-ed25519.pem"}
     dispatch = {"schema": "aao.audit-dispatch-config.v1", "inbox": "/var/lib/aao-audit-inbox",
@@ -119,7 +122,7 @@ def main() -> int:
     args = parser.parse_args()
     files = build(args.revision, json.loads(args.policy_template.read_text()), args.auditor_public_key.read_text(),
                   args.supervisor_public_key.read_text(), pwd.getpwnam("aao-auditor").pw_uid, args.developer,
-                  attribution_writer_uid=pwd.getpwnam("aao-supervisor").pw_uid)
+                  attribution_writer_uid=pwd.getpwnam("aao-supervisor").pw_uid, repo=args.repo)
     files["registry.json"] = build_registry(
         files["policy.json"], files["trust-anchor.json"],
         auditor_models={"aao-auditor": "claude", "aao-auditor-alt": "codex"},

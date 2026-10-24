@@ -1,0 +1,144 @@
+import base64
+import importlib.util
+import json
+import os
+import stat
+from datetime import UTC, datetime, timedelta
+from pathlib import Path
+
+import pytest
+
+from aao import auditor_dispatch, authorization_issuer, integrator, supervisor_service
+
+
+def test_integrator_heartbeat_sequence_is_written_under_integrator_state(tmp_path, monkeypatch):
+    heartbeat = tmp_path / "heartbeat.json"
+    sequence = tmp_path / "integrator" / "heartbeat.sequence"
+    now = datetime.now(UTC)
+    heartbeat.write_text(json.dumps({"key_id": "supervisor", "type": "heartbeat", "state_sha256": "a" * 64,
+        "sequence": 1, "issued_at": now.isoformat(), "expires_at": (now + timedelta(minutes=2)).isoformat(),
+        "signature": base64.b64encode(b"signature").decode()}))
+
+    class Verified:
+        returncode = 0
+
+    monkeypatch.setattr(integrator.subprocess, "run", lambda *args, **kwargs: Verified())
+    event = integrator._heartbeat(heartbeat, {"supervisor_key_id": "supervisor", "supervisor_public_key": "key"},
+                                  now, sequence)
+    assert event["sequence"] == 1
+    assert sequence.read_text() == "1"
+    assert not heartbeat.with_suffix(".json.sequence").exists()
+
+
+def test_promote_push_uses_app_auth_header_only_in_git_environment(monkeypatch, tmp_path):
+    captured = {}
+
+    class Result:
+        returncode, stdout, stderr = 0, "", ""
+
+    def run(argv, **kwargs):
+        captured["argv"], captured["env"] = argv, kwargs["env"]
+        return Result()
+
+    monkeypatch.setattr(integrator.subprocess, "run", run)
+    integrator._conditional_push(tmp_path, "https://github.com/owner/repo.git", "refs/heads/main",
+                                 "b" * 40, "c" * 40, "installation-secret")
+    assert "installation-secret" not in " ".join(captured["argv"])
+    env = captured["env"]
+    expected = "AUTHORIZATION: basic " + base64.b64encode(b"x-access-token:installation-secret").decode()
+    assert env["GIT_CONFIG_VALUE_1"] == expected
+    assert env["GIT_CONFIG_KEY_1"] == "http.https://github.com/.extraheader"
+    assert env["GIT_CONFIG_KEY_0"] == "credential.helper" and env["GIT_CONFIG_VALUE_0"] == ""
+    assert env["GIT_TERMINAL_PROMPT"] == "0"
+    assert env["GIT_CONFIG_NOSYSTEM"] == "1" and env["GIT_CONFIG_GLOBAL"] == "/dev/null"
+
+
+def test_dispatch_gate_path_and_file_are_group_readable_not_writable(tmp_path, monkeypatch):
+    inbox, reports = tmp_path / "inbox", tmp_path / "reports"
+    inbox.mkdir(); reports.mkdir()
+    request_id = "a" * 64
+    (reports / request_id).mkdir(mode=0o700)
+    (inbox / f"{request_id}.json").write_text(json.dumps({"schema": "aao.audit-request.v1", "type": "gate",
+        "id": "b" * 64, "promoted_sha": "c" * 40, "repo": "owner/project", "pr_number": 1}))
+    monkeypatch.setattr(auditor_dispatch, "verify_promotion", lambda *args, **kwargs: (True, ()))
+    class Client:
+        def create_check_run(self, *args):
+            pass
+
+    auditor_dispatch.dispatch_once(inbox, reports, tmp_path / "key", Client())
+    directory = reports / request_id
+    info = directory.stat()
+    assert stat.S_IMODE(info.st_mode) == 0o750
+    assert stat.S_IMODE((directory / "gate.json").stat().st_mode) == 0o640
+
+
+def test_issued_authorization_files_are_group_readable_not_writable(tmp_path, monkeypatch):
+    report_dir = tmp_path / "report"
+    report_dir.mkdir(mode=0o750)
+    report = {"manifest": {"repository": str(tmp_path), "target_ref": "refs/heads/main"},
+              "candidate_sha": "a" * 40, "target_sha": "b" * 40, "result_tree": "c" * 40,
+              "implementer_ids": ["author"], "auditor_id": "auditor", "git_version": "git version 2.0",
+              "auditor_revision": "d" * 40, "verdict": "approve", "veto": False,
+              "blocking_findings": [], "custody_problems": [], "audit_checks": {},
+              "limitations": [], "findings": [], "assurance_level": "A"}
+    raw = json.dumps(report).encode()
+    anchor = {"auditor_uid": os.getuid(), "policy": {"protected_paths": [],
+              "enabled_risk_classes": ["R1"], "auditors": {"auditor": "auditor-key"},
+              "version": "v1", "policy_id": "v1"}, "policy_sha256": "e" * 64}
+    monkeypatch.setattr(authorization_issuer, "load_anchor", lambda *args: anchor)
+    monkeypatch.setattr(authorization_issuer, "read_protected", lambda *args: raw)
+    monkeypatch.setattr(authorization_issuer, "verify_promotion", lambda *args, **kwargs: (True, ()))
+    monkeypatch.setattr(authorization_issuer, "changed_paths", lambda *args: [])
+    monkeypatch.setattr(authorization_issuer.authorization, "sign", lambda *args: "test-signature")
+    output = tmp_path / "out"
+    authorization_issuer.issue_authorization(report_dir, "owner/repo", 1, tmp_path / "key", output,
+                                               anchor_path=tmp_path / "anchor",
+                                               anchor_owner_uids=(os.getuid(),))
+    assert stat.S_IMODE(output.stat().st_mode) == 0o750
+    for name in ("authorization.json", "authorization.sig"):
+        mode = stat.S_IMODE((output / name).stat().st_mode)
+        assert mode == 0o640 and mode & 0o022 == 0
+
+
+def test_attribution_records_github_push_and_pr_author_only_after_api_success(tmp_path):
+    sha_push, sha_pr = "a" * 40, "b" * 40
+
+    class Client:
+        def installation_token(self, owner, repo):
+            assert (owner, repo) == ("owner", "repo")
+
+        def request(self, method, path):
+            assert method == "GET"
+            if "/events?" in path:
+                body = [{"type": "PushEvent", "actor": {"login": "pusher"},
+                         "payload": {"commits": [{"sha": sha_push}]}}]
+            else:
+                body = [{"user": {"login": "author"}, "head": {"sha": sha_pr}}]
+            return type("Response", (), {"status": 200, "body": body})()
+
+    path = tmp_path / "attribution.json"
+    config = {"repository": "owner/repo", "attribution_path": str(path)}
+    assert supervisor_service.attribution(config, Client()) == 2
+    data = json.loads(path.read_text())
+    assert data["candidates"] == {sha_push: ["pusher"], sha_pr: ["author"]}
+
+    class Failed(Client):
+        def request(self, method, path):
+            return type("Response", (), {"status": 503, "body": []})()
+
+    failed_path = tmp_path / "failed.json"
+    with pytest.raises(RuntimeError):
+        supervisor_service.attribution({**config, "attribution_path": str(failed_path)}, Failed())
+    assert not failed_path.exists()
+
+
+def test_verifier_lists_dispatch_integrator_and_attribution_units():
+    path = Path(__file__).parents[1] / "scripts/verify_trust_root_host.py"
+    spec = importlib.util.spec_from_file_location("trust_root_verifier", path)
+    verifier = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(verifier)
+
+    expected = {"aao-auditor-dispatch.service", "aao-auditor-dispatch.path", "aao-auditor-dispatch.timer",
+                "aao-integrator-tick.service", "aao-integrator-tick.timer",
+                "aao-supervisor-attribution.service", "aao-supervisor-attribution.timer"}
+    assert expected <= set(verifier.UNITS)

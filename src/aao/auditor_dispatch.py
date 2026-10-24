@@ -78,9 +78,11 @@ def _read_request(path: Path) -> bytes:
 
 
 def _atomic(path: Path, value: dict[str, Any]) -> None:
-    path.parent.mkdir(mode=0o700, parents=True, exist_ok=True)
+    path.parent.mkdir(mode=0o750, parents=True, exist_ok=True)
+    path.parent.chmod(0o750)
     fd, name = tempfile.mkstemp(prefix=f".{path.name}.", dir=path.parent)
     try:
+        os.fchmod(fd, 0o640)
         with os.fdopen(fd, "wb") as stream:
             stream.write(json.dumps(value, sort_keys=True, separators=(",", ":"), ensure_ascii=False).encode())
             stream.flush(); os.fsync(stream.fileno())
@@ -110,7 +112,8 @@ def dispatch_once(inbox: str | Path, reports: str | Path, key: str | Path,
                   runner: Callable[[Path, list[str]], tuple[int, str, str]] | None = None) -> list[dict[str, str]]:
     """Process each valid request once. The inbox is data only; no command is run from it."""
     inbox, reports, key = Path(inbox), Path(reports), Path(key)
-    reports.mkdir(mode=0o700, parents=True, exist_ok=True)
+    reports.mkdir(mode=0o750, parents=True, exist_ok=True)
+    reports.chmod(0o750)
     results: list[dict[str, str]] = []
     try:
         entries = sorted(inbox.iterdir())
@@ -150,7 +153,8 @@ def dispatch_once(inbox: str | Path, reports: str | Path, key: str | Path,
                 if expected_repo is not None and request["repo"] != expected_repo:
                     raise ValueError("request repository does not match configured repository")
                 manifest_path = reports / request_id / "manifest.json"
-                manifest_path.parent.mkdir(mode=0o700, parents=True, exist_ok=True)
+                manifest_path.parent.mkdir(mode=0o750, parents=True, exist_ok=True)
+                manifest_path.parent.chmod(0o750)
                 manifest_path.write_text(json.dumps(manifest, sort_keys=True, separators=(",", ":")))
                 verdict = audit_manifest(manifest_path, audit_dir, key, anchor_path=anchor_path,
                                          anchor_owner_uids=anchor_owner_uids, **({"runner": runner} if runner else {}))
@@ -159,8 +163,10 @@ def dispatch_once(inbox: str | Path, reports: str | Path, key: str | Path,
                     issue_authorization(audit_dir, request["repo"], request["pr_number"], key,
                                         auth_dir, anchor_path=anchor_path,
                                         anchor_owner_uids=anchor_owner_uids)
-                    (reports / request_id / "authorization.json").write_bytes((auth_dir / "authorization.json").read_bytes())
-                    (reports / request_id / "authorization.sig").write_bytes((auth_dir / "authorization.sig").read_bytes())
+                    for name in ("authorization.json", "authorization.sig"):
+                        target = reports / request_id / name
+                        target.write_bytes((auth_dir / name).read_bytes())
+                        target.chmod(0o640)
                 results.append({"id": request_id, "status": str(verdict.get("verdict", "failed"))})
             elif kind == "gate":
                 if set(request) != {"schema", "type", "id", "promoted_sha", "repo", "pr_number"}:

@@ -29,7 +29,7 @@ CONFIG_PATH = Path("/etc/aao-integrator/config.json")
 CONFIG_SCHEMA = "aao.integrator-config.v1"
 _CONFIG_FIELDS = {"schema", "repo", "git_remote", "mirror", "inbox", "reports", "state_dir",
                   "trust_registry", "ledger", "ledger_anchor", "heartbeat", "freeze",
-                  "integrator_private_key"}
+                  "heartbeat_sequence", "integrator_private_key"}
 
 
 def _read_config_file(path: Path, owners: tuple[int, ...]) -> bytes:
@@ -78,7 +78,8 @@ def run_configured_tick(config: dict[str, Any], *, github_client: Any | None = N
         git_token_provider = lambda: github.installation_token(*config["repo"].split("/", 1))
     sources = TrustSources(Path(config["trust_registry"]), Path(config["ledger"]),
                            Path(config["ledger_anchor"]), Path(config["heartbeat"]),
-                           Path(config["freeze"]), Path(config["integrator_private_key"]))
+                           Path(config["freeze"]), Path(config["integrator_private_key"]),
+                           Path(config["heartbeat_sequence"]))
     identity_name = config["integrator_identity"]
     if not isinstance(identity_name, str) or not identity_name:
         raise ValueError("integrator config lacks integrator_identity")
@@ -281,7 +282,7 @@ def integrator_tick(github: Any, git_remote: str, mirror: str | Path, inbox: str
                                identity_provider=identity_provider, observed_repo=owner_repo,
                                observed_pr_number=number, staged_commit=staged,
                                ci_verified_sha=staged,
-                               candidate_ref=f"refs/pull/{number}/head", now=clock)
+                               candidate_ref=f"refs/pull/{number}/head", now=clock, git_token=git_token)
             state.update(status="promoted", promoted_sha=promoted)
         except (OSError, ValueError, TypeError, RuntimeError, KeyError, subprocess.SubprocessError) as error:
             moved = isinstance(error, RuntimeError) and str(error) == "remote base moved"

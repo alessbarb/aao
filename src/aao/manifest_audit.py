@@ -363,7 +363,7 @@ def audit_manifest(
         # Declared identities can only make the decision stricter; recusal relies on attribution (SL-02).
         declared = sorted({manifest["producer"], *authors.split()})
         implementers = attributed_implementers(anchor, manifest["candidate_sha"])
-        output.mkdir(mode=0o700, exist_ok=False)
+        output.mkdir(mode=0o750, exist_ok=False)
         evidence_dir = output / "evidence"
         evidence_dir.mkdir(mode=0o700)
         evidence: dict[str, str] = {}
@@ -405,7 +405,7 @@ def audit_manifest(
         raise AuditError("target ref moved before the verdict was recorded")
     report_bytes = _canonical(report)
     (output / "report.json").write_bytes(report_bytes)
-    (output / "report.json").chmod(0o444)
+    (output / "report.json").chmod(0o640)
     if not custody:
         signature = subprocess.run(["openssl", "pkeyutl", "-sign", "-inkey", str(key_path), "-rawin", "-in",
                                     str(output / "report.json")], check=True, capture_output=True).stdout

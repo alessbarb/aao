@@ -24,7 +24,7 @@ def _pub(tmp_path, name):
 def test_generated_anchor_loads_with_the_real_loader(tmp_path):
     template = json.loads((ROOT / "docs/audit-runs/20261019-provisional/policy.json").read_text())
     files = maker.build(REV, template, _pub(tmp_path, "a"), _pub(tmp_path, "s"), os.getuid(), ["alessbarb"],
-                        attribution_writer_uid=os.getuid())
+                        attribution_writer_uid=os.getuid(), repo="owner/project")
     trust = tmp_path / "trust"
     trust.mkdir(mode=0o755)
     policy = trust / "policy.json"
@@ -40,7 +40,7 @@ def test_generated_anchor_loads_with_the_real_loader(tmp_path):
 
 
 def test_generated_supervisor_config_loads(tmp_path):
-    files = maker.build(REV, {"version": "x"}, "A", "S", 1005, [])
+    files = maker.build(REV, {"version": "x"}, "A", "S", 1005, [], repo="owner/project")
     registry = tmp_path / "registry.json"
     registry.write_text(json.dumps({"ledger_keys": {"k": {}}, "integrator_key_id": "k"}))
     registry.chmod(0o644)
@@ -79,6 +79,9 @@ def test_registry_is_static_and_fail_closed():
 def test_runtime_configs_match_the_service_loaders(tmp_path):
     from aao import auditor_dispatch, r1_pipeline
     configs = maker.build_runtime_configs("autoaiorg/aao-governance-trial")
+    files = maker.build(REV, {"version": "x"}, "A", "S", 1005, [], repo="owner/project")
+    assert files["supervisor-config.json"]["repository"] == "owner/project"
+    assert configs["integrator-config.json"]["heartbeat_sequence"] == "/var/lib/aao-integrator/heartbeat.sequence"
     assert set(configs["integrator-config.json"]) == r1_pipeline._CONFIG_FIELDS
     assert configs["integrator-config.json"]["schema"] == r1_pipeline.CONFIG_SCHEMA
     assert set(configs["dispatch.json"]) == auditor_dispatch._CONFIG_FIELDS
