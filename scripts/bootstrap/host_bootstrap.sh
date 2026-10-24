@@ -203,11 +203,11 @@ PY
            /srv/aao/trust/keys/aao-supervisor-ed25519.pub /srv/aao/trust/keys/aao-integrator-ed25519.pub \
            /var/lib/aao-trust-verify/status.json /var/lib/aao-auditor/ledger/governance.jsonl "$SRC"/deploy/systemd/*; do
     [[ $f == "$SRC"/* ]] && f=/etc/systemd/system/${f##*/}
-    [[ ! -e $f ]] || die "$f already exists: the trust-root phase only runs on a host without one (rotation is a separate procedure)"
+    [[ ! -e $f && ! -L $f ]] || die "$f already exists: the trust-root phase only runs on a host without one (rotation is a separate procedure)"
   done
   # Every directory the trust-root tmpfiles manage must be absent or empty (no leftover data).
   while read -r d; do
-    [[ ! -e $d ]] || [[ -d $d && ! -L $d && -z $(ls -A "$d") ]] || die "$d is not empty: not a fresh host"
+    [[ ! -e $d && ! -L $d ]] || [[ -d $d && ! -L $d && -z $(ls -A "$d") ]] || die "$d is not empty: not a fresh host"
   done < <(awk '$1 == "d" {print $2}' "$SRC/deploy/tmpfiles.d/aao-trust-root.conf")
   for role in aao-auditor aao-supervisor aao-integrator; do
     f=/srv/aao/frozen/$role
