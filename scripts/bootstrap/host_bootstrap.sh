@@ -189,7 +189,7 @@ import hashlib, json, re, sys
 att, report, rev = json.load(open(sys.argv[1])), open(sys.argv[2], "rb").read(), sys.argv[3]
 assert att["head"] == att["checked_out_head"] == rev and att["os_user"] == "aao-auditor-alt" and att["auditor"] == "antigravity", "attestation is not for this REV"
 assert hashlib.sha256(report).hexdigest() == att["report_sha256"], "report.md does not match the attestation"
-verdicts = set(re.findall(r"Veredicto:\W*(APPROVE-TECHNICAL|APPROVE|REJECT|VETO)", report.decode()))
+verdicts = set(re.findall(r"Veredicto:\W*([A-Za-z][A-Za-z_-]*)", report.decode()))  # the whole word, never a prefix
 assert verdicts == {"APPROVE-TECHNICAL"}, f"verdict is not APPROVE-TECHNICAL (the only favourable verdict of the pinned prompt): {sorted(verdicts) or 'none'}"
 print("audit verdict", sorted(verdicts))
 PY
