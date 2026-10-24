@@ -177,8 +177,9 @@ def verify(app: str, forks: list[str] | None = None) -> tuple[bool, dict]:
     rec["accessible_repositories"] = sorted(repos)
     checks["token_revoked"] = revoke == 204
     if app in CANONICAL_ONLY:
-        checks["access_is_canonical_only"] = rec["accessible_repositories"] == [canonical] \
-            and rec["repository_selection"] == "selected"
+        # The canonical repo, plus at most its trial repo (P2/P3 trial installs these Apps there too).
+        checks["access_is_canonical_only"] = canonical in repos and set(repos) <= parents \
+            and len(repos) == len(set(repos)) and rec["repository_selection"] == "selected"
     else:
         checks["implementer_cannot_reach_canonical"] = canonical not in rec["accessible_repositories"]
         rec["expected_forks"] = sorted(forks or [])
