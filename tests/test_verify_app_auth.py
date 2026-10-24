@@ -141,3 +141,13 @@ def test_implementer_on_production_and_trial_forks(tmp_path, monkeypatch):
     mod, _, _ = _load(tmp_path, monkeypatch, repos=["agents/aao", "agents/aao-governance-trial"],
                       canonical_only=False, parent="org/aao-governance-trial")
     assert mod.verify("aao-x", ["agents/aao", "agents/aao-governance-trial"])[0] is True
+
+
+def test_canonical_role_may_also_reach_trial(tmp_path, monkeypatch):
+    mod, _, _ = _load(tmp_path, monkeypatch, repos=["org/aao", "org/aao-governance-trial"])
+    assert mod.verify("aao-x")[0] is True
+
+
+def test_canonical_role_trial_only_fails(tmp_path, monkeypatch):
+    mod, _, _ = _load(tmp_path, monkeypatch, repos=["org/aao-governance-trial"])
+    assert mod.verify("aao-x")[0] is False

@@ -65,7 +65,7 @@ Las Apps de la primera pasada se comprueban a posteriori con `scripts/github_app
 
 **Quién:** el CEO (sudo, P5 (a)). Cada comprobación corre **como el uid que custodia la clave**; nadie más lee la clave.
 **Qué hace:** con la clave de la App firma un JWT, comprueba `GET /app` (id, slug, permisos frente al manifiesto revisado), la instalación (`app_id`, cuenta, permisos, no suspendida), obtiene un token de instalación, lista los repositorios accesibles y revoca el token. Solo lectura en GitHub. No imprime clave, JWT ni token.
-**Repos esperados:** integrador, auditores, supervisor, notifier y PM solo `autoaiorg/aao` (`selected`). Los implementadores: exactamente los forks indicados con `--fork` (de `autoaiorg/aao` o de su repo de ensayo), nunca el canónico (A-10/A-11).
+**Repos esperados:** integrador, auditores, supervisor, notifier y PM: `autoaiorg/aao` y, como único añadido, `autoaiorg/aao-governance-trial` (`selected`). Los implementadores: exactamente los forks indicados con `--fork` (de `autoaiorg/aao` o de su repo de ensayo), nunca el canónico (A-10/A-11).
 
 ```bash
 REPO=$HOME/workspace/repos/active/aao
