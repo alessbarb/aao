@@ -1,4 +1,4 @@
-#!/usr/bin/env bash
+#!/bin/bash
 # Bootstrap an AAO host from zero, by chaining the reviewed pieces in this repository.
 #
 # Run ONLY as root, from a root-owned clone checked out at the exact REV (see
@@ -19,15 +19,16 @@
 # Default is a dry run that prints what it would do. Fail closed. Phases 1-4 are re-runnable and never
 # regenerate an existing key; the trust-root phase runs only on a host with no trust-root artifact at all.
 set -euo pipefail
-# Root must never resolve commands through the caller's PATH or inherit its environment.
-if [[ ${AAO_BOOT_CLEAN:-} != 1 ]]; then
-  exec /usr/bin/env -i AAO_BOOT_CLEAN=1 PATH=/usr/sbin:/usr/bin:/sbin:/bin HOME=/root LANG=C.UTF-8 /bin/bash "$0" "$@"
-fi
+# Root never resolves commands through the caller's environment: fixed PATH, no inherited functions,
+# default IFS. Unconditional (no flag or variable can skip it).
+unset -f $(compgen -A function) 2>/dev/null || true
+export PATH=/usr/sbin:/usr/bin:/sbin:/bin HOME=/root LANG=C.UTF-8; IFS=$' \t\n'; hash -r
+unset BASH_ENV ENV CDPATH GLOBIGNORE PYTHONPATH PYTHONHOME PYTHONSTARTUP LD_PRELOAD LD_LIBRARY_PATH
 umask 022
 
 die() { echo "FAIL: $*" >&2; exit 1; }
 say() { echo "== $*"; }
-APPLY=0 REV="" CEO="" KEYS_DIR="" AGY_SRC="" AGY_SHA="" TRUST_ROOT=0 LOOP_REPO="" ENABLE_INTEGRATOR=0
+APPLY=0 REV="" CEO="" KEYS_DIR="" AGY_SRC="" AGY_SHA="" REPORT_SHA="" TRUST_ROOT=0 LOOP_REPO="" ENABLE_INTEGRATOR=0
 while [[ $# -gt 0 ]]; do
   case $1 in
     --apply) APPLY=1;;
@@ -37,6 +38,7 @@ while [[ $# -gt 0 ]]; do
     --agy) AGY_SRC=$2; shift;;
     --agy-sha256) AGY_SHA=$2; shift;;
     --trust-root) TRUST_ROOT=1;;
+    --audit-report-sha256) REPORT_SHA=$2; shift;;
     --loop-repo) LOOP_REPO=$2; shift;;
     --enable-integrator) ENABLE_INTEGRATOR=1;;
     *) die "unknown option $1 (see the header of $0)";;
@@ -168,12 +170,15 @@ fi
 if ((TRUST_ROOT)); then
   say "trust-root"
   [[ $LOOP_REPO =~ ^[A-Za-z0-9-]+/[A-Za-z0-9._-]+$ ]] || die "--loop-repo OWNER/REPO is required (the repo the R1 loop serves)"
+  # The CEO authorizes the trust root (§12.3 op. 1) by pinning the exact audit report they read.
+  [[ $REPORT_SHA =~ ^[0-9a-f]{64}$ ]] || die "--audit-report-sha256 <sha256 of the report.md you read> is required"
   # The independent audit of this exact REV, where only aao-auditor-alt can write it.
   A=$alt_home/aao-audits/$REV
   for f in "$A" "$A/attestation.json" "$A/report.md"; do
     [[ ! -L $f && $(stat -c %U "$f" 2>/dev/null) == aao-auditor-alt && $(( 0$(stat -c %a "$f") & 022 )) == 0 ]] \
       || die "$f missing, a symlink, or not exclusively aao-auditor-alt's: run the Antigravity audit of $REV first"
   done
+  [[ $(sha256sum "$A/report.md" | cut -d' ' -f1) == "$REPORT_SHA" ]] || die "$A/report.md is not the report you pinned"
   python3 -I - "$A/attestation.json" "$A/report.md" "$REV" <<'PY' || die "the audit of $REV does not authorize the trust root"
 import hashlib, json, re, sys
 att, report, rev = json.load(open(sys.argv[1])), open(sys.argv[2], "rb").read(), sys.argv[3]
@@ -188,7 +193,11 @@ PY
   for f in /etc/aao-audit/trust-anchor.json /etc/aao-audit/dispatch.json /etc/aao-audit/expected-revision \
            /etc/aao-supervisor/config.json /etc/aao-integrator/config.json /srv/aao/trust/registry.json \
            /var/lib/aao-auditor/policy.json /srv/aao/frozen/aao-auditor/tree /srv/aao/frozen/aao-supervisor/tree \
-           /srv/aao/frozen/aao-integrator/tree; do
+           /srv/aao/frozen/aao-integrator/tree /etc/aao-audit/ledger.anchor /etc/tmpfiles.d/aao-trust-root.conf \
+           /var/lib/aao-supervisor/keys/supervisor-ed25519.pem /var/lib/aao-integrator/integrator-ed25519.pem \
+           /srv/aao/trust/keys/aao-supervisor-ed25519.pub /srv/aao/trust/keys/aao-integrator-ed25519.pub \
+           /var/lib/aao-trust-verify/status.json "$SRC"/deploy/systemd/*; do
+    [[ $f == "$SRC"/* ]] && f=/etc/systemd/system/${f##*/}
     [[ ! -e $f ]] || die "$f already exists: the trust-root phase only runs on a host without one (rotation is a separate procedure)"
   done
   for role in aao-auditor aao-supervisor aao-integrator; do
