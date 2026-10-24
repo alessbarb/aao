@@ -61,7 +61,9 @@ SRC=$(cd "$(dirname "$0")/../.." && pwd)
 # Every git call: no system/global config, no hooks, no replace refs, no prompt.
 g() { env -i PATH=/usr/bin:/bin HOME=/nonexistent LANG=C.UTF-8 GIT_CONFIG_GLOBAL=/dev/null GIT_CONFIG_NOSYSTEM=1 \
         GIT_NO_REPLACE_OBJECTS=1 GIT_TERMINAL_PROMPT=0 git -c core.hooksPath=/dev/null -c safe.directory="*" "$@"; }
-[[ $(stat -c %u "$SRC") == 0 && $(stat -c %u "$SRC/.git") == 0 ]] || die "$SRC must be a root-owned clone"
+# A plain clone (.git is a directory, not a worktree pointer), entirely root's, nothing group/other-writable.
+[[ -d $SRC/.git && ! -L $SRC/.git ]] || die "$SRC/.git must be a directory (a plain clone, not a worktree)"
+[[ -z $(find "$SRC" \( ! -uid 0 -o \( ! -type l -perm /022 \) \) -print -quit) ]] || die "$SRC must be entirely root-owned and not group/other-writable"
 [[ $(g -C "$SRC" rev-parse HEAD) == "$REV" ]] || die "$SRC is not checked out at $REV"
 [[ -z $(g -C "$SRC" status --porcelain) ]] || die "$SRC has local changes"
 for tool in git python3 openssl systemctl systemd-tmpfiles runuser install getfacl; do command -v $tool >/dev/null || die "missing $tool (packages: git python3 python3-venv openssl systemd acl)"; done
@@ -189,7 +191,8 @@ import hashlib, json, re, sys
 att, report, rev = json.load(open(sys.argv[1])), open(sys.argv[2], "rb").read(), sys.argv[3]
 assert att["head"] == att["checked_out_head"] == rev and att["os_user"] == "aao-auditor-alt" and att["auditor"] == "antigravity", "attestation is not for this REV"
 assert hashlib.sha256(report).hexdigest() == att["report_sha256"], "report.md does not match the attestation"
-verdicts = set(re.findall(r"Veredicto:\W*([A-Za-z][A-Za-z_-]*)", report.decode()))  # the whole word, never a prefix
+# Every verdict line, whole: after "Veredicto:" only markdown (spaces, *, `) may surround the word.
+verdicts = {re.sub(r"[\s*`]", "", line.split("Veredicto:", 1)[1]) for line in report.decode().splitlines() if "Veredicto:" in line}
 assert verdicts == {"APPROVE-TECHNICAL"}, f"verdict is not APPROVE-TECHNICAL (the only favourable verdict of the pinned prompt): {sorted(verdicts) or 'none'}"
 print("audit verdict", sorted(verdicts))
 PY
