@@ -1,5 +1,7 @@
 # Instalación de la raíz de confianza en el host (op. 1 del §12.3)
 
+> **Host nuevo o traslado:** usa `docs/procedures/HOST_BOOTSTRAP.md`. El script `scripts/bootstrap/host_bootstrap.sh` automatiza esta página y además deja el integrador apagado hasta que los RA estén en PASS. Esta página queda como referencia de lo que hace.
+
 **Estado:** BORRADOR. No ejecutar hasta que:
 - el SHA final de la cadena R1 tenga APPROVE de un revisor no recusado;
 - esta página fije ese SHA en `REV`.
