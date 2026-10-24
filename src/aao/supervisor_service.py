@@ -47,7 +47,15 @@ def load_config(path: Path = CONFIG_PATH, owners: tuple[int, ...] = (0,),
     keys, integrator = registry.get("ledger_keys"), registry.get("integrator_key_id")
     if not isinstance(keys, dict) or not keys or not isinstance(integrator, str):
         raise ValueError("trust registry lacks ledger_keys or integrator_key_id")
-    return {**config, "trusted_keys": keys, "integrator_key_id": integrator}
+    push_principals = registry.get("push_principals")
+    if not isinstance(push_principals, dict) or not push_principals or any(
+            not isinstance(principal, str) or not principal or not isinstance(implementer, str) or not implementer
+            for principal, implementer in push_principals.items()):
+        raise ValueError("trust registry lacks push_principals")
+    if len(set(push_principals.values())) != len(push_principals):
+        raise ValueError("push principal attribution is ambiguous")
+    return {**config, "trusted_keys": keys, "integrator_key_id": integrator,
+            "push_principals": push_principals}
 
 
 def _custody(config: dict[str, Any]) -> dict[str, Any]:
@@ -89,9 +97,9 @@ def attribution(config: dict[str, Any], client: Any | None = None) -> int:
         return body
 
     attributed: dict[str, set[str]] = {}
-    # Fetch both sources completely before writing any attribution.
+    push_principals = config["push_principals"]
+    # Only authenticated push events are eligible. PR author logins are not push authentication.
     events = get(f"/repos/{escaped}/events?per_page=100")
-    pulls = get(f"/repos/{escaped}/pulls?state=all&per_page=100")
     for event in events:
         if not isinstance(event, dict):
             raise TypeError("malformed GitHub repository event")
@@ -105,17 +113,6 @@ def attribution(config: dict[str, Any], client: Any | None = None) -> int:
                 if not isinstance(sha, str) or len(sha) != 40 or any(ch not in "0123456789abcdef" for ch in sha):
                     raise ValueError("malformed commit in GitHub push event")
                 attributed.setdefault(sha, set()).add(actor["login"])
-    for pull in pulls:
-        if not isinstance(pull, dict):
-            raise TypeError("malformed GitHub pull request")
-        user = pull.get("user")
-        head = pull.get("head")
-        sha = head.get("sha") if isinstance(head, dict) else None
-        if (not isinstance(user, dict) or not isinstance(user.get("login"), str)
-                or not isinstance(sha, str) or len(sha) != 40
-                or any(ch not in "0123456789abcdef" for ch in sha)):
-            raise ValueError("malformed GitHub pull request author or head")
-        attributed.setdefault(sha, set()).add(user["login"])
     for sha, principals in sorted(attributed.items()):
         record_attribution(Path(config["attribution_path"]), sha, sorted(principals))
     return len(attributed)

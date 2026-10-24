@@ -42,12 +42,15 @@ def test_generated_anchor_loads_with_the_real_loader(tmp_path):
 def test_generated_supervisor_config_loads(tmp_path):
     files = maker.build(REV, {"version": "x"}, "A", "S", 1005, [], repo="owner/project")
     registry = tmp_path / "registry.json"
-    registry.write_text(json.dumps({"ledger_keys": {"k": {}}, "integrator_key_id": "k"}))
+    registry.write_text(json.dumps({"ledger_keys": {"k": {}}, "integrator_key_id": "k",
+                                    "push_principals": {"aao-impl-codex[bot]": "codex"}}))
     registry.chmod(0o644)
     config = tmp_path / "config.json"
     config.write_text(json.dumps({**files["supervisor-config.json"], "trust_registry": str(registry)}))
     config.chmod(0o644)
-    assert load_config(config, (os.getuid(),), (os.getuid(),))["integrator_key_id"] == "k"
+    loaded = load_config(config, (os.getuid(),), (os.getuid(),))
+    assert loaded["integrator_key_id"] == "k"
+    assert loaded["push_principals"] == {"aao-impl-codex[bot]": "codex"}
 
 
 def test_auditor_cannot_be_developer():
@@ -68,6 +71,13 @@ def test_registry_is_static_and_fail_closed():
     assert registry["enabled_risk_classes"] == ["R1"]
     assert registry["trusted_auditor_revisions"] == [REV]
     assert registry["policy_sha256"] == files["trust-anchor.json"]["policy_sha256"]
+    assert registry["protected_routes"] == files["policy.json"]["protected_routes"]
+    assert registry["protected_routes_sha256"] == files["policy.json"]["protected_routes_sha256"]
+    assert registry["protected_routes"]["docs/CONSTITUTION.md"] == "R3"
+    assert registry["required_check_publishers"] == {"aao-audit": [5448107], "test": [15368]}
+    assert registry["push_principals"] == {"aao-impl-claude[bot]": "claude",
+                                            "aao-impl-codex[bot]": "codex",
+                                            "aao-impl-agy[bot]": "antigravity"}
     try:
         maker.build_registry(files["policy.json"], files["trust-anchor.json"], auditor_models={},
                              author_models={}, ra_status={"RA-02": "YES"})
