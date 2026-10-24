@@ -9,6 +9,7 @@ from pathlib import Path
 import pytest
 from test_manifest_audit import audit as run_audit
 from test_manifest_audit import env as _base_audit_env  # noqa: F401
+from test_manifest_audit import git
 from test_manifest_audit import manifest as make_manifest
 
 from aao import authorization_issuer
