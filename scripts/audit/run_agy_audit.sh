@@ -5,6 +5,7 @@
 # Read-only: public clone at the frozen SHA, plan mode, sandbox, clean environment, the reviewed prompt only.
 # Writes ~/aao-audits/<head_sha>/{prompt.txt,report.md,attestation.json} and prints their sha256.
 set -euo pipefail
+umask 022   # report/attestation must not be group-writable: the bootstrap refuses them otherwise
 PROMPT=/opt/aao-audit/r1-chain.md
 AGY=/usr/local/bin/agy   # root-owned copy; never a binary another account can write
 PROMPT_SHA256=3ddba5375577292dc75bb0ce04634c7d63f03d20cd74bcf1fca1d232f9246ef9   # reviewed docs/audit-prompts/r1-chain.md

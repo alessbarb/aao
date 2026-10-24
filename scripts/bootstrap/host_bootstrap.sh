@@ -75,7 +75,7 @@ echo "rev=$REV ceo=$CEO src=$SRC apply=$APPLY log=$LOG"
 # Fork scope of each implementer App (verify_app_auth --fork). Change here if the forks move.
 declare -A FORKS=([aao-impl-claude]=autoaiorg/aao-claude [aao-impl-codex]=autoaiorg/aao-codex [aao-impl-agy]=autoaiorg/aao-agy)
 apps() { python3 -I -c 'import json,sys
-for a in json.load(open(sys.argv[1]))["apps"]: print(a["name"], a["linux_uid"], a["key_file"])' "$REGISTRY"; }
+for a in json.load(open(sys.argv[1]))["apps"]: print(a["name"], a["linux_uid"], a["key_file"], int(a["app_id"]))' "$REGISTRY"; }
 
 # ---------- 1. identities ----------
 say "identities (P1)"
@@ -89,7 +89,7 @@ if [[ -n $KEYS_DIR ]]; then
   [[ $(stat -c '%u %a' "$kd") == "0 700" ]] || die "--keys-dir must be root:0700"
 fi
 missing=0
-while read -r app uid key; do
+while read -r app uid key _; do
   if ! home=$(getent passwd "$uid" | cut -d: -f6); then
     ((APPLY)) && die "no account $uid"
     echo "pend $app key (account $uid is created by the identities phase)"; continue
@@ -117,6 +117,15 @@ while read -r app uid key; do
   fi
 done < <(apps)
 ((missing == 0 || APPLY == 0)) || die "App keys missing: put <app>.pem in --keys-dir (see HOST_BOOTSTRAP.md)"
+# GitHubAppClient reads the app_id from ~/.config/aao/<app>.json (not secret). Written as the uid, never overwritten.
+while read -r app uid _ id; do
+  home=$(getent passwd "$uid" | cut -d: -f6) || continue
+  meta=$home/.config/aao/$app.json
+  [[ ! -L $meta ]] || die "$meta is a symlink"
+  if [[ -e $meta ]]; then echo "ok   $app metadata present"; continue; fi
+  if ((APPLY)); then printf '{"id": %d}\n' "$id" | runuser -u "$uid" -- /bin/sh -c 'umask 077 && set -C && cat > "$1"' sh "$meta"; fi
+  echo "new  $app metadata (app_id $id) for $uid"
+done < <(apps)
 
 # ---------- 3. P2 verification ----------
 say "p2-verify (9/9 required)"
@@ -252,7 +261,7 @@ PY
   fi
   ((APPLY)) && echo "$REV" | install -o root -g root -m 0644 /dev/stdin /etc/aao-audit/expected-revision
   run systemctl daemon-reload
-  run systemctl enable --now aao-supervisor-intake.service aao-supervisor-heartbeat.timer
+  run systemctl enable --now aao-supervisor-intake.service aao-supervisor-heartbeat.timer aao-supervisor-attribution.timer
   if ((APPLY)); then
     /usr/bin/python3 -I /srv/aao/frozen/aao-supervisor/tree/scripts/verify_trust_root_host.py --expected-revision "$REV" \
       --status-file /var/lib/aao-trust-verify/status.json | tee "$LOG/trust-root-verify.log" \
