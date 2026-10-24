@@ -48,3 +48,14 @@ Los RA se cierran con las pruebas negativas del §16.1 al §16.5 de `AUTONOMOUS_
 4. **Actions: autorizado.** Se activa «Require approval for all outside collaborators», se guarda la evidencia y se ejecuta P3-10. Herramienta: `scripts/trial/actions_approval.sh` (#66).
 
 **Auditoría obligatoria.** Un agente no recusado debe auditar #60, #61, #62 y #64, y la revisión definitiva de `github_trial.py` y del ejecutor del ensayo. Ningún resultado cuenta como evidencia de RA antes de esa auditoría. El integrador no se activa hasta que pasen NT-01 a NT-09, A-01 a A-14 y P3-01 a P3-12, y los RA correspondientes estén en PASS.
+||||||| parent of aaee4f0 (docs(p2p3): trial prep evidence — CI seeded with rulesets restored, Actions approval, A-14 probe)
+## Preparación ejecutada (2026-10-24, CEO)
+
+- **Decisión 1, workflow de CI.** El workflow quedó en `main` del repo de ensayo con el commit `d1b55efca1453e51638d5302b5ba6095dee60dc5`. Los rulesets 25776805, 25776806 y 25776807 se restauraron **idénticos** a la configuración guardada; los hashes de antes y después coinciden. Evidencia en [`ci-seed/`](ci-seed/).
+- **Decisión 4, Actions.** La aprobación pasó de `first_time_contributors` a `all_external_contributors`, y el token de workflow sigue en `read`. Evidencia en [`actions/`](actions/).
+- **Decisión 3, sonda de A-14.**
+  - App `aao-probe-noworkflows`: id 5453507, propietaria `autoaiorg`, permisos `contents: write` y `metadata: read`, sin `workflows`.
+  - Instalación 174767813, solo en el fork `autoaiorg/aao-trial-probe` (padre: el repo de ensayo).
+  - La clave está en el uid `aao-probe-noworkflows`, con modo 0600. La descarga se destruyó con `shred`.
+  - **Incidencia:** el formulario del manifiesto devolvió «"url" wasn't supplied», así que el CEO creó la App a mano y generó la clave en GitHub. Los permisos coinciden con el manifiesto revisado.
+  - Al terminar A-14 se ejecuta `probe_app_setup.sh --teardown`.

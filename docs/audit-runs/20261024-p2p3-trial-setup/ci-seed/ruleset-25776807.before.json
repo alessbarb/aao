@@ -1,0 +1,1 @@
+{"bypass_actors":[{"actor_id":5447984,"actor_type":"Integration","bypass_mode":"always"}],"conditions":{"ref_name":{"exclude":[],"include":["~ALL"]}},"enforcement":"active","id":25776807,"name":"C tags","rules":[{"type":"creation"},{"type":"update"},{"type":"deletion"}],"source":"autoaiorg/aao-governance-trial","source_type":"Repository","target":"tag"}
