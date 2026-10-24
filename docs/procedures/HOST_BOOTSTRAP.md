@@ -54,7 +54,7 @@ $B                                            # simulación: revisa la salida
 $B --apply --keys-dir /root/aao-keys          # P1 + claves + 9/9 + Antigravity
 ```
 
-**agy.** Se instala solo contra un hash que das tú: `--agy ~/.local/bin/agy --agy-sha256 <hex>`. Calcula ese hash con `sha256sum` sobre el binario que descargaste de la fuente oficial, no sobre uno que hayan podido tocar los agentes. Si ya hay un `/usr/local/bin/agy`, el script lo deja como está.
+**agy.** Se instala solo contra un hash que das tú: `--agy ~/.local/bin/agy --agy-sha256 <hex>`. Calcula ese hash con `sha256sum` sobre el binario que descargaste de la fuente oficial, no sobre uno que hayan podido tocar los agentes. Sin `--agy`, un `/usr/local/bin/agy` existente se deja como está. Con `--agy`, se sustituye, solo si el hash coincide (así se actualiza).
 
 Si nunca has iniciado sesión de agy como `aao-auditor-alt` en esta máquina, el script imprime el comando de login. Hazlo una vez y une la URL en **una sola línea** antes de abrirla.
 
