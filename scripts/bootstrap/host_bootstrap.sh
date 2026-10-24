@@ -53,7 +53,7 @@ g() { env -i PATH=/usr/bin:/bin HOME=/nonexistent LANG=C.UTF-8 GIT_CONFIG_GLOBAL
 [[ $(stat -c %u "$SRC") == 0 && $(stat -c %u "$SRC/.git") == 0 ]] || die "$SRC must be a root-owned clone"
 [[ $(g -C "$SRC" rev-parse HEAD) == "$REV" ]] || die "$SRC is not checked out at $REV"
 [[ -z $(g -C "$SRC" status --porcelain) ]] || die "$SRC has local changes"
-for tool in git python3 openssl systemctl systemd-tmpfiles runuser install; do command -v $tool >/dev/null || die "missing $tool"; done
+for tool in git python3 openssl systemctl systemd-tmpfiles runuser install getfacl; do command -v $tool >/dev/null || die "missing $tool (packages: git python3 python3-venv openssl systemd acl)"; done
 python3 -c 'import venv, ensurepip' 2>/dev/null || die "python3-venv is missing"
 gv=$(git --version | awk '{print $3}'); [[ $(printf '%s\n2.38\n' "$gv" | sort -V | head -1) == 2.38 ]] || die "git >= 2.38 required (merge-tree --write-tree), found $gv"
 REGISTRY=$SRC/deploy/github-apps/aao-github-apps-registry.json
