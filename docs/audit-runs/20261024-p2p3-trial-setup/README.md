@@ -39,3 +39,12 @@ Los RA se cierran con las pruebas negativas del §16.1 al §16.5 de `AUTONOMOUS_
 2. **Criterio de A-01, A-02 y P3-02.** El diseño de P2 instala las Apps de implementador solo en sus forks. Hay dos opciones: (a) contar como PASS que el implementador no pueda obtener token en el repo de ensayo, junto con A-10 en el fork; (b) instalar temporalmente la App en el repo de ensayo para demostrar el 403. AAO no redefine el criterio por su cuenta.
 3. **A-14.** Crear la App `aao-probe-noworkflows` con su uid, o eximir la prueba de forma explícita.
 4. **Paso pendiente de los rulesets.** En Settings > Actions del repo de ensayo, activar «Require approval for all outside collaborators». P3-10 depende de él.
+
+## Decisiones del CEO (2026-10-24 11:32 CEST)
+
+1. **Workflow de CI: autorizado.** Los rulesets A y B pueden desactivarse solo mientras se instala el workflow. Antes se guarda su configuración, después se restauran y se comprueba que los tres vuelven a estar activos. Si la protección no se restablece, se detienen las pruebas. Herramienta: `scripts/trial/seed_trial_ci.sh` (#66).
+2. **A-01, A-02 y P3-02: opción (a), condicionada.** El 403 literal se sustituye por una demostración reproducible de que el implementador no tiene instalación ni permisos sobre el repo protegido. Se complementa con pruebas positivas en los forks y con una revisión adversarial. **No se declara PASS hasta que la equivalencia se valide formalmente.** La herramienta las marca `EQUIVALENCE-PENDING`, nunca PASS.
+3. **A-14: no se exime.** Se crea la App temporal `aao-probe-noworkflows` con permisos mínimos y solo para el ensayo, se ejecutan las pruebas positiva y negativa, y al terminar se revoca la instalación. Herramienta: `scripts/trial/probe_app_setup.sh` (#66), con `--teardown` para la revocación.
+4. **Actions: autorizado.** Se activa «Require approval for all outside collaborators», se guarda la evidencia y se ejecuta P3-10. Herramienta: `scripts/trial/actions_approval.sh` (#66).
+
+**Auditoría obligatoria.** Un agente no recusado debe auditar #60, #61, #62 y #64, y la revisión definitiva de `github_trial.py` y del ejecutor del ensayo. Ningún resultado cuenta como evidencia de RA antes de esa auditoría. El integrador no se activa hasta que pasen NT-01 a NT-09, A-01 a A-14 y P3-01 a P3-12, y los RA correspondientes estén en PASS.
