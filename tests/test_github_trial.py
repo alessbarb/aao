@@ -366,9 +366,16 @@ def test_a01_implementer_passes_only_server_push_denial_and_unchanged_main(monke
     client = RefClient({"/repos/org/trial/git/ref/heads/main": [_ref_reply(before), _ref_reply(before)]})
     monkeypatch.setattr(trial, "_git_push", lambda *_a, **_k: _push_record(
         "HEAD:refs/heads/main", "! [remote rejected] HEAD -> main (protected branch hook declined)"))
-    status, _, evidence = trial.run_test("A-01", "org", "trial", "aao-impl-codex", client)
-    assert status == "PASS"
-    assert evidence[1]["server_rejected"] is True
+    status, reason, _evidence = trial.run_test("A-01", "org", "trial", "aao-impl-codex", client)
+    assert status == "FAIL"
+    assert "explicit equivalence mode" in reason
+    assert not client.calls
+
+
+@pytest.mark.parametrize("test_id", ["A-01", "A-02", "P3-02"])
+def test_equivalence_sensitive_tests_never_pass_without_equivalence_mode(test_id):
+    status, _, _ = trial.run_test(test_id, "org", "trial", "aao-impl-codex", DummyClient([]))
+    assert status == "FAIL"
 
 
 def test_a04_never_claims_server_rejection_from_stale_lease_client_result(monkeypatch):
@@ -702,7 +709,7 @@ def test_main_moving_test_fails_without_green_candidate_checks(monkeypatch):
     monkeypatch.setattr(trial, "_git_push", lambda *_a, **_k: {"status": 0, "exit_code": 0})
     monkeypatch.setattr(trial, "_wait_required_checks", lambda *_a: (False, "required checks did not become green"))
     client = DummyClient([(200, {"object": {"sha": "a" * 40}})])
-    status, reason, evidence = trial.run_test("A-03", "org", "trial", "aao-integrator", client)
+    status, reason, _evidence = trial.run_test("A-03", "org", "trial", "aao-integrator", client)
     assert status == "FAIL" and "cannot move main" in reason
     assert not any(method == "POST" and path == "/graphql" for method, path, _ in client.calls)
 
@@ -724,6 +731,10 @@ def test_equivalence_is_pending_never_pass_and_rejects_wrong_role(monkeypatch):
             return auth.APIResponse(204, {}, {})
     monkeypatch.setenv("AAO_GITHUB_TRIAL_FORKS", "autoaiorg/aao-codex,autoaiorg/aao-trial-codex")
     monkeypatch.setenv("AAO_GITHUB_TRIAL_FORK", "autoaiorg/aao-trial-codex")
+    monkeypatch.setenv("AAO_TRIAL_EXPECTED_REPO_ID", "123")
+    monkeypatch.setenv("AAO_TRIAL_P0_EVIDENCE", json.dumps({"status": 200, "full_name": "autoaiorg/aao-governance-trial", "id": 123}))
+    monkeypatch.setenv("AAO_TRIAL_P4_EVIDENCE", json.dumps({"gh_hosts_yml_absent": True, "git_credentials_absent": True, "token_environment_absent": True, "runner_environment_token_absent": True, "aao_config_exact": True, "deploy_keys_empty": True, "outside_collaborators_clear": True, "org_members_clear": True}))
+    monkeypatch.setenv("AAO_TRIAL_P4B_EVIDENCE", json.dumps({"ceo_login": "alessbarb", "org_owners": ["alessbarb"], "repo_admins": ["alessbarb"]}))
     monkeypatch.setattr(trial.subprocess, "run", lambda *_a, **_k: type("Result", (), {"stdout": "b" * 40})())
     monkeypatch.setattr(trial, "_git_push", lambda *_a, **_k: {"status": 0, "exit_code": 0})
     client = EquivalenceClient([
@@ -740,6 +751,63 @@ def test_equivalence_is_pending_never_pass_and_rejects_wrong_role(monkeypatch):
     assert status == "FAIL" and not unselected.calls
     status, _, _ = trial.run_test("EQUIVALENCE", "autoaiorg", "aao-governance-trial", "aao-integrator", DummyClient([]))
     assert status == "NOT RUN"
+
+
+@pytest.mark.parametrize("premise, facts", [
+    ("P0", {"status": 404, "full_name": "autoaiorg/aao-governance-trial", "id": 123}),
+    ("P4", {"gh_hosts_yml_absent": False, "git_credentials_absent": True, "token_environment_absent": True, "runner_environment_token_absent": True,
+             "aao_config_exact": True, "deploy_keys_empty": True,
+             "outside_collaborators_clear": True, "org_members_clear": True}),
+    ("P4b", {"org_owners": ["alessbarb", "unexpected"], "repo_admins": ["alessbarb"]}),
+])
+def test_equivalence_failed_premise_is_fail_and_never_pass(premise, facts):
+    checks = trial.evaluate_equivalence_premises(
+        {"status": 200, "full_name": "autoaiorg/aao-governance-trial", "id": 123},
+        {"gh_hosts_yml_absent": True, "git_credentials_absent": True, "token_environment_absent": True, "runner_environment_token_absent": True,
+         "aao_config_exact": True, "deploy_keys_empty": True,
+         "outside_collaborators_clear": True, "org_members_clear": True},
+        {"ceo_login": "alessbarb", "org_owners": ["alessbarb"], "repo_admins": ["alessbarb"]},
+        expected_repo_id=123,
+    )
+    assert all(item["result"] == "PASS" for item in checks)
+    if premise == "P0":
+        checks = trial.evaluate_equivalence_premises(facts, {}, {}, expected_repo_id=123)
+    elif premise == "P4":
+        checks = trial.evaluate_equivalence_premises(
+            {"status": 200, "full_name": "autoaiorg/aao-governance-trial", "id": 123}, facts,
+            {"ceo_login": "alessbarb", "org_owners": ["alessbarb"], "repo_admins": ["alessbarb"]}, expected_repo_id=123)
+    else:
+        checks = trial.evaluate_equivalence_premises(
+            {"status": 200, "full_name": "autoaiorg/aao-governance-trial", "id": 123},
+            {"gh_hosts_yml_absent": True, "git_credentials_absent": True, "token_environment_absent": True, "runner_environment_token_absent": True,
+             "aao_config_exact": True, "deploy_keys_empty": True,
+             "outside_collaborators_clear": True, "org_members_clear": True}, facts,
+            expected_repo_id=123)
+    assert next(item for item in checks if item["id"] == premise)["result"] == "FAIL"
+    assert not any(item["result"] == "PASS" and item["id"] == premise for item in checks)
+
+
+def test_equivalence_premises_all_pass_only_while_pending():
+    checks = trial.evaluate_equivalence_premises(
+        {"status": 200, "full_name": "autoaiorg/aao-governance-trial", "id": 123},
+        {"gh_hosts_yml_absent": True, "git_credentials_absent": True, "token_environment_absent": True, "runner_environment_token_absent": True,
+         "aao_config_exact": True, "deploy_keys_empty": True,
+         "outside_collaborators_clear": True, "org_members_clear": True},
+        {"ceo_login": "alessbarb", "org_owners": ["alessbarb"], "repo_admins": ["alessbarb"]}, expected_repo_id=123)
+    assert [item["id"] for item in checks] == ["P0", "P4", "P4b"]
+    assert all(item["result"] == "PASS" for item in checks)
+    assert "return \"PASS\"" not in __import__("inspect").getsource(trial._run_equivalence)
+
+
+def test_equivalence_missing_premise_forces_fail_before_scope_claim(monkeypatch):
+    for key in ("AAO_TRIAL_P0_EVIDENCE", "AAO_TRIAL_P4_EVIDENCE", "AAO_TRIAL_P4B_EVIDENCE", "AAO_TRIAL_EXPECTED_REPO_ID"):
+        monkeypatch.delenv(key, raising=False)
+    status, reason, evidence = trial.run_test(
+        "EQUIVALENCE", "autoaiorg", "aao-governance-trial", "aao-impl-codex", DummyClient([]))
+    assert status == "FAIL" and "P0" in reason and "P4" in reason and "P4b" in reason
+    assert not any(item.get("result") == "PASS" and item.get("id") in {"P0", "P4", "P4b"}
+                   for record in evidence if record.get("method") == "equivalence premises"
+                   for item in record["premises"])
 
 
 def test_promotion_phase_requires_staged_sha_green_checks_and_cas(monkeypatch):
