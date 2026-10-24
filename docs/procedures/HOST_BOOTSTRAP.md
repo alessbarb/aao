@@ -64,7 +64,7 @@ Luego, la auditoría independiente de la revisión que vas a instalar:
 sudo -u aao-auditor-alt -H /opt/aao-audit/run_agy_audit.sh <base auditada> "$REV"
 ```
 
-Instala la raíz de confianza solo si el `report.md` dice **APPROVE-TECHNICAL**, que es el veredicto favorable del prompt de auditoría. El script también acepta `APPROVE`:
+Instala la raíz de confianza solo si el `report.md` dice **APPROVE-TECHNICAL**, que es el único veredicto favorable del prompt de auditoría:
 
 ```bash
 sudo sha256sum /home/aao-auditor-alt/aao-audits/$REV/report.md   # el hash del informe que has leído
@@ -73,7 +73,7 @@ $B --apply --keys-dir /root/aao-keys --trust-root --loop-repo <OWNER/REPO> --aud
 
 `--loop-repo` es el repo que servirá el bucle R1. Hasta que pase el ensayo P2/P3, debe ser el repo de ensayo, que tienes que crear tú (`autoaiorg/aao-governance-trial`, ver `P2_P3_TRIAL_SETUP.md`).
 
-El script lee la auditoría de ese mismo `REV` en `/home/aao-auditor-alt/aao-audits/$REV/`, donde solo escribe `aao-auditor-alt`. Exige que el informe sea exactamente el que fijaste con `--audit-report-sha256`, porque la instalación la autorizas tú. Además comprueba que coincide con la atestación y que el veredicto es APPROVE-TECHNICAL (o APPROVE). Si algo no cuadra, se niega. **Límite conocido:** la atestación no lleva firma. Que la produjo el auditor se apoya en que solo `aao-auditor-alt` puede escribir en esa carpeta. Una firma con una clave de ese mismo uid no demostraría nada más. Lo que autoriza la instalación es tu hash. Después verifica el host y exige `RESULT: PASS`. Después activa la reverificación diaria y el despacho del auditor, pero **no** el integrador. Los logs quedan en `/var/log/aao-bootstrap/<fecha>/`.
+El script lee la auditoría de ese mismo `REV` en `/home/aao-auditor-alt/aao-audits/$REV/`, donde solo escribe `aao-auditor-alt`. Exige que el informe sea exactamente el que fijaste con `--audit-report-sha256`, porque la instalación la autorizas tú. Además comprueba que coincide con la atestación y que el veredicto es exactamente APPROVE-TECHNICAL. Si algo no cuadra, se niega. **Límite conocido:** la atestación no lleva firma. Que la produjo el auditor se apoya en que solo `aao-auditor-alt` puede escribir en esa carpeta. Una firma con una clave de ese mismo uid no demostraría nada más. Lo que autoriza la instalación es tu hash. Después verifica el host y exige `RESULT: PASS`. Después activa la reverificación diaria y el despacho del auditor, pero **no** el integrador. Los logs quedan en `/var/log/aao-bootstrap/<fecha>/`.
 
 Cuando el ensayo P2/P3 dé PASS y reinstales el registro con los RA en PASS:
 

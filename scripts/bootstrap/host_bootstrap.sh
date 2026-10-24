@@ -190,7 +190,7 @@ att, report, rev = json.load(open(sys.argv[1])), open(sys.argv[2], "rb").read(),
 assert att["head"] == att["checked_out_head"] == rev and att["os_user"] == "aao-auditor-alt" and att["auditor"] == "antigravity", "attestation is not for this REV"
 assert hashlib.sha256(report).hexdigest() == att["report_sha256"], "report.md does not match the attestation"
 verdicts = set(re.findall(r"Veredicto:\W*(APPROVE-TECHNICAL|APPROVE|REJECT|VETO)", report.decode()))
-assert verdicts and verdicts <= {"APPROVE", "APPROVE-TECHNICAL"}, f"verdict is not APPROVE: {sorted(verdicts) or 'none'}"
+assert verdicts == {"APPROVE-TECHNICAL"}, f"verdict is not APPROVE-TECHNICAL (the only favourable verdict of the pinned prompt): {sorted(verdicts) or 'none'}"
 print("audit verdict", sorted(verdicts))
 PY
   echo "audit attestation sha256=$(sha256sum "$A/attestation.json" | cut -d' ' -f1)"
