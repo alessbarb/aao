@@ -127,9 +127,29 @@ scripts/github_apps/apply_rulesets.sh autoaiorg/aao-governance-trial "$INTEGRATO
 
 **Si GitHub rechaza la App como excepción** en un repo de cuenta personal, el script falla y **se detiene**. Según P3, en ese caso se eleva la transferencia a una organización como decisión aparte. Nada se transfiere implícitamente.
 
-## 5. Después
+## 5. Run the disposable trial
 
-AAO ejecuta las pruebas A-01 a A-14 (P2) y P3-01 a P3-12 en el repo de ensayo. Cada rol actúa con su propia clave desde su uid; la herramienta de pruebas se prepara en la tarea siguiente del tablero (#36). La configuración se aplica al repo canónico **solo** con todas en PASS (P3 §6).
+The CEO runs the root-owned harness from a sudo session after the audited revision is available in `/root/aao-src` (a plain root-owned clone containing the Git objects):
+
+```bash
+sudo /root/aao-src/scripts/trial/run_trial.sh --rev <40-hex audited SHA>
+sudo /root/aao-src/scripts/trial/run_trial.sh --rev <40-hex audited SHA> --only A-01,A-03,P3-05
+```
+
+The harness exports only `src/` from that revision's Git objects into `/opt/aao-trial/<SHA>/src`, checks the trial rulesets before and after, creates per-uid disposable clones under `/var/tmp/aao-trial/`, invokes each role as its Linux uid with a cleared environment, and collects evidence under `/var/log/aao-trial/<UTC timestamp>/`. It never targets `autoaiorg/aao`. Inspect the summary and `SHA256SUMS`; any `FAIL` produces a non-zero exit. A manual item is reported as `NOT RUN` with its manual procedure rather than being counted as a pass.
+
+Status meanings:
+
+- `PASS`: the harness observed the defined behavior and wrote evidence. This is not an independent audit or RA acceptance.
+- `FAIL`: an assertion failed, a required check did not become green, or a controlled operation failed; investigate before continuing.
+- `NOT RUN`: a precondition/manual action was missing or the test is intentionally manual. It is not evidence of success.
+- `INCONCLUSIVE`: a denial occurred but the observed reason could not be tied to the specific rule; do not treat it as PASS.
+- `STAGED`: A-05/P3-06 stage phase pushed the two-parent merge commit to `aao-staging/...`; it has not moved main.
+- `EQUIVALENCE-PENDING`: implementer scope/positive-control evidence was collected, but the CEO must formally validate equivalence before any PASS. This value is never PASS.
+
+For A-05/P3-06, create the explicitly authorized open PR in the trial repo and set `AAO_GITHUB_TRIAL_PR`, `AAO_GITHUB_TRIAL_PR_HEAD`. Run first as integrator with `AAO_GITHUB_TRIAL_PHASE=stage`; this builds the merge commit and pushes it to an unprotected `aao-trial/merge-...` candidate branch so the `test` workflow can execute. (Ruleset B requires checks on `aao-staging/**`, so the unaudited candidate cannot be pushed there first.) Record the printed merge SHA. Then run `PUBLISH-AUDIT` as `aao-auditor` with `--sha <merge SHA>` to publish the trial-only `aao-audit` check. Finally rerun as integrator with `AAO_GITHUB_TRIAL_PHASE=promote` and `AAO_GITHUB_TRIAL_PROMOTE_SHA=<merge SHA>`. Promotion waits for both required checks, moves that exact commit into `aao-staging/...`, then uses compare-and-swap `updateRefs`; never weaken rulesets or fabricate a check from another role.
+
+For implementer Apps absent from the trial repo, run `EQUIVALENCE` as each implementer with `AAO_GITHUB_TRIAL_FORKS` set to that App's exact installed fork set and `AAO_GITHUB_TRIAL_FORK` set to its trial fork. This records the JWT installation lookup, installation repository scope, and positive branch push on the fork. The result remains `EQUIVALENCE-PENDING` until formal CEO equivalence validation.
 
 ## Revocación (cualquier momento)
 

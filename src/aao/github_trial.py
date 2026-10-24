@@ -48,6 +48,7 @@ FORK_PERMISSIONS = {
     "aao-impl-agy": {"contents": "write", "workflows": "write", "metadata": "read"},
 }
 CANONICAL_REPO = "autoaiorg/aao"
+REQUIRED_CHECKS = ("aao-audit", "test")
 CHECK_WAIT_SECONDS = 300
 CHECK_POLL_SECONDS = 5
 
@@ -266,28 +267,55 @@ def _merge_trial_pr(client: GitHubAppClient, base: str, evidence: list[dict]) ->
     evidence.append(auditor)
     auditor_id = auditor.get("response", {}).get("id") if isinstance(auditor.get("response"), dict) else None
     auditor_owner = auditor.get("response", {}).get("owner", {}).get("login", "").lower() if isinstance(auditor.get("response"), dict) else ""
-    if auditor["status"] != 200 or not isinstance(auditor_id, int) or auditor_owner != "alessbarb":
+    expected_owner = CANONICAL_REPO.split("/", 1)[0].lower()
+    if auditor["status"] != 200 or not isinstance(auditor_id, int) or auditor_owner != expected_owner:
         return "FAIL", "could not resolve aao-auditor App id", evidence
 
-    try:
-        tree = subprocess.run(["git", "merge-tree", "--write-tree", base_sha, candidate], check=True,
-                              capture_output=True, text=True, timeout=60).stdout.splitlines()[0].strip()
-        merge_sha = subprocess.run(["git", "-c", "user.name=AAO Integrator", "-c",
-                                    "user.email=aao-integrator@users.noreply.github.com", "commit-tree",
-                                    tree, "-p", base_sha, "-p", candidate], check=True, capture_output=True,
-                                   text=True, timeout=30).stdout.strip()
-    except (OSError, subprocess.SubprocessError, IndexError) as exc:
-        evidence.append({"method": "git merge-tree/commit-tree", "status": "error", "response": type(exc).__name__})
-        return "FAIL", "could not construct local merge commit", evidence
-    evidence.append({"method": "git merge-tree --write-tree + git commit-tree", "tree": tree,
-                     "parents": [base_sha, candidate], "sha": merge_sha})
-    if not re.fullmatch(r"[0-9a-f]{40,64}", tree) or not re.fullmatch(r"[0-9a-f]{40,64}", merge_sha):
-        return "FAIL", "local merge tree or commit returned an invalid object id", evidence
+    phase = os.environ.get("AAO_GITHUB_TRIAL_PHASE", "")
+    if phase not in {"stage", "promote"}:
+        return "NOT RUN", "Set AAO_GITHUB_TRIAL_PHASE=stage, then run phase=promote with AAO_GITHUB_TRIAL_PROMOTE_SHA after audit publication.", evidence
+    if phase == "stage":
+        try:
+            tree = subprocess.run(["git", "merge-tree", "--write-tree", base_sha, candidate], check=True,
+                                  capture_output=True, text=True, timeout=60).stdout.splitlines()[0].strip()
+            merge_sha = subprocess.run(["git", "-c", "user.name=AAO Integrator", "-c",
+                                        "user.email=aao-integrator@users.noreply.github.com", "commit-tree",
+                                        tree, "-p", base_sha, "-p", candidate], check=True, capture_output=True,
+                                       text=True, timeout=30).stdout.strip()
+        except (OSError, subprocess.SubprocessError, IndexError) as exc:
+            evidence.append({"method": "git merge-tree/commit-tree", "status": "error", "response": type(exc).__name__})
+            return "FAIL", "could not construct local merge commit", evidence
+        evidence.append({"method": "git merge-tree --write-tree + git commit-tree", "tree": tree,
+                         "parents": [base_sha, candidate], "sha": merge_sha})
+        if not re.fullmatch(r"[0-9a-f]{40,64}", tree) or not re.fullmatch(r"[0-9a-f]{40,64}", merge_sha):
+            return "FAIL", "local merge tree or commit returned an invalid object id", evidence
+    else:
+        merge_sha = os.environ.get("AAO_GITHUB_TRIAL_PROMOTE_SHA", "")
+        if not re.fullmatch(r"[0-9a-f]{40}", merge_sha):
+            return "FAIL", "promote phase requires AAO_GITHUB_TRIAL_PROMOTE_SHA with the staged full SHA", evidence
+        commit_record = _api(client, "GET", f"{base}/git/commits/{merge_sha}")
+        evidence.append(commit_record)
+        data = commit_record.get("response", {}) if isinstance(commit_record.get("response"), dict) else {}
+        parents = [item.get("sha") for item in data.get("parents", [])]
+        tree = data.get("tree", {}).get("sha")
+        if commit_record["status"] != 200 or parents != [base_sha, candidate] or not re.fullmatch(r"[0-9a-f]{40}", str(tree)):
+            return "FAIL", "supplied promotion SHA is not a merge of the current main and authorized PR head", evidence
+    # B requires checks on aao-staging/**; seed the workflow on an unprotected
+    # trial ref first, then move the same checked commit into staging.
+    candidate_ref = f"refs/heads/aao-trial/merge-{number}-{candidate[:8]}"
     staging = f"refs/heads/aao-staging/{number}-{candidate[:8]}"
-    push = _git_push(client, f"{owner_repo(base)}", f"{merge_sha}:{staging}")
-    evidence.append(push)
-    if push["status"] != 0:
-        return "FAIL", "integrator could not push merge commit to staging", evidence
+    if phase == "stage":
+        push = _git_push(client, f"{owner_repo(base)}", f"{merge_sha}:{candidate_ref}")
+        evidence.append(push)
+        if push["status"] != 0:
+            return "FAIL", "integrator could not push merge commit to the unprotected trial candidate ref", evidence
+    else:
+        staged_status, staged_sha = _ref_sha(client, base, candidate_ref.removeprefix("refs/heads/"), evidence)
+        if staged_status != 200 or staged_sha != merge_sha:
+            return "FAIL", "supplied promotion SHA does not match the authorized trial candidate ref", evidence
+    if phase == "stage":
+        evidence.append({"method": "staged merge commit", "sha": merge_sha, "ref": candidate_ref})
+        return "STAGED", f"merge commit staged at {merge_sha} on {candidate_ref}; publish aao-audit, then rerun with phase=promote and this SHA", evidence
 
     deadline = time.monotonic() + CHECK_WAIT_SECONDS
     checks_ok = False
@@ -310,6 +338,17 @@ def _merge_trial_pr(client: GitHubAppClient, base: str, evidence: list[dict]) ->
         time.sleep(min(CHECK_POLL_SECONDS, max(0, deadline - time.monotonic())))
     if not checks_ok:
         return "FAIL", f"required checks did not become green within {CHECK_WAIT_SECONDS}s", evidence
+    evidence.append({"method": "required checks", "sha": merge_sha, "status": "green",
+                     "checks": list(REQUIRED_CHECKS), "auditor_app_id": auditor_id})
+
+    # Only now introduce the checked commit into ruleset B's staging namespace.
+    push = _git_push(client, owner_repo(base), f"{merge_sha}:{staging}")
+    evidence.append(push)
+    if push.get("status") != 0:
+        return "FAIL", "required checks were green but protected aao-staging update failed", evidence
+    staged_status, staged_sha = _ref_sha(client, base, staging.removeprefix("refs/heads/"), evidence)
+    if staged_status != 200 or staged_sha != merge_sha:
+        return "FAIL", "protected aao-staging ref does not match the checked merge commit", evidence
 
     query = {"query": "mutation($input: UpdateRefsInput!) { updateRefs(input: $input) { refs { name } } }",
              "variables": {"input": {"refUpdates": [{"name": "refs/heads/main", "oid": merge_sha,
@@ -337,9 +376,128 @@ def owner_repo(base: str) -> str:
     return base.removeprefix("/repos/")
 
 
+def _wait_required_checks(client: GitHubAppClient, base: str, sha: str,
+                          evidence: list[dict]) -> tuple[bool, str]:
+    app = _api(client, "GET", "/apps/aao-auditor")
+    evidence.append(app)
+    app_id = app.get("response", {}).get("id") if isinstance(app.get("response"), dict) else None
+    owner = app.get("response", {}).get("owner", {}).get("login", "").lower() if isinstance(app.get("response"), dict) else ""
+    if app["status"] != 200 or not isinstance(app_id, int) or owner != CANONICAL_REPO.split("/", 1)[0].lower():
+        return False, "could not establish canonical aao-auditor App identity"
+    deadline = time.monotonic() + CHECK_WAIT_SECONDS
+    while time.monotonic() < deadline:
+        result = _api(client, "GET", f"{base}/commits/{sha}/check-runs?per_page=100")
+        evidence.append(result)
+        if result["status"] != 200:
+            return False, f"required-check query returned HTTP {result['status']}"
+        runs = result.get("response", {}).get("check_runs", []) if isinstance(result.get("response"), dict) else []
+        selected = {}
+        for run in runs:
+            if run.get("name") in REQUIRED_CHECKS:
+                name = run["name"]
+                if name == "aao-audit" and run.get("app", {}).get("id") != app_id:
+                    return False, f"aao-audit check came from app_id {run.get('app', {}).get('id')}, expected {app_id}"
+                selected[name] = run
+        if all(name in selected and selected[name].get("status") == "completed"
+               and selected[name].get("conclusion") == "success" for name in REQUIRED_CHECKS):
+            evidence.append({"method": "required checks", "sha": sha, "status": "green",
+                             "checks": list(REQUIRED_CHECKS), "auditor_app_id": app_id})
+            return True, "required checks are green for candidate"
+        time.sleep(min(CHECK_POLL_SECONDS, max(0, deadline - time.monotonic())))
+    evidence.append({"method": "required checks", "sha": sha, "status": "timeout", "checks": list(REQUIRED_CHECKS)})
+    return False, f"required checks {', '.join(REQUIRED_CHECKS)} did not become green within {CHECK_WAIT_SECONDS}s"
+
+
+def _run_equivalence(owner: str, repo: str, role: str, client: GitHubAppClient) -> tuple[str, str, list[dict]]:
+    evidence: list[dict] = []
+    allowed_roles = {"aao-impl-claude", "aao-impl-codex", "aao-impl-agy"}
+    if role not in allowed_roles:
+        return "NOT RUN", "equivalence evidence is restricted to implementer Apps", evidence
+    target = f"{owner}/{repo}".lower()
+    if target != "autoaiorg/aao-governance-trial" or target == CANONICAL_REPO:
+        return "NOT RUN", "equivalence mode is restricted to autoaiorg/aao-governance-trial", evidence
+    installed = client.app_request("GET", f"/repos/{owner}/{repo}/installation")
+    evidence.append({"method": "GET", "path": f"/repos/{owner}/{repo}/installation", "status": installed.status,
+                     "response": _redact(installed.body)})
+    if installed.status != 404:
+        return "FAIL", f"implementer App trial-repository installation lookup returned HTTP {installed.status}, expected 404", evidence
+    forks = sorted({item.strip().lower() for item in os.environ.get("AAO_GITHUB_TRIAL_FORKS", "").split(",") if item.strip()})
+    if not forks or any("/" not in item for item in forks) or target in forks or CANONICAL_REPO in forks:
+        return "FAIL", "AAO_GITHUB_TRIAL_FORKS must list only explicit non-canonical implementer forks", evidence
+    fork = os.environ.get("AAO_GITHUB_TRIAL_FORK", "").lower()
+    if fork not in forks:
+        return "FAIL", "AAO_GITHUB_TRIAL_FORK must name one of AAO_GITHUB_TRIAL_FORKS", evidence
+    try:
+        client.installation_token(*fork.split("/", 1))
+    except GitHubAuthError as exc:
+        evidence.append({"method": "installation token", "status": "error", "response": str(exc)})
+        return "FAIL", "could not authenticate against the implementer's configured fork", evidence
+    listing = _api(client, "GET", "/installation/repositories")
+    evidence.append(listing)
+    if listing["status"] != 200 or not isinstance(listing.get("response"), dict):
+        return "FAIL", "could not enumerate installation repositories", evidence
+    actual = sorted(item.get("full_name", "").lower() for item in listing["response"].get("repositories", [])
+                    if isinstance(item, dict) and isinstance(item.get("full_name"), str))
+    evidence.append({"method": "repository scope comparison", "expected": forks, "actual": actual,
+                     "trial_excluded": target not in actual, "canonical_excluded": CANONICAL_REPO not in actual})
+    if actual != forks or target in actual or CANONICAL_REPO in actual:
+        return "FAIL", "installation repository scope differs from configured fork set or includes protected repositories", evidence
+    try:
+        sha = subprocess.run(["git", "rev-parse", "HEAD"], check=True, capture_output=True, text=True, timeout=10).stdout.strip()
+    except (OSError, subprocess.SubprocessError):
+        return "FAIL", "positive-control candidate SHA unavailable in local clone", evidence
+    if not re.fullmatch(r"[0-9a-f]{40,64}", sha):
+        return "FAIL", "positive-control candidate SHA is malformed", evidence
+    ref = f"refs/heads/aao-trial/equivalence-{sha[:12]}"
+    push = _git_push(client, fork, f"{sha}:{ref}")
+    evidence.append(push)
+    if push.get("status") != 0:
+        return "FAIL", "positive-control push to own non-protected fork branch failed", evidence
+    return "EQUIVALENCE-PENDING", "trial installation absent, configured fork scope exact, positive fork push accepted; CEO formal equivalence validation required before PASS", evidence
+
+
 def _run_test(test_id: str, owner: str, repo: str, role: str, client: GitHubAppClient) -> tuple[str, str, list[dict]]:
     base = f"/repos/{owner}/{repo}"
     evidence: list[dict] = []
+    if test_id == "EQUIVALENCE":
+        return _run_equivalence(owner, repo, role, client)
+    if test_id in {"PUBLISH-AUDIT", "STAGE-COMMIT"} and not _trial_repo_allowed(owner, repo):
+        return "NOT RUN", "trial helper is restricted to an explicitly allowlisted non-canonical trial repository", evidence
+    if test_id == "PUBLISH-AUDIT":
+        if role != "aao-auditor":
+            return "NOT RUN", "explicit aao-audit publication requires role aao-auditor", evidence
+        sha = os.environ.get("AAO_GITHUB_TRIAL_SHA", "")
+        if not re.fullmatch(r"[0-9a-f]{40}", sha):
+            return "FAIL", "AAO_GITHUB_TRIAL_SHA must be an explicit full 40-hex commit SHA", evidence
+        item = _api(client, "POST", f"{base}/check-runs", {"name": "aao-audit", "head_sha": sha,
+                     "status": "completed", "conclusion": "success", "output": {"title": "Trial check evidence", "summary": "Auditor App trial helper; not an independent audit."}})
+        evidence.append(item)
+        actual_app = item.get("response", {}).get("app", {}).get("id") if isinstance(item.get("response"), dict) else None
+        if item["status"] not in (200, 201) or actual_app != client.app_id:
+            return "FAIL", "auditor check run rejected or returned a different App identity", evidence
+        return "PASS", f"completed aao-audit check published by configured auditor App on explicit trial SHA {sha}", evidence
+    if test_id == "STAGE-COMMIT":
+        if role != "aao-integrator":
+            return "NOT RUN", "explicit commit staging requires role aao-integrator", evidence
+        branch = os.environ.get("AAO_GITHUB_TRIAL_BRANCH", "")
+        if not re.fullmatch(r"aao-trial/[A-Za-z0-9._/-]{1,90}", branch) or ".." in branch:
+            return "FAIL", "AAO_GITHUB_TRIAL_BRANCH must be a safe named aao-trial/* branch", evidence
+        try:
+            sha = subprocess.run(["git", "rev-parse", "HEAD^{commit}"], check=True, capture_output=True,
+                                 text=True, timeout=10).stdout.strip()
+        except (OSError, subprocess.SubprocessError):
+            return "FAIL", "local commit unavailable for staging", evidence
+        if not re.fullmatch(r"[0-9a-f]{40}", sha):
+            return "FAIL", "local commit SHA is malformed", evidence
+        expected_sha = os.environ.get("AAO_GITHUB_TRIAL_EXPECTED_SHA", "")
+        if expected_sha and (not re.fullmatch(r"[0-9a-f]{40}", expected_sha) or sha != expected_sha):
+            return "FAIL", "local staged commit SHA does not match runner candidate", evidence
+        item = _git_push(client, f"{owner}/{repo}", f"{sha}:refs/heads/{branch}")
+        evidence.append(item)
+        if item.get("status") != 0:
+            return "FAIL", "integrator could not stage explicit local commit", evidence
+        evidence.append({"method": "staged commit", "sha": sha, "branch": branch})
+        return "PASS", f"staged local commit {sha} on {branch}", evidence
     if not _trial_repo_allowed(owner, repo):
         return "NOT RUN", "Repository is not explicitly listed in AAO_GITHUB_TRIAL_REPOS or is the canonical repository; no operation performed.", evidence
     implementers = {"aao-impl-codex", "aao-impl-claude", "aao-impl-agy"}
@@ -386,6 +544,9 @@ def _run_test(test_id: str, owner: str, repo: str, role: str, client: GitHubAppC
         evidence.append(staged)
         if staged.get("exit_code") != 0:
             return "FAIL", "could not stage the distinct candidate commit", evidence
+        checks_ok, checks_reason = _wait_required_checks(client, base, local, evidence)
+        if not checks_ok:
+            return "FAIL", f"cannot move main before stale-lease test: {checks_reason}", evidence
         moved = _api(client, "POST", "/graphql", {"query": "mutation($input: UpdateRefsInput!) { updateRefs(input: $input) { refs { name } } }", "variables": {"input": {"refUpdates": [{"name": "refs/heads/main", "oid": local, "beforeOid": actual}]}}})
         evidence.append(moved)
         moved_ok = moved["status"] == 200 and isinstance(moved["response"], dict) and not moved["response"].get("errors")
@@ -525,6 +686,9 @@ def _run_test(test_id: str, owner: str, repo: str, role: str, client: GitHubAppC
         evidence.append(staged)
         if staged.get("exit_code") != 0:
             return "FAIL", "could not stage distinct candidate commit", evidence
+        checks_ok, checks_reason = _wait_required_checks(client, base, candidate, evidence)
+        if not checks_ok:
+            return "FAIL", f"cannot move main before stale updateRefs test: {checks_reason}", evidence
         query = {"query": "mutation($input: UpdateRefsInput!) { updateRefs(input: $input) { refs { name } } }", "variables": {"input": {"refUpdates": [{"name": "refs/heads/main", "oid": candidate, "beforeOid": sha}]}}}
         moved = _api(client, "POST", "/graphql", query)
         evidence.append(moved)
@@ -675,10 +839,14 @@ def write_evidence(test_id: str, status: str, reason: str, repo: str, role: str,
                 collect(item)
 
     collect(evidence)
-    if os.environ.get("GITHUB_SHA"):
-        shas.add(os.environ["GITHUB_SHA"])
+    candidate_sha = os.environ.get("AAO_TRIAL_CANDIDATE_SHA")
+    if candidate_sha and re.fullmatch(r"[0-9a-f]{40,64}", candidate_sha):
+        shas.add(candidate_sha)
     payload = {"test_id": test_id, "status": status, "reason": reason, "repo": repo, "role": role,
                "app_id": app_id, "timestamp": timestamp, "shas": sorted(shas),
+               "run_id": os.environ.get("AAO_TRIAL_RUN_ID", ""),
+               "harness_revision": os.environ.get("AAO_TRIAL_HARNESS_REV", ""),
+               "candidate_sha": candidate_sha or "",
                "evidence": _redact(evidence)}
     fd, name = tempfile.mkstemp(prefix=f".{test_id}-", suffix=".tmp", dir=directory)
     try:
@@ -687,6 +855,10 @@ def write_evidence(test_id: str, status: str, reason: str, repo: str, role: str,
             json.dump(payload, stream, indent=2, sort_keys=True)
             stream.write("\n")
         target = directory / f"{test_id}-{safe_ts}.json"
+        suffix = 1
+        while target.exists():
+            suffix += 1
+            target = directory / f"{test_id}-{safe_ts}-{suffix}.json"
         os.replace(name, target)
         os.chmod(target, 0o600)
         return target
@@ -700,13 +872,22 @@ def write_evidence(test_id: str, status: str, reason: str, repo: str, role: str,
 
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("test_id", choices=[*(f"A-{i:02}" for i in range(1, 15)), *(f"P3-{i:02}" for i in range(1, 13))])
+    parser.add_argument("test_id", choices=[*(f"A-{i:02}" for i in range(1, 15)), *(f"P3-{i:02}" for i in range(1, 13)), "PUBLISH-AUDIT", "STAGE-COMMIT", "EQUIVALENCE"])
     parser.add_argument("--repo", required=True, help="OWNER/REPO disposable trial repository")
     parser.add_argument("--role", required=True, choices=[*sorted(ROLE_NAMES), "ceo"])
+    parser.add_argument("--sha", help="explicit SHA for PUBLISH-AUDIT; also accepted through AAO_GITHUB_TRIAL_SHA")
+    parser.add_argument("--branch", help="explicit branch for STAGE-COMMIT; also accepted through AAO_GITHUB_TRIAL_BRANCH")
+    parser.add_argument("--equivalence", action="store_true", help="record implementer scope evidence without claiming PASS")
     args = parser.parse_args(argv)
     if not re.fullmatch(r"[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+", args.repo):
         parser.error("--repo must be OWNER/REPO")
     try:
+        if args.equivalence and (args.test_id not in {"A-01", "A-02", "P3-02"} or args.role not in {"aao-impl-claude", "aao-impl-codex", "aao-impl-agy"}):
+            raise GitHubAuthError("--equivalence is limited to A-01, A-02, P3-02 for implementer roles")
+        if args.sha:
+            os.environ["AAO_GITHUB_TRIAL_SHA"] = args.sha
+        if args.branch:
+            os.environ["AAO_GITHUB_TRIAL_BRANCH"] = args.branch
         validate_role_uid(args.role)
         if not _trial_repo_allowed(*args.repo.split("/", 1)):
             raise GitHubAuthError("--repo must be explicitly listed in AAO_GITHUB_TRIAL_REPOS and cannot be " + CANONICAL_REPO)
@@ -730,8 +911,15 @@ def main(argv: list[str] | None = None) -> int:
         if args.role == "ceo":
             status, reason, records = run_test(args.test_id, owner, repo, args.role, client)
         else:
-            client.installation_token(owner, repo)
-            status, reason, records = run_test(args.test_id, owner, repo, args.role, client)
+            if args.equivalence or args.test_id == "EQUIVALENCE":
+                token_repo = os.environ.get("AAO_GITHUB_TRIAL_FORK", "")
+                if "/" not in token_repo:
+                    raise GitHubAuthError("EQUIVALENCE requires AAO_GITHUB_TRIAL_FORK=OWNER/REPO")
+                client.installation_token(*token_repo.split("/", 1))
+            else:
+                client.installation_token(owner, repo)
+            status, reason, records = (_run_equivalence(owner, repo, args.role, client) if args.equivalence
+                                       else run_test(args.test_id, owner, repo, args.role, client))
         output = write_evidence(args.test_id, status, reason, args.repo, args.role, client.app_id, records)
         print(f"{status}: {reason}\nEvidence: {output}")
         return 0 if status == "PASS" else (1 if status == "FAIL" else 2)

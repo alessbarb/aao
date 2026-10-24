@@ -166,7 +166,7 @@ def _promotion_replies(*, audit_app_id=77):
         (200, [{"number": 8, "head": {"sha": head}}]),
         (200, {"number": 8, "head": {"sha": head}, "base": {"ref": "main"}}),
         (200, {"object": {"sha": base}}),
-        (200, {"id": 77, "owner": {"login": "alessbarb"}}),
+        (200, {"id": 77, "owner": {"login": "autoaiorg"}}),
         (200, {"check_runs": [
             {"name": "aao-audit", "app": {"id": audit_app_id}, "status": "completed", "conclusion": "success"},
             {"name": "test", "app": {"id": 1}, "status": "completed", "conclusion": "success"},
@@ -193,28 +193,23 @@ def test_authorized_promotion_uses_update_refs_never_merge_endpoint(monkeypatch,
     _fake_git(monkeypatch)
     monkeypatch.setenv("AAO_GITHUB_TRIAL_PR", "8")
     monkeypatch.setenv("AAO_GITHUB_TRIAL_PR_HEAD", "b" * 40)
+    monkeypatch.setenv("AAO_GITHUB_TRIAL_PHASE", "stage")
     monkeypatch.setattr(trial, "CHECK_WAIT_SECONDS", 1)
     client = DummyClient(_promotion_replies())
     status, _, evidence = trial.run_test(test_id, "org", "trial", "aao-integrator", client)
-    assert status == "PASS"
+    assert status == "STAGED"
     assert not any(method == "PUT" and path.endswith("/merge") for method, path, _ in client.calls)
-    update = next(body for method, path, body in client.calls if method == "POST" and path == "/graphql")
-    ref_update = update["variables"]["input"]["refUpdates"][0]
-    assert ref_update["beforeOid"] == "a" * 40
-    assert ref_update["oid"] == "d" * 40
+    assert not any(method == "POST" and path == "/graphql" for method, path, _ in client.calls)
     assert any(item.get("method", "").startswith("git merge-tree") for item in evidence)
+    assert any(item.get("method") == "staged merge commit" and item.get("sha") == "d" * 40 for item in evidence)
 
 
 def test_authorized_promotion_fails_for_wrong_audit_app(monkeypatch):
-    _fake_git(monkeypatch)
-    monkeypatch.setenv("AAO_GITHUB_TRIAL_PR", "8")
-    monkeypatch.setenv("AAO_GITHUB_TRIAL_PR_HEAD", "b" * 40)
     monkeypatch.setattr(trial, "CHECK_WAIT_SECONDS", 1)
-    client = DummyClient(_promotion_replies(audit_app_id=999))
-    status, reason, _ = trial.run_test("A-05", "org", "trial", "aao-integrator", client)
-    assert status == "FAIL"
-    assert "app_id 999" in reason
-    assert not any(path == "/graphql" for _, path, _ in client.calls)
+    client = DummyClient([(200, {"id": 77, "owner": {"login": "autoaiorg"}}),
+                          (200, {"check_runs": [{"name": "aao-audit", "app": {"id": 999}, "status": "completed", "conclusion": "success"}]})])
+    ok, reason = trial._wait_required_checks(client, "/repos/org/trial", "d" * 40, [])
+    assert not ok and "app_id 999" in reason
 
 
 def test_push_client_failure_is_not_misreported_as_permission_rejection(monkeypatch):
@@ -227,6 +222,7 @@ def test_push_client_failure_is_not_misreported_as_permission_rejection(monkeypa
 def test_a03_rejects_unrelated_graphql_error(monkeypatch):
     monkeypatch.setattr(trial.subprocess, "run", lambda *_args, **_kwargs: type("Result", (), {"stdout": "b" * 40})())
     monkeypatch.setattr(trial, "_git_push", lambda *_args, **_kwargs: {"exit_code": 0, "status": 0})
+    monkeypatch.setattr(trial, "_wait_required_checks", lambda *_a: (True, "green"))
     client = DummyClient([
         (200, {"object": {"sha": "a" * 40}}),
         (200, {"data": {"updateRefs": {"refs": [{"name": "main"}]}}}),
@@ -374,6 +370,7 @@ def test_a04_stale_lease_passes_only_server_rejection_and_moved_main_intact(monk
     monkeypatch.setattr(trial.subprocess, "run", lambda args, **_kw: type(
         "Result", (), {"stdout": moved + "\n" if args[1:3] == ["rev-parse", "HEAD"] else ""})())
     monkeypatch.setattr(trial, "_git_push", lambda *_a, **_k: next(pushes))
+    monkeypatch.setattr(trial, "_wait_required_checks", lambda *_a: (True, "green"))
     original_api = trial._api
     monkeypatch.setattr(trial, "_api", lambda c, m, p, b=None: (
         original_api(c, m, p, b) if m == "GET" else {"method": m, "path": p, "status": 200,
@@ -610,7 +607,134 @@ def test_redirect_handler_never_forwards_credentials():
 
 def test_evidence_mode_and_redaction(tmp_path, monkeypatch):
     monkeypatch.setattr(Path, "home", lambda: tmp_path)
+    monkeypatch.setenv("AAO_TRIAL_RUN_ID", "trial-1")
+    monkeypatch.setenv("AAO_TRIAL_HARNESS_REV", "a" * 40)
+    monkeypatch.setenv("AAO_TRIAL_CANDIDATE_SHA", "b" * 40)
+    monkeypatch.setenv("GITHUB_SHA", "c" * 40)
     dest = trial.write_evidence("A-01", "PASS", "ok", "org/trial", "aao-impl-codex", 17,
                                 [{"request": {"token": "hide"}, "response": {"ok": True}}])
     assert dest.stat().st_mode & 0o777 == 0o600
+    payload = json.loads(dest.read_text())
     assert "hide" not in dest.read_text()
+    assert payload["run_id"] == "trial-1"
+    assert payload["harness_revision"] == "a" * 40
+    assert payload["candidate_sha"] == "b" * 40
+    assert "c" * 40 not in payload["shas"]
+
+
+def test_explicit_audit_publication_is_auditor_only_and_trial_only(monkeypatch):
+    monkeypatch.setenv("AAO_GITHUB_TRIAL_SHA", "a" * 40)
+    denied = DummyClient([])
+    status, _, _ = trial.run_test("PUBLISH-AUDIT", "autoaiorg", "aao-governance-trial", "aao-integrator", denied)
+    assert status == "NOT RUN" and not denied.calls
+    monkeypatch.setenv("AAO_GITHUB_TRIAL_REPOS", "")
+    status, _, _ = trial.run_test("PUBLISH-AUDIT", "autoaiorg", "aao-governance-trial", "aao-auditor", DummyClient([]))
+    assert status == "NOT RUN"
+    monkeypatch.setenv("AAO_GITHUB_TRIAL_REPOS", "autoaiorg/aao")
+    status, _, _ = trial.run_test("PUBLISH-AUDIT", "autoaiorg", "aao", "aao-auditor", DummyClient([]))
+    assert status == "NOT RUN"
+
+
+def test_explicit_audit_publication_records_exact_sha_and_app_id(monkeypatch):
+    monkeypatch.setenv("AAO_GITHUB_TRIAL_SHA", "a" * 40)
+    client = DummyClient([(201, {"app": {"id": 42}})])
+    client.app_id = 42
+    status, _, evidence = trial.run_test("PUBLISH-AUDIT", "org", "trial", "aao-auditor", client)
+    assert status == "PASS"
+    assert client.calls[0][2]["head_sha"] == "a" * 40
+    assert client.calls[0][2]["status"] == "completed"
+    assert evidence[0]["response"]["app"]["id"] == 42
+
+
+def test_explicit_stage_commit_is_integrator_only_and_named_trial_branch(monkeypatch):
+    monkeypatch.setenv("AAO_GITHUB_TRIAL_BRANCH", "aao-trial/explicit-candidate")
+    monkeypatch.setattr(trial.subprocess, "run", lambda *_a, **_k: type("Result", (), {"stdout": "c" * 40})())
+    pushes = []
+    monkeypatch.setattr(trial, "_git_push", lambda _client, repo, ref: pushes.append((repo, ref)) or {"status": 0})
+    status, _, evidence = trial.run_test("STAGE-COMMIT", "org", "trial", "aao-integrator", DummyClient([]))
+    assert status == "PASS" and pushes == [("org/trial", "cccccccccccccccccccccccccccccccccccccccc:refs/heads/aao-trial/explicit-candidate")]
+    assert any(x.get("sha") == "c" * 40 for x in evidence)
+    status, _, _ = trial.run_test("STAGE-COMMIT", "org", "trial", "aao-auditor", DummyClient([]))
+    assert status == "NOT RUN"
+
+
+def test_explicit_stage_commit_rejects_candidate_mismatch_before_push(monkeypatch):
+    monkeypatch.setenv("AAO_GITHUB_TRIAL_BRANCH", "aao-trial/explicit-candidate")
+    monkeypatch.setenv("AAO_GITHUB_TRIAL_EXPECTED_SHA", "d" * 40)
+    monkeypatch.setattr(trial.subprocess, "run", lambda *_a, **_k: type("Result", (), {"stdout": "c" * 40})())
+    pushes = []
+    monkeypatch.setattr(trial, "_git_push", lambda *_a, **_k: pushes.append(True) or {"status": 0})
+    status, reason, _ = trial.run_test("STAGE-COMMIT", "org", "trial", "aao-integrator", DummyClient([]))
+    assert status == "FAIL" and "does not match runner candidate" in reason
+    assert not pushes
+
+
+def test_explicit_stage_commit_rejects_unsafe_branch(monkeypatch):
+    monkeypatch.setenv("AAO_GITHUB_TRIAL_BRANCH", "refs/heads/main")
+    status, reason, evidence = trial.run_test("STAGE-COMMIT", "org", "trial", "aao-integrator", DummyClient([]))
+    assert status == "FAIL" and "safe named" in reason and not evidence
+
+
+def test_check_wait_timeout_is_fail_closed(monkeypatch):
+    monkeypatch.setattr(trial, "CHECK_WAIT_SECONDS", 0)
+    client = DummyClient([(200, {"id": 42, "owner": {"login": "autoaiorg"}})])
+    ok, reason = trial._wait_required_checks(client, "/repos/org/trial", "a" * 40, [])
+    assert not ok and "did not become green" in reason
+
+
+def test_main_moving_test_fails_without_green_candidate_checks(monkeypatch):
+    monkeypatch.setattr(trial.subprocess, "run", lambda *_a, **_k: type("Result", (), {"stdout": "b" * 40})())
+    monkeypatch.setattr(trial, "_git_push", lambda *_a, **_k: {"status": 0, "exit_code": 0})
+    monkeypatch.setattr(trial, "_wait_required_checks", lambda *_a: (False, "required checks did not become green"))
+    client = DummyClient([(200, {"object": {"sha": "a" * 40}})])
+    status, reason, evidence = trial.run_test("A-03", "org", "trial", "aao-integrator", client)
+    assert status == "FAIL" and "cannot move main" in reason
+    assert not any(method == "POST" and path == "/graphql" for method, path, _ in client.calls)
+
+
+def test_equivalence_is_pending_never_pass_and_rejects_wrong_role(monkeypatch):
+    class EquivalenceClient(DummyClient):
+        app_id = 77
+        def app_request(self, method, path):
+            assert method == "GET" and path == "/repos/autoaiorg/aao-governance-trial/installation"
+            return auth.APIResponse(404, {"message": "Not Found"}, {})
+        def installation_token(self, *_args):
+            return "test"
+    monkeypatch.setenv("AAO_GITHUB_TRIAL_FORKS", "autoaiorg/aao-codex,autoaiorg/aao-trial-codex")
+    monkeypatch.setenv("AAO_GITHUB_TRIAL_FORK", "autoaiorg/aao-trial-codex")
+    monkeypatch.setattr(trial.subprocess, "run", lambda *_a, **_k: type("Result", (), {"stdout": "b" * 40})())
+    monkeypatch.setattr(trial, "_git_push", lambda *_a, **_k: {"status": 0, "exit_code": 0})
+    client = EquivalenceClient([(200, {"repositories": [
+        {"full_name": "autoaiorg/aao-codex"},
+        {"full_name": "autoaiorg/aao-trial-codex"},
+    ]})])
+    status, _, _ = trial.run_test("EQUIVALENCE", "autoaiorg", "aao-governance-trial", "aao-impl-codex", client)
+    assert status == "EQUIVALENCE-PENDING" and status != "PASS"
+    status, _, _ = trial.run_test("EQUIVALENCE", "autoaiorg", "aao-governance-trial", "aao-integrator", DummyClient([]))
+    assert status == "NOT RUN"
+
+
+def test_promotion_phase_requires_staged_sha_green_checks_and_cas(monkeypatch):
+    _fake_git(monkeypatch)
+    monkeypatch.setenv("AAO_GITHUB_TRIAL_PR", "8")
+    monkeypatch.setenv("AAO_GITHUB_TRIAL_PR_HEAD", "b" * 40)
+    monkeypatch.setenv("AAO_GITHUB_TRIAL_PHASE", "promote")
+    monkeypatch.setenv("AAO_GITHUB_TRIAL_PROMOTE_SHA", "d" * 40)
+    client = DummyClient([
+        (200, [{"number": 8, "head": {"sha": "b" * 40}}]),
+        (200, {"number": 8, "head": {"sha": "b" * 40}, "base": {"ref": "main"}}),
+        (200, {"object": {"sha": "a" * 40}}),
+        (200, {"id": 77, "owner": {"login": "autoaiorg"}}),
+        (200, {"tree": {"sha": "c" * 40}, "parents": [{"sha": "a" * 40}, {"sha": "b" * 40}]}),
+        (200, {"object": {"sha": "d" * 40}}),
+        (200, {"check_runs": [{"name": "aao-audit", "status": "completed", "conclusion": "success", "app": {"id": 77}}, {"name": "test", "status": "completed", "conclusion": "success", "app": {"id": 1}}]}),
+        (200, {"object": {"sha": "d" * 40}}),
+        (200, {"data": {"updateRefs": {"refs": [{"name": "refs/heads/main"}]}}}),
+        (200, {"object": {"sha": "d" * 40}}),
+        (200, {"sha": "d" * 40, "tree": {"sha": "c" * 40}, "parents": [{"sha": "a" * 40}, {"sha": "b" * 40}]}),
+        (200, {"merged": True}),
+    ])
+    status, _, evidence = trial.run_test("A-05", "org", "trial", "aao-integrator", client)
+    assert status == "PASS"
+    assert any(method == "POST" and path == "/graphql" for method, path, _ in client.calls)
+    assert any(item.get("sha") == "d" * 40 and item.get("status") == "green" for item in evidence)
