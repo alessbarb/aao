@@ -217,6 +217,8 @@ def test_r1_signed_audit_issues_exact_authorization(audit_setup, tmp_path, monke
 
 
 @pytest.mark.parametrize("mismatch", ["tree", "parents"])
+@pytest.mark.nt("NT-03-3")
+@pytest.mark.nt("NT-03-5")
 def test_integrator_rejects_staged_commit_mismatch(audit_setup, tmp_path, mismatch):
     env = audit_setup
     env["configure"](policy_overrides={"auditors": {"aao-auditor": "auditor-key"},
@@ -323,6 +325,7 @@ def test_supervisor_record_attribution_is_atomic_and_keeps_other_entries(tmp_pat
         record_attribution(path, first, [])
 
 
+@pytest.mark.nt("NT-02-9")
 def test_attribution_owned_by_untrusted_uid_is_unresolved(audit_setup):
     from aao.manifest_audit import attributed_implementers
 

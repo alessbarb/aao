@@ -11,6 +11,9 @@ postgres = ["psycopg[binary]>=3.2,<4"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
+markers = [
+    "nt(case_id): traceability marker for a negative test in AUTONOMOUS_GOVERNANCE_POLICY.md §16",
+]
 
 [tool.ruff]
 target-version = "py312"

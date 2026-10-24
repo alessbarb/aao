@@ -261,6 +261,7 @@ def test_tree_claim_that_does_not_match_git_is_refused(env, field):
         audit(env, path)
 
 
+@pytest.mark.nt("NT-03-7")
 def test_conflicting_candidate_is_refused(env):
     git(env["repo"], "switch", "-q", "-c", "conflict", "main~1")
     commit(env["repo"], {"src/other.py": "Y = 99\n"}, "conflict")
@@ -270,6 +271,7 @@ def test_conflicting_candidate_is_refused(env):
         audit(env, path)
 
 
+@pytest.mark.nt("NT-03-2")
 def test_target_moving_after_audit_blocks_the_gate(env):
     path, _ = manifest(env)
     audit(env, path)
@@ -278,6 +280,8 @@ def test_target_moving_after_audit_blocks_the_gate(env):
     assert not ok and "target ref no longer points to the manifest target_sha" in reasons
 
 
+@pytest.mark.nt("NT-03-3")
+@pytest.mark.nt("NT-03-5")
 def test_promoted_commit_must_carry_the_audited_tree_and_parents(env):
     path, data = manifest(env)
     audit(env, path)
@@ -394,6 +398,7 @@ def test_gate_rejects_report_from_auditor_revision_no_longer_trusted(env):
 
 # --- Second-line review SL-02/SL-03 (trust root) ------------------------------------------------------------
 
+@pytest.mark.nt("NT-02-9")
 def test_unattributed_candidate_is_provisional_even_with_valid_custody(env):
     path, _ = manifest(env, attribute=False)
     report = audit(env, path)
@@ -403,6 +408,7 @@ def test_unattributed_candidate_is_provisional_even_with_valid_custody(env):
     assert not gate(env, path)[0]
 
 
+@pytest.mark.nt("NT-02-8")
 def test_recusal_uses_attribution_and_declared_identities_only_tighten(env):
     path, data = manifest(env)
     env["attribute"](data["candidate_sha"], ["aao-auditor"])  # authenticated pusher is the auditor itself
@@ -435,6 +441,7 @@ def _rewrite_chain(rows):
     return b"\n".join(out) + b"\n"
 
 
+@pytest.mark.nt("NT-02-6")
 def test_ledger_rewritten_without_an_intermediate_veto_and_rehashed_is_rejected(env):
     # SL-06: delete a veto in the middle and recompute the hash chain. Later entries change sequence and
     # previous_hash, which are signed, so the rewrite fails without the auditor key.
@@ -448,6 +455,7 @@ def test_ledger_rewritten_without_an_intermediate_veto_and_rehashed_is_rejected(
     assert any("ledger is not trustworthy" in r for r in gate(env, path, run="again")[1])
 
 
+@pytest.mark.nt("NT-02-7")
 def test_ledger_tail_truncation_below_the_external_anchor_is_rejected(env):
     path, _ = manifest(env)
     audit(env, path)
