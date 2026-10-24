@@ -144,6 +144,7 @@ def test_new_commit_invalidates_prior_signed_report(tmp_path, trust_bundle):
     assert "audit report targets a different candidate SHA" in result.reasons
 
 
+@pytest.mark.nt("NT-02-4")
 def test_github_duplicate_checks_require_all_runs_to_pass_same_sha():
     from aao.pr_conformity import aggregate_github_check_runs
 
