@@ -1,5 +1,5 @@
-from pathlib import Path
 import os
+from pathlib import Path
 
 from aao.trial_security import validate_role_workdir
 
@@ -79,6 +79,26 @@ def test_runner_passes_both_implementer_forks_and_runs_a10_for_all_apps():
     assert "A10_ROLES=(aao-integrator aao-auditor aao-auditor-alt aao-supervisor aao-notifier aao-pm aao-impl-claude aao-impl-codex aao-impl-agy aao-probe-noworkflows)" in source
     assert "target=autoaiorg/aao-trial-probe" in source
     assert 'impl_uid=${APP_UID[$impl]}' in source
+
+
+def test_runner_collects_p0_p4_and_p4b_before_equivalence_execution():
+    source = RUNNER.read_text()
+    assert 'GitHubAppClient("aao-integrator")' in source
+    assert '"/repos/"+sys.argv[1]' in source
+    assert 'EXPECTED_REPO_ID=' in source
+    assert 'collect_impl_p4()' in source
+    assert 'IFS=, read -r -a fork_list' in source
+    assert 'for target in "$REPO" "${fork_list[@]}"' in source
+    for check in ('hosts.yml', '.git-credentials', 'GH_TOKEN=', 'GITHUB_TOKEN=',
+                  'deploy_keys_by_repository', 'outside_collaborators_clear', 'org_members_clear'):
+        assert check in source
+    assert 'collect_p4b()' in source
+    assert 'orgs/autoaiorg/members?role=admin' in source
+    assert 'repos/$REPO/collaborators?permission=admin' in source
+    assert 'P0_JSON=$(integrator_target_identity)' in source
+    assert 'AAO_TRIAL_P0_EVIDENCE="$p0_run_json"' in source
+    assert 'AAO_TRIAL_P4_EVIDENCE="$p4_json"' in source
+    assert 'AAO_TRIAL_P4B_EVIDENCE="$p4b_json"' in source
 
 
 def test_pinned_setup_inputs_come_from_revision_objects():

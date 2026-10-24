@@ -421,6 +421,19 @@ def _run_equivalence(owner: str, repo: str, role: str, client: GitHubAppClient) 
     target = f"{owner}/{repo}".lower()
     if target != "autoaiorg/aao-governance-trial" or target == CANONICAL_REPO:
         return "NOT RUN", "equivalence mode is restricted to autoaiorg/aao-governance-trial", evidence
+    try:
+        target_identity = json.loads(os.environ.get("AAO_TRIAL_P0_EVIDENCE", "{}"))
+        p4_evidence = json.loads(os.environ.get("AAO_TRIAL_P4_EVIDENCE", "{}"))
+        p4b_evidence = json.loads(os.environ.get("AAO_TRIAL_P4B_EVIDENCE", "{}"))
+        expected_repo_id = int(os.environ.get("AAO_TRIAL_EXPECTED_REPO_ID", ""))
+    except (ValueError, json.JSONDecodeError):
+        target_identity, p4_evidence, p4b_evidence, expected_repo_id = {}, {}, {}, 0
+    premises = evaluate_equivalence_premises(target_identity, p4_evidence, p4b_evidence,
+                                             expected_repo_id=expected_repo_id)
+    evidence.append({"method": "equivalence premises", "premises": premises})
+    failed = [item["id"] for item in premises if item["result"] != "PASS"]
+    if failed:
+        return "FAIL", "equivalence premises failed: " + ", ".join(failed), evidence
     installed = client.app_request("GET", f"/repos/{owner}/{repo}/installation")
     evidence.append({"method": "GET", "path": f"/repos/{owner}/{repo}/installation", "status": installed.status,
                      "response": _redact(installed.body)})
@@ -491,6 +504,43 @@ def _run_equivalence(owner: str, repo: str, role: str, client: GitHubAppClient) 
     return "EQUIVALENCE-PENDING", "trial installation absent, configured fork scope exact, positive fork push accepted; CEO formal equivalence validation required before PASS", evidence
 
 
+def evaluate_equivalence_premises(p0: dict, p4: dict, p4b: dict, *, expected_repo_id: int) -> list[dict]:
+    """Evaluate only the newly required P0/P4/P4b premises; missing facts fail closed."""
+    expected_name = "autoaiorg/aao-governance-trial"
+    p0 = p0 if isinstance(p0, dict) else {}
+    p4 = p4 if isinstance(p4, dict) else {}
+    p4b = p4b if isinstance(p4b, dict) else {}
+    full_name = p0.get("full_name")
+    p0_ok = (p0.get("status") == 200 and isinstance(full_name, str) and full_name.lower() == expected_name
+             and isinstance(p0.get("id"), int) and p0.get("id") == expected_repo_id and expected_repo_id > 0)
+    p4_fields = ("gh_hosts_yml_absent", "git_credentials_absent", "token_environment_absent",
+                 "runner_environment_token_absent", "aao_config_exact",
+                 "deploy_keys_empty", "outside_collaborators_clear", "org_members_clear")
+    p4_ok = all(p4.get(field) is True for field in p4_fields)
+    p4b_ok = (p4b.get("ceo_login") == "alessbarb"
+              and p4b.get("org_owners") == ["alessbarb"]
+              and p4b.get("repo_admins") == ["alessbarb"])
+    return [
+        {"id": "P0", "result": "PASS" if p0_ok else "FAIL",
+         "expected_full_name": expected_name, "expected_id": expected_repo_id,
+         "pinned_at_run_start_id": expected_repo_id,
+         "observed_status": p0.get("status"), "observed_full_name": p0.get("full_name"),
+         "observed_id": p0.get("id")},
+        {"id": "P4", "result": "PASS" if p4_ok else "FAIL",
+         "checks": {field: p4.get(field) is True for field in p4_fields},
+         "uid": p4.get("uid"), "aao_config_names": p4.get("config_names"),
+         "systemd_checked": p4.get("systemd_checked"),
+         "runner_environment": p4.get("runner_environment"),
+         "deploy_keys_by_repository": p4.get("deploy_keys_by_repository"),
+         "outside_collaborators": p4.get("outside_collaborators"),
+         "org_members": p4.get("org_members")},
+        {"id": "P4b", "result": "PASS" if p4b_ok else "FAIL",
+         "expected_org_owners": ["alessbarb"], "observed_org_owners": p4b.get("org_owners"),
+         "expected_repo_admins": ["alessbarb"], "observed_repo_admins": p4b.get("repo_admins"),
+         "expected_ceo_login": "alessbarb", "observed_ceo_login": p4b.get("ceo_login")},
+    ]
+
+
 def _run_test(test_id: str, owner: str, repo: str, role: str, client: GitHubAppClient) -> tuple[str, str, list[dict]]:
     base = f"/repos/{owner}/{repo}"
     evidence: list[dict] = []
@@ -549,6 +599,8 @@ def _run_test(test_id: str, owner: str, repo: str, role: str, client: GitHubAppC
         names = ", ".join(sorted(required_roles[test_id]))
         role_hint = "an implementer App" if test_id == "A-14" else f"role: {names}"
         return "NOT RUN", f"This test must run with {role_hint}.", evidence
+    if test_id in {"A-01", "A-02", "P3-02"} and role in implementers:
+        return "FAIL", "this equivalence-sensitive test cannot emit PASS outside explicit equivalence mode", evidence
     if test_id in NOT_RUN:
         return "NOT RUN", NOT_RUN[test_id], evidence
     if test_id == "A-01":
