@@ -15,6 +15,6 @@
 2. **Faltaban `~/.config/aao/<app>.json` (B-2).** El CEO los escribió desde el registro, cada uno con su uid. Corregido en #60.
 3. **S6: faltaba el ledger del auditor.** Sin él, el latido fallaba. El CEO creó un ledger vacío y reejecutó el verificador, que dio PASS. Corregido en #61.
 
-**Limitación.** El bloque que habilitó el despacho no comprobaba el código de salida del verificador, porque estaba enmascarado por una tubería. El `status.json` posterior confirma el PASS.
+**Limitación.** El bloque que habilitó el despacho no comprobaba el código de salida del verificador, porque una tubería lo enmascaraba. La salida que pegó el CEO muestra `RESULT: PASS (38 checks)` antes de las líneas `Created symlink`, y el `status.json` lo confirma.
 
 **Pendiente.** La atribución da HTTP 404 hasta que las Apps estén instaladas en el repo de ensayo. Faltan además el ensayo P2/P3, el piloto R1 y el integrador.
