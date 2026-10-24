@@ -22,6 +22,11 @@ set -euo pipefail
 # Privileged mode (-p, in the shebang) makes bash ignore BASH_ENV/ENV, SHELLOPTS and every function
 # in the environment before this line runs. Then a fixed PATH and IFS; nothing can skip this.
 [[ $- == *p* ]] || { echo "FAIL: run as $0 (privileged mode), not through another shell" >&2; exit 1; }
+# Children (identity_separation.sh, python, runuser) would still see the caller's environment, including
+# exported functions. If it holds anything beyond the minimum, start over with an empty one.
+if /usr/bin/env | /usr/bin/grep -qvE '^(PATH=/usr/sbin:/usr/bin:/sbin:/bin|HOME=/root|LANG=C\.UTF-8|PWD=.*|SHLVL=[0-9]+|_=.*)$'; then
+  exec /usr/bin/env -i PATH=/usr/sbin:/usr/bin:/sbin:/bin HOME=/root LANG=C.UTF-8 "$0" "$@"
+fi
 export PATH=/usr/sbin:/usr/bin:/sbin:/bin HOME=/root LANG=C.UTF-8; IFS=$' \t\n'; hash -r
 unset BASH_ENV ENV CDPATH GLOBIGNORE PYTHONPATH PYTHONHOME PYTHONSTARTUP LD_PRELOAD LD_LIBRARY_PATH
 umask 022
