@@ -16,14 +16,18 @@
 #                registry (RA PENDING), verifier PASS, auditor dispatch. The integrator stays OFF.
 #   integrator   OPT-IN (--enable-integrator): only if every RA in the installed registry is PASS.
 #
-# Default is a dry run that prints what it would do. Idempotent and fail closed: it never
-# regenerates an existing private key, never overwrites an installed trust anchor or ledger.
+# Default is a dry run that prints what it would do. Fail closed. Phases 1-4 are re-runnable and never
+# regenerate an existing key; the trust-root phase runs only on a host with no trust-root artifact at all.
 set -euo pipefail
+# Root must never resolve commands through the caller's PATH or inherit its environment.
+if [[ ${AAO_BOOT_CLEAN:-} != 1 ]]; then
+  exec /usr/bin/env -i AAO_BOOT_CLEAN=1 PATH=/usr/sbin:/usr/bin:/sbin:/bin HOME=/root LANG=C.UTF-8 /bin/bash "$0" "$@"
+fi
 umask 022
 
 die() { echo "FAIL: $*" >&2; exit 1; }
 say() { echo "== $*"; }
-APPLY=0 REV="" CEO="" KEYS_DIR="" AGY_SRC="" TRUST_ROOT=0 LOOP_REPO="" ATTEST="" ENABLE_INTEGRATOR=0
+APPLY=0 REV="" CEO="" KEYS_DIR="" AGY_SRC="" AGY_SHA="" TRUST_ROOT=0 LOOP_REPO="" ENABLE_INTEGRATOR=0
 while [[ $# -gt 0 ]]; do
   case $1 in
     --apply) APPLY=1;;
@@ -31,9 +35,9 @@ while [[ $# -gt 0 ]]; do
     --ceo-user) CEO=$2; shift;;
     --keys-dir) KEYS_DIR=$2; shift;;
     --agy) AGY_SRC=$2; shift;;
+    --agy-sha256) AGY_SHA=$2; shift;;
     --trust-root) TRUST_ROOT=1;;
     --loop-repo) LOOP_REPO=$2; shift;;
-    --audit-attestation) ATTEST=$2; shift;;
     --enable-integrator) ENABLE_INTEGRATOR=1;;
     *) die "unknown option $1 (see the header of $0)";;
   esac
@@ -82,14 +86,22 @@ while read -r app uid key; do
     echo "pend $app key (account $uid is created by the identities phase)"; continue
   fi
   [[ $key == "$home/.config/aao/$app.pem" ]] || die "registry key_file for $app is not $home/.config/aao/$app.pem"
-  if [[ -f $key ]]; then
-    [[ $(stat -c '%U %a' "$key") == "$uid 600" ]] || die "$key exists but is not $uid:0600"
+  # No component of the key path may be a symlink (stat without -L does not follow links).
+  for c in "$home" "$home/.config" "$home/.config/aao" "$key"; do
+    [[ ! -L $c ]] || die "$c is a symlink"
+  done
+  if [[ -e $key ]]; then
+    [[ $(stat -c '%F %U %a' "$key") == "regular file $uid 600" ]] || die "$key exists but is not a $uid:0600 regular file"
     echo "ok   $app key present"; continue
   fi
-  if [[ -n $KEYS_DIR && -f $kd/$app.pem ]]; then
-    [[ ! -L $kd/$app.pem && $(stat -c %u "$kd/$app.pem") == 0 ]] || die "$kd/$app.pem must be a root-owned regular file"
-    run install -d -o "$uid" -g "$uid" -m 0700 "$home/.config" "$home/.config/aao"
-    run install -o "$uid" -g "$uid" -m 0600 "$kd/$app.pem" "$key"
+  if [[ -n $KEYS_DIR && -e $kd/$app.pem ]]; then
+    [[ $(stat -c '%F %u' "$kd/$app.pem") == "regular file 0" ]] || die "$kd/$app.pem must be a root-owned regular file"
+    # A .config created by root (e.g. by an earlier manual install) is handed to the uid; never through a link.
+    if [[ -d $home/.config && $(stat -c %u "$home/.config") == 0 ]]; then run chown "$uid:$uid" "$home/.config"; fi
+    # Every write inside the home is done AS the uid, and the key travels on stdin: a planted link can only
+    # reach what that uid could already write.
+    run runuser -u "$uid" -- /usr/bin/install -d -m 0700 "$home/.config" "$home/.config/aao"
+    if ((APPLY)); then runuser -u "$uid" -- /bin/sh -c 'umask 077 && set -C && cat > "$1"' sh "$key" < "$kd/$app.pem"; fi
     echo "new  $app key installed for $uid"
   else
     echo "MISSING $app key ($key)"; missing=1
@@ -117,8 +129,18 @@ fi
 
 # ---------- 4. Antigravity (alternate auditor) ----------
 say "antigravity"
-AGY_SRC=${AGY_SRC:-$(getent passwd "$CEO" | cut -d: -f6)/.local/bin/agy}
-if [[ -f $AGY_SRC ]]; then run install -o root -g root -m 0755 "$AGY_SRC" /usr/local/bin/agy; else echo "WARN: no agy at $AGY_SRC (--agy PATH); skipping"; fi
+# agy comes from a path agents may control, so it is installed only against a hash the CEO supplies:
+# copy once into a root-only temp file, hash that copy, install that same copy.
+if [[ -n $AGY_SRC ]]; then
+  [[ $AGY_SHA =~ ^[0-9a-f]{64}$ ]] || die "--agy needs --agy-sha256 <hex> (the hash of the agy binary you trust)"
+  tmp_agy=$(mktemp); cp --no-dereference -- "$AGY_SRC" "$tmp_agy"; [[ -f $tmp_agy && ! -L $tmp_agy ]] || die "$AGY_SRC is not a regular file"
+  [[ $(sha256sum "$tmp_agy" | cut -d' ' -f1) == "$AGY_SHA" ]] || { rm -f "$tmp_agy"; die "agy sha256 does not match --agy-sha256"; }
+  run install -o root -g root -m 0755 "$tmp_agy" /usr/local/bin/agy; rm -f "$tmp_agy"
+elif [[ -f /usr/local/bin/agy ]]; then
+  echo "ok   /usr/local/bin/agy present sha256=$(sha256sum /usr/local/bin/agy | cut -d' ' -f1)"
+else
+  echo "TODO no /usr/local/bin/agy: rerun with --agy <path> --agy-sha256 <hex>"
+fi
 run install -d -o root -g root -m 0755 /opt/aao-audit
 run install -o root -g root -m 0755 "$SRC/scripts/audit/run_agy_audit.sh" /opt/aao-audit/
 run install -o root -g root -m 0644 "$SRC/docs/audit-prompts/r1-chain.md" /opt/aao-audit/
@@ -146,15 +168,31 @@ fi
 if ((TRUST_ROOT)); then
   say "trust-root"
   [[ $LOOP_REPO =~ ^[A-Za-z0-9-]+/[A-Za-z0-9._-]+$ ]] || die "--loop-repo OWNER/REPO is required (the repo the R1 loop serves)"
-  [[ -f $ATTEST ]] || die "--audit-attestation <attestation.json of the Antigravity audit of $REV> is required"
-  python3 -I -c 'import json,sys; a=json.load(open(sys.argv[1]))
-assert a["head"]==sys.argv[2] and a["os_user"]=="aao-auditor-alt" and a["auditor"]=="antigravity", "attestation is not for this REV"' \
-    "$ATTEST" "$REV" || die "attestation does not cover $REV"
-  echo "audit attestation sha256=$(sha256sum "$ATTEST" | cut -d' ' -f1) (its report must say APPROVE: the CEO checks it)"
-  [[ ! -e /etc/aao-audit/trust-anchor.json ]] || die "a trust anchor is already installed; rotation is a separate, reviewed procedure"
+  # The independent audit of this exact REV, where only aao-auditor-alt can write it.
+  A=$alt_home/aao-audits/$REV
+  for f in "$A" "$A/attestation.json" "$A/report.md"; do
+    [[ ! -L $f && $(stat -c %U "$f" 2>/dev/null) == aao-auditor-alt && $(( 0$(stat -c %a "$f") & 022 )) == 0 ]] \
+      || die "$f missing, a symlink, or not exclusively aao-auditor-alt's: run the Antigravity audit of $REV first"
+  done
+  python3 -I - "$A/attestation.json" "$A/report.md" "$REV" <<'PY' || die "the audit of $REV does not authorize the trust root"
+import hashlib, json, re, sys
+att, report, rev = json.load(open(sys.argv[1])), open(sys.argv[2], "rb").read(), sys.argv[3]
+assert att["head"] == att["checked_out_head"] == rev and att["os_user"] == "aao-auditor-alt" and att["auditor"] == "antigravity", "attestation is not for this REV"
+assert hashlib.sha256(report).hexdigest() == att["report_sha256"], "report.md does not match the attestation"
+verdicts = set(re.findall(r"Veredicto:\W*(APPROVE-TECHNICAL|APPROVE|REJECT|VETO)", report.decode()))
+assert verdicts and verdicts <= {"APPROVE", "APPROVE-TECHNICAL"}, f"verdict is not APPROVE: {sorted(verdicts) or 'none'}"
+print("audit verdict", sorted(verdicts))
+PY
+  echo "audit attestation sha256=$(sha256sum "$A/attestation.json" | cut -d' ' -f1)"
+  # Fresh hosts only: refuse before writing anything if any trust-root artifact already exists.
+  for f in /etc/aao-audit/trust-anchor.json /etc/aao-audit/dispatch.json /etc/aao-audit/expected-revision \
+           /etc/aao-supervisor/config.json /etc/aao-integrator/config.json /srv/aao/trust/registry.json \
+           /var/lib/aao-auditor/policy.json /srv/aao/frozen/aao-auditor/tree /srv/aao/frozen/aao-supervisor/tree \
+           /srv/aao/frozen/aao-integrator/tree; do
+    [[ ! -e $f ]] || die "$f already exists: the trust-root phase only runs on a host without one (rotation is a separate procedure)"
+  done
   for role in aao-auditor aao-supervisor aao-integrator; do
     f=/srv/aao/frozen/$role
-    [[ -e $f/tree ]] && die "$f/tree exists; remove it deliberately before a fresh bootstrap"
     run g clone -q --no-hardlinks "$SRC" "$f/tree"
     run g -C "$f/tree" -c advice.detachedHead=false checkout -q "$REV"
     run g -C "$f/tree" remote remove origin
@@ -203,8 +241,8 @@ fi
 # ---------- 6. integrator (opt-in, gated on RA PASS) ----------
 if ((ENABLE_INTEGRATOR)); then
   say "integrator"
-  python3 -I -c 'import json,sys; s=json.load(open(sys.argv[1]))["ra_status"]
-bad=[k for k,v in s.items() if v!="PASS"]; sys.exit("RA not PASS: "+", ".join(bad) if bad else 0)' /srv/aao/trust/registry.json \
+  python3 -I -c 'import json,sys; s=json.load(open(sys.argv[1]))["ra_status"]; need={"RA-01","RA-02","RA-03","RA-07","RA-09"}
+bad=sorted(need-{k for k,v in s.items() if v=="PASS"}|set(s)-need); sys.exit("RA not exactly PASS: "+", ".join(bad) if bad else 0)' /srv/aao/trust/registry.json \
     || die "the integrator stays off until the P2/P3 trial sets every RA to PASS in the registry"
   run systemctl enable --now aao-integrator-tick.timer
 fi

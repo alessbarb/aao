@@ -11,7 +11,7 @@
 
 **El integrador queda apagado.** Solo se enciende con `--enable-integrator`, y el script se niega mientras algún RA del registro instalado no esté en PASS.
 
-Por defecto el script **simula**: imprime lo que haría sin cambiar nada. Con `--apply` lo hace. Es idempotente y falla en cerrado: no regenera ninguna clave privada que ya exista, no sobrescribe un ancla de confianza instalada y no toca el ledger.
+Por defecto el script **simula**: imprime lo que haría sin cambiar nada. Con `--apply` lo hace. Falla en cerrado y nunca regenera una clave privada que ya exista. Las fases 1 a 4 se pueden repetir sin riesgo. La fase de la raíz de confianza solo corre en un host que no tenga ninguna instalada: si ya existe cualquiera de sus archivos, se niega antes de escribir nada. Rotar la raíz es otro procedimiento.
 
 ## 0. Requisitos del host
 
@@ -54,6 +54,8 @@ $B                                            # simulación: revisa la salida
 $B --apply --keys-dir /root/aao-keys          # P1 + claves + 9/9 + Antigravity
 ```
 
+**agy.** Se instala solo contra un hash que das tú: `--agy ~/.local/bin/agy --agy-sha256 <hex>`. Calcula ese hash con `sha256sum` sobre el binario que descargaste de la fuente oficial, no sobre uno que hayan podido tocar los agentes. Si ya hay un `/usr/local/bin/agy`, el script lo deja como está.
+
 Si nunca has iniciado sesión de agy como `aao-auditor-alt` en esta máquina, el script imprime el comando de login. Hazlo una vez y une la URL en **una sola línea** antes de abrirla.
 
 Luego, la auditoría independiente de la revisión que vas a instalar:
@@ -65,13 +67,12 @@ sudo -u aao-auditor-alt -H /opt/aao-audit/run_agy_audit.sh <base auditada> "$REV
 Instala la raíz de confianza solo si el `report.md` dice **APPROVE**:
 
 ```bash
-$B --apply --keys-dir /root/aao-keys --trust-root --loop-repo <OWNER/REPO> \
-   --audit-attestation /home/aao-auditor-alt/aao-audits/$REV/attestation.json
+$B --apply --keys-dir /root/aao-keys --trust-root --loop-repo <OWNER/REPO>
 ```
 
 `--loop-repo` es el repo que servirá el bucle R1. Hasta que pase el ensayo P2/P3, debe ser el repo de ensayo, que tienes que crear tú (`autoaiorg/aao-governance-trial`, ver `P2_P3_TRIAL_SETUP.md`).
 
-El script registra el sha256 de la atestación, verifica el host y exige `RESULT: PASS`. Después activa la reverificación diaria y el despacho del auditor, pero **no** el integrador. Los logs quedan en `/var/log/aao-bootstrap/<fecha>/`.
+El script lee la auditoría de ese mismo `REV` en `/home/aao-auditor-alt/aao-audits/$REV/`, donde solo escribe `aao-auditor-alt`. Comprueba que el sha256 del informe coincide con la atestación y que el veredicto es APPROVE; si no, se niega. Después verifica el host y exige `RESULT: PASS`. Después activa la reverificación diaria y el despacho del auditor, pero **no** el integrador. Los logs quedan en `/var/log/aao-bootstrap/<fecha>/`.
 
 Cuando el ensayo P2/P3 dé PASS y reinstales el registro con los RA en PASS:
 
