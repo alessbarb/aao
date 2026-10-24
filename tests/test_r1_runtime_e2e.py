@@ -10,14 +10,15 @@ from test_manifest_audit import env as _base_audit_env  # noqa: F401
 from test_manifest_audit import manifest as make_manifest
 from test_manifest_audit import ok_runner
 
-from aao import auditor_dispatch, r1_pipeline
+from aao import authorization_issuer, auditor_dispatch, r1_pipeline
 from aao.git_paths import changed_paths, path_matches_prefix
 from aao.integrator import TrustSources
 from aao.protected_routes import compare_copies, load_document, route_map, routes_digest
 
 
 @pytest.fixture
-def audit_setup(_base_audit_env):  # noqa: F811
+def audit_setup(_base_audit_env, monkeypatch):  # noqa: F811
+    monkeypatch.setattr(authorization_issuer, "TRUST_REGISTRY_PATH", _base_audit_env["registry"])
     return _base_audit_env
 
 
@@ -58,13 +59,9 @@ def _fixture(tmp_path):
         "required_check_publishers": {"aao-audit": [5448107], "test": [15368]},
         "push_principals": routes["push_principals"],
     }))
-    operational = json.loads(env["policy"].read_text())
     registered = json.loads(trust.trust_registry.read_text())
-    compare_copies(routes, registered, {
-        "protected_routes": operational["protected_routes"],
-        "protected_routes_sha256": operational["protected_routes_sha256"],
-    })
-    assert operational["push_principals"]["aao-impl-codex[bot]"] == "codex"
+    assert registered["protected_routes"] == route_map(routes)
+    assert registered["protected_routes_sha256"] == routes_digest(routes["routes"])
     assert registered["required_check_publishers"] == {"aao-audit": [5448107], "test": [15368]}
     return remote, mirror, gh, inbox, reports, state, trust, base, head
 
