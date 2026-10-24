@@ -266,6 +266,15 @@ def test_issuer_rejects_tampered_report_signature(audit_setup):
 
 def test_protected_path_does_not_emit_when_r2_is_disabled(audit_setup):
     env = audit_setup
+    # Exercise an actual CEO-approved R2 route, not the fixture-only src/app.py path.
+    git(env["repo"], "switch", "candidate")
+    (env["repo"] / "src/aao/manifest_audit.py").parent.mkdir(parents=True, exist_ok=True)
+    (env["repo"] / "src/aao/manifest_audit.py").write_text("# protected route fixture\n")
+    git(env["repo"], "add", "src/aao/manifest_audit.py")
+    subprocess.run(["git", "-C", str(env["repo"]), "-c", "user.name=implementer",
+                    "-c", "user.email=implementer@example.invalid", "commit", "-m",
+                    "touch approved R2 route"], check=True, capture_output=True, text=True)
+    git(env["repo"], "switch", "main")
     manifest_path, data = make_manifest(env)
     env["configure"](policy_overrides={"auditors": {"aao-auditor": "auditor-key"},
                                        "protected_paths": ["src/app"],
@@ -332,13 +341,17 @@ def test_supervisor_record_attribution_is_atomic_and_keeps_other_entries(tmp_pat
 
 @pytest.mark.nt("NT-02-9")
 def test_attribution_owned_by_untrusted_uid_is_unresolved(audit_setup):
-    from aao.manifest_audit import attributed_implementers
+    from aao.manifest_audit import attributed_implementers, attributed_principals
 
     env = audit_setup
     env["attribute"]("c" * 40, ("push:alice",))
     anchor = {"attribution_path": env["anchor"].parent / "attribution.json",
               "anchor_owner_uids": (os.geteuid() + 100,),
               "attribution_writer_uid": os.geteuid()}
-    assert attributed_implementers(anchor, "c" * 40) == ["push:alice"]
+    # The authenticated identity stays recorded for recusal, but no registry is
+    # supplied here, so it cannot resolve to an implementer.
+    assert attributed_principals(anchor, "c" * 40) == ["push:alice"]
+    assert attributed_implementers(anchor, "c" * 40) == []
     anchor["attribution_writer_uid"] = os.geteuid() + 101
+    assert attributed_principals(anchor, "c" * 40) == []
     assert attributed_implementers(anchor, "c" * 40) == []

@@ -108,8 +108,6 @@ def attribution(config: dict[str, Any], client: Any | None = None) -> int:
             commits = event.get("payload", {}).get("commits") if isinstance(event.get("payload"), dict) else None
             if not isinstance(actor, dict) or not isinstance(actor.get("login"), str) or not isinstance(commits, list):
                 raise ValueError("malformed GitHub push event")
-            if actor["login"] not in push_principals:
-                continue
             for commit in commits:
                 sha = commit.get("sha") if isinstance(commit, dict) else None
                 if not isinstance(sha, str) or len(sha) != 40 or any(ch not in "0123456789abcdef" for ch in sha):

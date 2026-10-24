@@ -115,7 +115,7 @@ class _AttributionClient:
 
 @pytest.mark.nt("NT-02-3")
 @pytest.mark.nt("NT-02-10")
-def test_supervisor_resolves_only_unique_exact_push_principals(tmp_path):
+def test_supervisor_resolves_only_unique_exact_push_principals(tmp_path, monkeypatch):
     from aao.supervisor_service import attribution
 
     known_sha, other_sha = "a" * 40, "b" * 40
@@ -128,8 +128,20 @@ def test_supervisor_resolves_only_unique_exact_push_principals(tmp_path):
     path = tmp_path / "attribution.json"
     config = {"repository": "org/repo", "attribution_path": str(path),
               "push_principals": {"aao-impl-codex[bot]": "codex", "aao-impl-claude[bot]": "claude"}}
-    assert attribution(config, _AttributionClient(events)) == 1
+    assert attribution(config, _AttributionClient(events)) == 2
     data = json.loads(path.read_text())
-    assert data["candidates"] == {known_sha: ["aao-impl-codex[bot]"]}
-    assert "aao-pm[bot]" not in json.dumps(data)
+    assert data["candidates"] == {
+        known_sha: ["aao-impl-codex[bot]"], other_sha: ["aao-pm[bot]"]}
+    from aao.manifest_audit import attributed_implementers, attributed_principals
+    from aao import manifest_audit
+
+    monkeypatch.setattr(manifest_audit, "read_protected", lambda file_path, owners: file_path.read_bytes())
+
+    # Recording an unknown authenticated principal tightens recusal but cannot
+    # resolve implementer attribution under the registry.
+    anchor = {"attribution_path": path, "anchor_owner_uids": (path.stat().st_uid,),
+              "attribution_writer_uid": path.stat().st_uid,
+              "policy": {"push_principals": config["push_principals"]}}
+    assert attributed_principals(anchor, other_sha) == ["aao-pm[bot]"]
+    assert attributed_implementers(anchor, other_sha) == []
 

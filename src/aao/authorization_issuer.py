@@ -95,8 +95,6 @@ def issue_authorization(
     except (OSError, ValueError, TypeError) as error:
         raise AuditError(str(error)) from error
     risk_class = classify(paths, route_map(normative))
-    if risk_class != "R1":
-        raise AuditError(f"R1 autonomy refused: protected route classification is {risk_class}")
     enabled = policy.get("enabled_risk_classes", ["R1"])
     if not isinstance(enabled, list) or any(not isinstance(item, str) for item in enabled):
         raise AuditError("enabled risk classes are not pinned by policy")
@@ -104,6 +102,8 @@ def issue_authorization(
         raise AuditError("R2 is not enabled for this auditor")
     if risk_class == "R3":  # Defensive invariant; this issuer never classifies R3.
         raise AuditError("R3 authorizations are never issued")
+    if risk_class != "R1":
+        raise AuditError(f"R1 autonomy refused: protected route classification is {risk_class}")
 
     protected_digest = operational["protected_routes_sha256"]
     issued = now or datetime.now(UTC)

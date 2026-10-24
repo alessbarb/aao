@@ -195,17 +195,29 @@ def _supervisor_custody(anchor: dict[str, Any], candidate_sha: str, rows: list[d
         raise AuditError("pending veto marker deleted after the supervisor recorded it")
 
 
-def attributed_implementers(anchor: dict[str, Any], candidate_sha: str) -> list[str]:
-    """Implementer identities from the anchored attribution source, never from the manifest or Git metadata.
+def attributed_principals(anchor: dict[str, Any], candidate_sha: str) -> list[str]:
+    """Authenticated push principals from the protected attribution source.
 
-    The file is written by the merge authority from authenticated push events (RA-02) and is owned like the
-    trust anchor. An absent file, unknown candidate or empty list means attribution is unresolved."""
+    Keep these even when the registry cannot resolve them: their presence can only
+    tighten recusal, never establish an implementer identity.
+    """
     try:
         owners = tuple(dict.fromkeys((*anchor["anchor_owner_uids"], anchor["attribution_writer_uid"])))
         data = json.loads(read_protected(Path(anchor["attribution_path"]), owners))
         identities = data["candidates"][candidate_sha] if data.get("schema") == ATTRIBUTION_SCHEMA else None
     except (AuditError, OSError, ValueError, KeyError, TypeError, AttributeError):
         return []
+    if not isinstance(identities, list) or not identities or not all(isinstance(i, str) for i in identities):
+        return []
+    return sorted(set(identities))
+
+
+def attributed_implementers(anchor: dict[str, Any], candidate_sha: str) -> list[str]:
+    """Implementer identities from registered principals in the anchored source only.
+
+    The file is written by the merge authority from authenticated push events (RA-02) and is owned like the
+    trust anchor. An absent file, unknown candidate or empty list means attribution is unresolved."""
+    identities = attributed_principals(anchor, candidate_sha)
     principal_map = anchor.get("policy", {}).get("push_principals")
     if (not isinstance(principal_map, dict) or not principal_map
             or len(set(principal_map.values())) != len(principal_map)
@@ -366,6 +378,7 @@ def audit_manifest(
         authors = _git(clone, "log", "--format=%ae", f"{manifest['target_sha']}..{manifest['candidate_sha']}")
         # Declared identities can only make the decision stricter; recusal relies on attribution (SL-02).
         declared = sorted({manifest["producer"], *authors.split()})
+        push_principals = attributed_principals(anchor, manifest["candidate_sha"])
         implementers = attributed_implementers(anchor, manifest["candidate_sha"])
         output.mkdir(mode=0o750, exist_ok=False)
         evidence_dir = output / "evidence"
@@ -386,7 +399,7 @@ def audit_manifest(
     key = f"{manifest['candidate_sha']}:{manifest['result_tree']}"
     blocking = [f["id"] for f in findings if f"{key}:{f['id']}" not in policy["dispositions"]]
     blocking += [f"audit-check-failed:{n}" for n, c in checks.items() if c["conclusion"] != "success"]
-    if policy["auditor_id"] in implementers or policy["auditor_id"] in declared:
+    if policy["auditor_id"] in {*implementers, *push_principals, *declared}:
         blocking.append("auditor-is-implementer")
     custody = _custody(anchor, key_path)
     if not implementers:

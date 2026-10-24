@@ -13,7 +13,7 @@ from test_manifest_audit import ok_runner
 from aao import auditor_dispatch, r1_pipeline
 from aao.git_paths import changed_paths, path_matches_prefix
 from aao.integrator import TrustSources
-from aao.protected_routes import load_document, route_map, routes_digest
+from aao.protected_routes import compare_copies, load_document, route_map, routes_digest
 
 
 @pytest.fixture
@@ -58,6 +58,14 @@ def _fixture(tmp_path):
         "required_check_publishers": {"aao-audit": [5448107], "test": [15368]},
         "push_principals": routes["push_principals"],
     }))
+    operational = json.loads(env["policy"].read_text())
+    registered = json.loads(trust.trust_registry.read_text())
+    compare_copies(routes, registered, {
+        "protected_routes": operational["protected_routes"],
+        "protected_routes_sha256": operational["protected_routes_sha256"],
+    })
+    assert operational["push_principals"]["aao-impl-codex[bot]"] == "codex"
+    assert registered["required_check_publishers"] == {"aao-audit": [5448107], "test": [15368]}
     return remote, mirror, gh, inbox, reports, state, trust, base, head
 
 
@@ -245,6 +253,14 @@ def test_real_r1_authorizes_and_promotes_over_alternating_ticks(tmp_path, audit_
         "required_check_publishers": {"aao-audit": [5448107], "test": [15368]},
         "push_principals": routes["push_principals"],
     }))
+    operational = json.loads(env["policy"].read_text())
+    registered = json.loads(trust.trust_registry.read_text())
+    compare_copies(routes, registered, {
+        "protected_routes": operational["protected_routes"],
+        "protected_routes_sha256": operational["protected_routes_sha256"],
+    })
+    assert operational["push_principals"]["aao-impl-codex[bot]"] == "codex"
+    assert registered["required_check_publishers"] == {"aao-audit": [5448107], "test": [15368]}
     inbox, reports, state = (tmp_path / name for name in ("pipeline-inbox", "pipeline-reports", "pipeline-state"))
 
     class PipelineGitHub:
@@ -294,7 +310,7 @@ def test_real_r1_authorizes_and_promotes_over_alternating_ticks(tmp_path, audit_
     result = auditor_dispatch.dispatch_once(inbox, reports, env["key"], github,
         anchor_path=env["anchor"], anchor_owner_uids=(env["anchor"].stat().st_uid,),
         repository_root=mirror, runner=ok_runner)
-    assert result[0]["status"] == "approve"
+    assert result[0]["status"] == "approve", result
     assert audit_file.exists()
     output.mkdir()
     (output / "authorization.json").write_bytes((reports / audit_file.stem / "authorization.json").read_bytes())
