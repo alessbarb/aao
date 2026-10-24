@@ -350,8 +350,13 @@ def _merge_trial_pr(client: GitHubAppClient, base: str, evidence: list[dict]) ->
     if staged_status != 200 or staged_sha != merge_sha:
         return "FAIL", "protected aao-staging ref does not match the checked merge commit", evidence
 
+    repository = _api(client, "GET", base)
+    evidence.append(repository)
+    repository_id = repository.get("response", {}).get("node_id") if isinstance(repository.get("response"), dict) else None
+    if repository["status"] != 200 or not repository_id:
+        return "FAIL", "could not resolve repository node id for updateRefs", evidence
     query = {"query": "mutation($input: UpdateRefsInput!) { updateRefs(input: $input) { refs { name } } }",
-             "variables": {"input": {"refUpdates": [{"name": "refs/heads/main", "oid": merge_sha,
+             "variables": {"input": {"repositoryId": repository_id, "refUpdates": [{"name": "refs/heads/main", "oid": merge_sha,
                                                         "beforeOid": base_sha}]}}}
     update = _api(client, "POST", "/graphql", query)
     evidence.append(update)
@@ -428,20 +433,50 @@ def _run_equivalence(owner: str, repo: str, role: str, client: GitHubAppClient) 
     if fork not in forks:
         return "FAIL", "AAO_GITHUB_TRIAL_FORK must name one of AAO_GITHUB_TRIAL_FORKS", evidence
     try:
-        client.installation_token(*fork.split("/", 1))
+        client.installation_token(*fork.split("/", 1), repository_names=False)
     except GitHubAuthError as exc:
         evidence.append({"method": "installation token", "status": "error", "response": str(exc)})
         return "FAIL", "could not authenticate against the implementer's configured fork", evidence
-    listing = _api(client, "GET", "/installation/repositories")
-    evidence.append(listing)
-    if listing["status"] != 200 or not isinstance(listing.get("response"), dict):
-        return "FAIL", "could not enumerate installation repositories", evidence
-    actual = sorted(item.get("full_name", "").lower() for item in listing["response"].get("repositories", [])
-                    if isinstance(item, dict) and isinstance(item.get("full_name"), str))
+    installation = client.app_request("GET", f"/app/installations/{client._installation_id}")
+    evidence.append({"method": "GET", "path": f"/app/installations/{client._installation_id}",
+                     "status": installation.status, "response": _redact(installation.body)})
+    if installation.status != 200 or not isinstance(installation.body, dict) or installation.body.get("repository_selection") != "selected":
+        return "FAIL", "installation must have selected repository scope", evidence
+    actual_names: list[str] = []
+    total_count = None
+    page = 1
+    while True:
+        listing = _api(client, "GET", f"/installation/repositories?per_page=100&page={page}")
+        evidence.append(listing)
+        body = listing.get("response")
+        if listing["status"] != 200 or not isinstance(body, dict) or not isinstance(body.get("total_count"), int) or not isinstance(body.get("repositories"), list):
+            return "FAIL", "could not enumerate installation repositories consistently", evidence
+        if total_count is None:
+            total_count = body["total_count"]
+        elif body["total_count"] != total_count:
+            return "FAIL", "installation repository total_count changed during pagination", evidence
+        actual_names.extend(item["full_name"].lower() for item in body["repositories"]
+                            if isinstance(item, dict) and isinstance(item.get("full_name"), str))
+        if len(actual_names) == total_count:
+            break
+        if not body["repositories"] or len(actual_names) > total_count:
+            return "FAIL", "installation repository listing inconsistent with total_count", evidence
+        page += 1
+    actual = sorted(actual_names)
     evidence.append({"method": "repository scope comparison", "expected": forks, "actual": actual,
                      "trial_excluded": target not in actual, "canonical_excluded": CANONICAL_REPO not in actual})
     if actual != forks or target in actual or CANONICAL_REPO in actual:
         return "FAIL", "installation repository scope differs from configured fork set or includes protected repositories", evidence
+    revoked = client.revoke()
+    evidence.append({"method": "DELETE", "path": "/installation/token",
+                     "status": revoked.status if revoked else None})
+    if revoked is None or revoked.status != 204:
+        return "FAIL", "could not revoke unrestricted scope-audit token", evidence
+    try:
+        client.installation_token(*fork.split("/", 1))
+    except GitHubAuthError as exc:
+        evidence.append({"method": "scoped positive-control token", "status": "error", "response": str(exc)})
+        return "FAIL", "could not mint fork-scoped positive-control token", evidence
     try:
         sha = subprocess.run(["git", "rev-parse", "HEAD"], check=True, capture_output=True, text=True, timeout=10).stdout.strip()
     except (OSError, subprocess.SubprocessError):
@@ -547,7 +582,12 @@ def _run_test(test_id: str, owner: str, repo: str, role: str, client: GitHubAppC
         checks_ok, checks_reason = _wait_required_checks(client, base, local, evidence)
         if not checks_ok:
             return "FAIL", f"cannot move main before stale-lease test: {checks_reason}", evidence
-        moved = _api(client, "POST", "/graphql", {"query": "mutation($input: UpdateRefsInput!) { updateRefs(input: $input) { refs { name } } }", "variables": {"input": {"refUpdates": [{"name": "refs/heads/main", "oid": local, "beforeOid": actual}]}}})
+        repository = _api(client, "GET", base)
+        evidence.append(repository)
+        repository_id = repository.get("response", {}).get("node_id") if isinstance(repository.get("response"), dict) else None
+        if repository["status"] != 200 or not repository_id:
+            return "FAIL", "could not resolve repository node id for updateRefs", evidence
+        moved = _api(client, "POST", "/graphql", {"query": "mutation($input: UpdateRefsInput!) { updateRefs(input: $input) { refs { name } } }", "variables": {"input": {"repositoryId": repository_id, "refUpdates": [{"name": "refs/heads/main", "oid": local, "beforeOid": actual}]}}})
         evidence.append(moved)
         moved_ok = moved["status"] == 200 and isinstance(moved["response"], dict) and not moved["response"].get("errors")
         if not moved_ok or _main_sha(client, base, evidence) != local:
@@ -556,8 +596,12 @@ def _run_test(test_id: str, owner: str, repo: str, role: str, client: GitHubAppC
         evidence.append(item)
         unchanged = _verify_unchanged(client, base, local, evidence)
         response = item.get("response", "").lower()
-        valid_server_reject = item.get("exit_code", 0) != 0 and item.get("server_rejected") and ("stale" in response or "rejected" in response)
-        return ("PASS", "server rejected stale force-with-lease; moved main unchanged", evidence) if valid_server_reject and unchanged else ("FAIL", "stale lease was not rejected by server for the expected reason or main changed", evidence)
+        # Git's force-with-lease stale-info check is client-side; this cannot prove a
+        # receive-pack denial. A-03/P3-05 provide server-side protected-ref CAS evidence.
+        evidence.append({"method": "A-04 limitation", "client_response": response,
+                         "server_side_demonstrated": False, "related_server_test": "A-03/P3-05",
+                         "main_unchanged": unchanged})
+        return "NOT RUN", "Git client stale-info rejection does not demonstrate a server-side denial; see A-03/P3-05", evidence
     if test_id == "A-09":
         item = _api(client, "POST", f"{base}/issues", {"title": "AAO P2/P3 trial notification", "body": "Disposable trial harness check."})
         evidence.append(item)
@@ -689,14 +733,19 @@ def _run_test(test_id: str, owner: str, repo: str, role: str, client: GitHubAppC
         checks_ok, checks_reason = _wait_required_checks(client, base, candidate, evidence)
         if not checks_ok:
             return "FAIL", f"cannot move main before stale updateRefs test: {checks_reason}", evidence
-        query = {"query": "mutation($input: UpdateRefsInput!) { updateRefs(input: $input) { refs { name } } }", "variables": {"input": {"refUpdates": [{"name": "refs/heads/main", "oid": candidate, "beforeOid": sha}]}}}
+        repository = _api(client, "GET", base)
+        evidence.append(repository)
+        repository_id = repository.get("response", {}).get("node_id") if isinstance(repository.get("response"), dict) else None
+        if repository["status"] != 200 or not repository_id:
+            return "FAIL", "could not resolve repository node id for updateRefs", evidence
+        query = {"query": "mutation($input: UpdateRefsInput!) { updateRefs(input: $input) { refs { name } } }", "variables": {"input": {"repositoryId": repository_id, "refUpdates": [{"name": "refs/heads/main", "oid": candidate, "beforeOid": sha}]}}}
         moved = _api(client, "POST", "/graphql", query)
         evidence.append(moved)
         moved_ok = moved["status"] == 200 and isinstance(moved["response"], dict) and not moved["response"].get("errors")
         if not moved_ok or _main_sha(client, base, evidence) != candidate:
             return "FAIL", "could not move main to distinct candidate before stale updateRefs attempt", evidence
         query = {"query": "mutation($input: UpdateRefsInput!) { updateRefs(input: $input) { refs { name } } }",
-                 "variables": {"input": {"refUpdates": [{"name": "refs/heads/main", "oid": sha, "beforeOid": sha}]}}}
+                 "variables": {"input": {"repositoryId": repository_id, "refUpdates": [{"name": "refs/heads/main", "oid": sha, "beforeOid": sha}]}}}
         item = _api(client, "POST", "/graphql", query)
         evidence.append(item)
         errors = item["status"] == 200 and isinstance(item["response"], dict) and any("before" in e.get("message", "").lower() or "stale" in e.get("message", "").lower() for e in item["response"].get("errors", []))
@@ -758,6 +807,9 @@ def _run_test(test_id: str, owner: str, repo: str, role: str, client: GitHubAppC
         evidence.append(item)
         unchanged = _verify_unchanged(client, base, before, evidence)
         expected = "non-fast-forward" if test_id == "P3-12" else "protected branch"
+        if test_id == "P3-12":
+            status, reason = _denial_outcome(item, unchanged, "non-fast-forward", "P3-12 push")
+            return status, reason, evidence
         return ("PASS", f"server denied {test_id} push for expected reason; main unchanged", evidence) if _push_rejection_pass(item, unchanged, expected) else ("FAIL", "push was not rejected by the server for the expected reason or main changed", evidence)
     if test_id == "P3-08":
         return "NOT RUN", "Default-branch deletion is not a meaningful ruleset test: GitHub forbids deleting the default branch independently of rulesets. Configure a protected non-default trial branch and rerun.", evidence

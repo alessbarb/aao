@@ -1,5 +1,7 @@
 from pathlib import Path
+import os
 
+from aao.trial_security import validate_role_workdir
 
 RUNNER = Path(__file__).parents[1] / "scripts/trial/run_trial.sh"
 
@@ -7,7 +9,7 @@ RUNNER = Path(__file__).parents[1] / "scripts/trial/run_trial.sh"
 def test_runner_binds_evidence_to_unique_run_and_harness_revision():
     source = RUNNER.read_text()
     assert "export AAO_TRIAL_RUN_ID=$TS AAO_TRIAL_HARNESS_REV=$REV" in source
-    assert 'get("run_id", "")' in source
+    assert 'd.get("run_id")' in source
     assert "no evidence from this run" in source
     assert "GITHUB_SHA=" not in source
 
@@ -32,6 +34,44 @@ def test_runner_fetch_and_symlink_checks_fail_closed_before_install():
     assert symlink_check < install
 
 
+def test_role_workdir_validator_rejects_wrong_owner_mode_and_symlink(tmp_path):
+    work = tmp_path / "work"
+    work.mkdir(mode=0o700)
+    work.chmod(0o700)
+    assert validate_role_workdir(work, os.getuid())
+    assert not validate_role_workdir(work, os.getuid() + 1)
+    work.chmod(0o755)
+    assert not validate_role_workdir(work, os.getuid())
+    link = tmp_path / "link"
+    link.symlink_to(work, target_is_directory=True)
+    assert not validate_role_workdir(link, os.getuid())
+
+
+def test_runner_uses_root_only_work_parent_clean_role_git_and_run_scoped_evidence():
+    source = RUNNER.read_text()
+    assert "WORK_PARENT=/var/lib/aao-trial" in source
+    assert "WORK_ROOT=$WORK_PARENT/work" in source
+    assert "[[ ! -L /var/lib && ! -L $WORK_PARENT && ! -L $WORK_ROOT ]]" in source
+    assert "role_work_safe \"$work\" \"$uid\"" in source
+    assert "GIT_CONFIG_GLOBAL=/dev/null" in source
+    assert "GIT_CONFIG_NOSYSTEM=1" in source
+    assert "-c core.hooksPath=/dev/null -c core.fsmonitor=false" in source
+    assert "runuser -u \"$uid\" -- env -i" in source
+    assert "capture_evidence \"$uid\" \"$home\" \"$id\"" in source
+    assert "find \"$evidence_dir\"" not in source
+    assert '[[ $extra_state != FAIL && $extra_rc -ne 1 ]]' in source
+
+
+def test_ruleset_gate_fetches_details_and_checks_rules_and_bypass_actors():
+    source = RUNNER.read_text()
+    assert 'gh api "repos/$REPO/rulesets?includes_parents=true"' in source
+    assert 'gh api "repos/$REPO/rulesets/$id"' in source
+    for rule in ('"non_fast_forward"', '"required_status_checks"', '"deletion"', '"pull_request"'):
+        assert rule in source
+    assert "bypass_actors" in source
+    assert 'x.get("actor_id")==5447984' in source
+
+
 def test_runner_passes_both_implementer_forks_and_runs_a10_for_all_apps():
     source = RUNNER.read_text()
     assert 'AAO_GITHUB_TRIAL_FORKS="autoaiorg/aao-codex,$impl_fork"' in source
@@ -39,3 +79,13 @@ def test_runner_passes_both_implementer_forks_and_runs_a10_for_all_apps():
     assert "A10_ROLES=(aao-integrator aao-auditor aao-auditor-alt aao-supervisor aao-notifier aao-pm aao-impl-claude aao-impl-codex aao-impl-agy aao-probe-noworkflows)" in source
     assert "target=autoaiorg/aao-trial-probe" in source
     assert 'impl_uid=${APP_UID[$impl]}' in source
+
+
+def test_pinned_setup_inputs_come_from_revision_objects():
+    runner = RUNNER.read_text()
+    probe = (RUNNER.parent / "probe_app_setup.sh").read_text()
+    form = (RUNNER.parents[1] / "github_apps" / "create_app_form.py").read_text()
+    assert 'show "$REV:deploy/github-apps/aao-github-apps-registry.json"' in runner
+    assert 'git -C "$REPO" archive "$REV" scripts/github_apps/create_app_form.py docs/proposals/github-apps' in probe
+    assert '--manifest-dir "$form_tmp/docs/proposals/github-apps"' in probe
+    assert 'manifest_dir = MANIFESTS' in form

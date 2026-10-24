@@ -18,13 +18,16 @@ fi
 REV=${1:?REV (40-hex) of origin/main to take the reviewed exchange script and manifests from}
 [[ $REV =~ ^[0-9a-f]{40}$ ]] || { echo "REV must be 40 hex" >&2; exit 2; }
 REPO=$(git rev-parse --show-toplevel)
+GIT=(git -C "$REPO")
 getent passwd $APP >/dev/null || sudo useradd --system --create-home --shell /usr/sbin/nologin $APP
 sudo chmod 0700 /home/$APP
 # Reviewed exchange script and manifests, from git objects (not the working tree).
 git -C "$REPO" show "$REV:scripts/github_apps/exchange_manifest_code.py" | sudo install -o root -g root -m 0755 /dev/stdin /opt/aao-p2/exchange_manifest_code.py
 git -C "$REPO" show "$REV:docs/proposals/github-apps/$APP.json" | sudo install -o root -g root -m 0644 /dev/stdin /opt/aao-p2/github-apps/$APP.json
 # The form only builds HTML; the exchange refuses the key if GitHub's permissions differ from the reviewed manifest.
-python3 "$REPO/scripts/github_apps/create_app_form.py" $APP --org autoaiorg
+form_tmp=$(mktemp -d); trap 'rm -rf "$form_tmp"' EXIT
+git -C "$REPO" archive "$REV" scripts/github_apps/create_app_form.py docs/proposals/github-apps | tar -x -C "$form_tmp"
+python3 "$form_tmp/scripts/github_apps/create_app_form.py" "$APP" --org autoaiorg --manifest-dir "$form_tmp/docs/proposals/github-apps"
 xdg-open "/tmp/aao-create-$APP.html" 2>/dev/null || echo "open /tmp/aao-create-$APP.html in the browser"
 echo "Click 'Create GitHub App'. The browser lands on http://127.0.0.1:9/?code=...: copy the code value."
 read -r -p "code: " code

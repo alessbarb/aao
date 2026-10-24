@@ -23,16 +23,26 @@ MANIFESTS = Path(__file__).resolve().parents[2] / "docs" / "proposals" / "github
 
 
 def main() -> int:
-    if len(sys.argv) not in (2, 4) or (len(sys.argv) == 4 and sys.argv[2] != "--org"):
+    args = sys.argv[1:]
+    manifest_dir = MANIFESTS
+    if "--manifest-dir" in args:
+        i = args.index("--manifest-dir")
+        try:
+            manifest_dir = Path(args[i + 1])
+        except IndexError:
+            print("--manifest-dir requires a path", file=sys.stderr)
+            return 2
+        del args[i:i + 2]
+    if len(args) not in (1, 3) or (len(args) == 3 and args[1] != "--org"):
         print(__doc__)
         return 2
-    name = sys.argv[1]
-    org = sys.argv[3] if len(sys.argv) == 4 else None
+    name = args[0]
+    org = args[2] if len(args) == 3 else None
     if org is not None and not org.replace("-", "").isalnum():
         print("invalid organization name", file=sys.stderr)
         return 2
     target = f"https://github.com/organizations/{org}/settings/apps/new" if org else "https://github.com/settings/apps/new"
-    manifest = json.loads((MANIFESTS / f"{name}.json").read_text(encoding="utf-8"))
+    manifest = json.loads((manifest_dir / f"{name}.json").read_text(encoding="utf-8"))
     manifest["redirect_url"] = "http://127.0.0.1:9/"
     state = secrets.token_urlsafe(16)
     page = Path(f"/tmp/aao-create-{name}.html")
