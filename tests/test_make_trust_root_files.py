@@ -102,3 +102,36 @@ def test_runtime_configs_match_the_service_loaders(tmp_path):
         except ValueError:
             continue
         raise AssertionError(bad)
+
+
+def _run_main(tmp_path, monkeypatch, *extra):
+    import pwd
+    import sys
+    tmp_path.mkdir(parents=True, exist_ok=True)
+    template = ROOT / "docs/audit-runs/20261019-provisional/policy.json"
+    a, s = tmp_path / "a.pub", tmp_path / "s.pub"
+    a.write_text(_pub(tmp_path, "a"))
+    s.write_text(_pub(tmp_path, "s"))
+    me = pwd.getpwuid(os.getuid())
+    monkeypatch.setattr(maker.pwd, "getpwnam", lambda name: me)
+    out = tmp_path / "out"
+    monkeypatch.setattr(sys, "argv", ["make", "--revision", REV, "--policy-template", str(template),
+                                      "--auditor-public-key", str(a), "--supervisor-public-key", str(s),
+                                      "--repo", "owner/project", "--out", str(out), *extra])
+    assert maker.main() == 0
+    return json.loads((out / "registry.json").read_text())
+
+
+def test_ra_status_flag_records_ceo_decision_and_defaults_pending(tmp_path, monkeypatch):
+    registry = _run_main(tmp_path, monkeypatch, "--ra-status", "RA-01=PASS", "--ra-status", "RA-07=PASS")
+    assert registry["ra_status"] == {"RA-01": "PASS", "RA-02": "PENDING", "RA-03": "PENDING",
+                                     "RA-07": "PASS", "RA-09": "PENDING"}
+    assert registry["auditor_models"]["aao-auditor-alt"] == "gemini"  # Antigravity, not Codex
+
+
+def test_ra_status_flag_rejects_unknown_or_duplicate(tmp_path, monkeypatch):
+    import pytest
+    with pytest.raises(ValueError):
+        _run_main(tmp_path / "x", monkeypatch, "--ra-status", "RA-05=PASS")
+    with pytest.raises(SystemExit):
+        _run_main(tmp_path / "y", monkeypatch, "--ra-status", "RA-01=PASS", "--ra-status", "RA-01=PENDING")

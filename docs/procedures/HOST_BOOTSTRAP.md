@@ -92,3 +92,30 @@ sudo /root/aao-src/scripts/identity_separation.sh --purge    # (clon de root del
 ```
 
 Guarda el archivo `.tar.gz`, porque los logs no se borran. Si usaste el camino (b), revoca en GitHub las claves antiguas de las Apps en cuanto la máquina nueva dé 9/9.
+
+## 5. Actualizar una raíz de confianza ya instalada (`--trust-root-upgrade`)
+
+Úsalo para llevar la raíz de confianza instalada a una revisión posterior y auditada, por ejemplo cuando el registro necesita campos nuevos (RA-01 y RA-02). También para registrar tu decisión de poner los RA en PASS (`--ra-status`). **No sirve para volver a una revisión anterior:** la nueva revisión tiene que descender de la instalada.
+
+**Requisitos:**
+- una auditoría de Antigravity de la nueva `REV` con el prompt `r1-chain` y veredicto APPROVE-TECHNICAL (`/home/aao-auditor-alt/aao-audits/$REV/`);
+- el clon de root del paso 1 en esa `REV`.
+
+```bash
+sudo sha256sum /home/aao-auditor-alt/aao-audits/$REV/report.md          # el informe que has leído
+$B                       --trust-root-upgrade --loop-repo autoaiorg/aao-governance-trial --audit-report-sha256 <hash>   # simulación
+$B --apply --keys-dir /root/aao-keys --trust-root-upgrade --loop-repo autoaiorg/aao-governance-trial --audit-report-sha256 <hash>
+# Solo cuando el ensayo dé PASS, como decisión del CEO; cada RA que no indiques queda en PENDING:
+#   ... --trust-root-upgrade ... --ra-status RA-01=PASS --ra-status RA-02=PASS ...
+```
+
+**Qué hace:**
+1. Comprueba la auditoría igual que una instalación nueva.
+2. Exige que la nueva `REV` descienda de `/etc/aao-audit/expected-revision`.
+3. Detiene todo el bucle, integrador incluido.
+4. Guarda en `/var/backups/aao-trust-root/<fecha>-<rev anterior>/` la configuración y las unidades instaladas (`config.tar`), y los árboles congelados anteriores.
+5. Congela los árboles nuevos, reinstala las unidades y regenera el registro y la configuración.
+6. Conserva las claves, el ledger del auditor y `ledger.anchor`, de modo que la cadena continúa.
+7. Ejecuta el verificador del host. Con PASS, reactiva el supervisor, la reverificación y el despacho del auditor. **El integrador queda apagado:** se enciende aparte con `--enable-integrator`.
+
+**Si el verificador falla:** el despacho queda apagado y el script imprime cómo deshacer el cambio. Hay que detener las unidades `aao-*`, quitar las unidades `aao-*` que haya añadido la nueva revisión, ejecutar `tar -C / -xpf config.tar` (restaura la configuración y las unidades anteriores), devolver los `frozen-*/` a su sitio, escribir la revisión anterior en `expected-revision` y ejecutar `systemctl daemon-reload`.

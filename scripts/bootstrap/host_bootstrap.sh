@@ -14,6 +14,9 @@
 #   antigravity  root copy of agy, audit runner + pinned prompt, read-only allowlist for aao-auditor-alt
 #   trust-root   OPT-IN (--trust-root): frozen trees, units, supervisor/integrator keys, anchor,
 #                registry (RA PENDING), verifier PASS, auditor dispatch. The integrator stays OFF.
+#   trust-root-upgrade  OPT-IN (--trust-root-upgrade): move an INSTALLED trust root to a newer audited REV:
+#                backs up config + frozen trees, keeps keys, ledger and ledger.anchor, regenerates the
+#                registry (optionally --ra-status RA-0x=PASS, a CEO decision), verifier PASS, dispatch back on.
 #   integrator   OPT-IN (--enable-integrator): only if every RA in the installed registry is PASS.
 #
 # Default is a dry run that prints what it would do. Fail closed. Phases 1-4 are re-runnable and never
@@ -33,7 +36,7 @@ umask 022
 
 die() { echo "FAIL: $*" >&2; exit 1; }
 say() { echo "== $*"; }
-APPLY=0 REV="" CEO="" KEYS_DIR="" AGY_SRC="" AGY_SHA="" REPORT_SHA="" TRUST_ROOT=0 LOOP_REPO="" ENABLE_INTEGRATOR=0
+APPLY=0 REV="" CEO="" KEYS_DIR="" AGY_SRC="" AGY_SHA="" REPORT_SHA="" TRUST_ROOT=0 LOOP_REPO="" ENABLE_INTEGRATOR=0 UPGRADE=0 RA_ARGS=()
 while [[ $# -gt 0 ]]; do
   case $1 in
     --apply) APPLY=1;;
@@ -43,6 +46,10 @@ while [[ $# -gt 0 ]]; do
     --agy) AGY_SRC=$2; shift;;
     --agy-sha256) AGY_SHA=$2; shift;;
     --trust-root) TRUST_ROOT=1;;
+    --trust-root-upgrade) UPGRADE=1;;
+    --ra-status) [[ ${2:-} =~ ^(RA-0[12379])=(PASS|PENDING)$ ]] || die "--ra-status RA-0x=PASS|PENDING"
+      [[ " ${RA_ARGS[*]} " != *" ${BASH_REMATCH[1]}="* ]] || die "duplicate --ra-status ${BASH_REMATCH[1]}"
+      RA_ARGS+=(--ra-status "$2"); shift;;
     --audit-report-sha256) REPORT_SHA=$2; shift;;
     --loop-repo) LOOP_REPO=$2; shift;;
     --enable-integrator) ENABLE_INTEGRATOR=1;;
@@ -186,8 +193,9 @@ else
 fi
 
 # ---------- 5. trust root (opt-in) ----------
-if ((TRUST_ROOT)); then
-  say "trust-root"
+((TRUST_ROOT && UPGRADE)) && die "--trust-root (fresh host) and --trust-root-upgrade are exclusive"
+((${#RA_ARGS[@]} == 0 || UPGRADE)) || die "--ra-status is only accepted with --trust-root-upgrade"
+check_audit() {
   [[ $LOOP_REPO =~ ^[A-Za-z0-9-]+/[A-Za-z0-9._-]+$ ]] || die "--loop-repo OWNER/REPO is required (the repo the R1 loop serves)"
   # The CEO authorizes the trust root (§12.3 op. 1) by pinning the exact audit report they read.
   [[ $REPORT_SHA =~ ^[0-9a-f]{64}$ ]] || die "--audit-report-sha256 <sha256 of the report.md you read> is required"
@@ -212,6 +220,51 @@ print("audit verdict", sorted(verdicts))
 PY
   echo "audit attestation sha256=$(sha256sum "$snap/attestation.json" | cut -d' ' -f1) report sha256=$REPORT_SHA"
   ((APPLY)) && cp -- "$snap/attestation.json" "$snap/report.md" "$LOG/"
+  return 0
+}
+freeze_trees() {
+  for role in aao-auditor aao-supervisor aao-integrator; do
+    f=/srv/aao/frozen/$role
+    run g clone -q --no-hardlinks "$SRC" "$f/tree"
+    run g -C "$f/tree" -c advice.detachedHead=false checkout -q "$REV"
+    run g -C "$f/tree" remote remove origin
+    run python3 -m venv "$f/venv"
+    run "$f/venv/bin/pip" install -q -r "$f/tree/deploy/auditor-venv-constraints.txt"
+  done
+  run chown -R aao-auditor:aao-auditor /srv/aao/frozen/aao-auditor/tree
+  run chmod -R go-w /srv/aao/frozen
+  T=$SRC/deploy
+  run install -o root -g root -m 0644 "$T"/systemd/*.service "$T"/systemd/*.timer "$T"/systemd/*.path /etc/systemd/system/
+  run install -o root -g root -m 0644 "$T/tmpfiles.d/aao-trust-root.conf" /etc/tmpfiles.d/
+  run systemd-tmpfiles --create /etc/tmpfiles.d/aao-trust-root.conf
+}
+generate_install() {
+  G=$(mktemp -d)/out
+  run /usr/bin/python3 -I /srv/aao/frozen/aao-supervisor/tree/scripts/make_trust_root_files.py --revision "$REV" \
+    --policy-template /srv/aao/frozen/aao-supervisor/tree/docs/audit-runs/20261019-provisional/policy.json \
+    --developer "$CEO" --repo "$LOOP_REPO" --out "$G" "${RA_ARGS[@]}"
+  run install -d -o root -g root -m 0755 /etc/aao-audit /etc/aao-supervisor /etc/aao-integrator
+  run install -o root -g root -m 0644 "$G/integrator-config.json" /etc/aao-integrator/config.json
+  run install -o root -g root -m 0644 "$G/dispatch.json" /etc/aao-audit/dispatch.json
+  run install -o root -g root -m 0644 "$G/trust-anchor.json" /etc/aao-audit/trust-anchor.json
+  run install -o root -g root -m 0644 "$G/supervisor-config.json" /etc/aao-supervisor/config.json
+  run install -o aao-trust -g aao-trust -m 0644 "$G/registry.json" /srv/aao/trust/registry.json
+  run install -o aao-auditor -g aao-auditor -m 0644 "$G/policy.json" /var/lib/aao-auditor/policy.json
+}
+verify_and_enable() {
+  run systemctl daemon-reload
+  run systemctl enable --now aao-supervisor-intake.service aao-supervisor-heartbeat.timer aao-supervisor-attribution.timer
+  if ((APPLY)); then
+    /usr/bin/python3 -I /srv/aao/frozen/aao-supervisor/tree/scripts/verify_trust_root_host.py --expected-revision "$REV" \
+      --status-file /var/lib/aao-trust-verify/status.json | tee "$LOG/trust-root-verify.log" \
+      || die "host verification FAILED: the auditor dispatch is NOT enabled ($LOG/trust-root-verify.log)${1:+; $1}"
+  fi
+  # Audits run; the integrator stays OFF (CEO order: not before P2/P3 PASS).
+  run systemctl enable --now aao-trust-root-verify.timer aao-auditor-dispatch.path aao-auditor-dispatch.timer
+}
+if ((TRUST_ROOT)); then
+  say "trust-root"
+  check_audit
   # Fresh hosts only: refuse before writing anything if any trust-root artifact already exists.
   for f in /etc/aao-audit/trust-anchor.json /etc/aao-audit/dispatch.json /etc/aao-audit/expected-revision \
            /etc/aao-supervisor/config.json /etc/aao-integrator/config.json /srv/aao/trust/registry.json \
@@ -227,20 +280,7 @@ PY
   while read -r d; do
     [[ ! -e $d && ! -L $d ]] || [[ -d $d && ! -L $d && -z $(ls -A "$d") ]] || die "$d is not empty: not a fresh host"
   done < <(awk '$1 == "d" {print $2}' "$SRC/deploy/tmpfiles.d/aao-trust-root.conf")
-  for role in aao-auditor aao-supervisor aao-integrator; do
-    f=/srv/aao/frozen/$role
-    run g clone -q --no-hardlinks "$SRC" "$f/tree"
-    run g -C "$f/tree" -c advice.detachedHead=false checkout -q "$REV"
-    run g -C "$f/tree" remote remove origin
-    run python3 -m venv "$f/venv"
-    run "$f/venv/bin/pip" install -q -r "$f/tree/deploy/auditor-venv-constraints.txt"
-  done
-  run chown -R aao-auditor:aao-auditor /srv/aao/frozen/aao-auditor/tree
-  run chmod -R go-w /srv/aao/frozen
-  T=$SRC/deploy
-  run install -o root -g root -m 0644 "$T"/systemd/*.service "$T"/systemd/*.timer "$T"/systemd/*.path /etc/systemd/system/
-  run install -o root -g root -m 0644 "$T/tmpfiles.d/aao-trust-root.conf" /etc/tmpfiles.d/
-  run systemd-tmpfiles --create /etc/tmpfiles.d/aao-trust-root.conf
+  freeze_trees
   newkey() {  # uid private public: never overwrite an existing key
     if [[ -e $2 ]]; then echo "ok   $2 exists (kept)"; return; fi
     run runuser -u "$1" -- sh -c "umask 077 && openssl genpkey -algorithm ed25519 -out '$2'"
@@ -248,32 +288,65 @@ PY
   }
   newkey aao-supervisor /var/lib/aao-supervisor/keys/supervisor-ed25519.pem /srv/aao/trust/keys/aao-supervisor-ed25519.pub
   newkey aao-integrator /var/lib/aao-integrator/integrator-ed25519.pem /srv/aao/trust/keys/aao-integrator-ed25519.pub
-  G=$(mktemp -d)/out
-  run /usr/bin/python3 -I /srv/aao/frozen/aao-supervisor/tree/scripts/make_trust_root_files.py --revision "$REV" \
-    --policy-template /srv/aao/frozen/aao-supervisor/tree/docs/audit-runs/20261019-provisional/policy.json \
-    --developer "$CEO" --repo "$LOOP_REPO" --out "$G"
-  run install -d -o root -g root -m 0755 /etc/aao-audit /etc/aao-supervisor /etc/aao-integrator
-  run install -o root -g root -m 0644 "$G/integrator-config.json" /etc/aao-integrator/config.json
-  run install -o root -g root -m 0644 "$G/dispatch.json" /etc/aao-audit/dispatch.json
-  run install -o root -g root -m 0644 "$G/trust-anchor.json" /etc/aao-audit/trust-anchor.json
-  run install -o root -g root -m 0644 "$G/supervisor-config.json" /etc/aao-supervisor/config.json
-  run install -o aao-trust -g aao-trust -m 0644 "$G/registry.json" /srv/aao/trust/registry.json
-  run install -o aao-auditor -g aao-auditor -m 0644 "$G/policy.json" /var/lib/aao-auditor/policy.json
+  generate_install
   if [[ ! -e /etc/aao-audit/ledger.anchor ]]; then
     ((APPLY)) && printf '%064d\n' 0 | install -o root -g root -m 0644 /dev/stdin /etc/aao-audit/ledger.anchor
   fi
   ((APPLY)) && echo "$REV" | install -o root -g root -m 0644 /dev/stdin /etc/aao-audit/expected-revision
   # Empty auditor ledger (zero rows verifies; matches the all-zero anchor). The heartbeat refuses a missing one.
   run install -o aao-auditor -g aao-ledger-read -m 0640 /dev/null /var/lib/aao-auditor/ledger/governance.jsonl
-  run systemctl daemon-reload
-  run systemctl enable --now aao-supervisor-intake.service aao-supervisor-heartbeat.timer aao-supervisor-attribution.timer
+  verify_and_enable
+fi
+
+# ---------- 5b. trust-root upgrade (opt-in) ----------
+if ((UPGRADE)); then
+  say "trust-root-upgrade"
+  check_audit
+  OLD=$(cat /etc/aao-audit/expected-revision 2>/dev/null) || die "no installed trust root (use --trust-root on a fresh host)"
+  [[ $OLD =~ ^[0-9a-f]{40}$ && $OLD != "$REV" ]] || die "installed revision '$OLD' is invalid or already $REV"
+  g -C "$SRC" merge-base --is-ancestor "$OLD" "$REV" || die "$REV does not descend from the installed $OLD (no rollback/side-grade)"
+  # Keys, the auditor ledger and its anchor are carried over untouched: the chain continues.
+  for f in /var/lib/aao-supervisor/keys/supervisor-ed25519.pem /var/lib/aao-integrator/integrator-ed25519.pem \
+           /srv/aao/trust/keys/aao-supervisor-ed25519.pub /srv/aao/trust/keys/aao-integrator-ed25519.pub \
+           /etc/aao-audit/ledger.anchor /var/lib/aao-auditor/ledger/governance.jsonl; do
+    [[ -f $f && ! -L $f ]] || die "$f missing: not a complete installed trust root"
+  done
+  # Validate every registry input BEFORE anything is stopped or moved (also in dry-run): same generator,
+  # from the root clone at REV, into a throwaway directory.
+  /usr/bin/python3 -I "$SRC/scripts/make_trust_root_files.py" --revision "$REV" \
+    --policy-template "$SRC/docs/audit-runs/20261019-provisional/policy.json" \
+    --developer "$CEO" --repo "$LOOP_REPO" --out "$(mktemp -d)/preflight" "${RA_ARGS[@]}" >/dev/null \
+    || die "registry inputs rejected by make_trust_root_files.py; nothing was stopped or moved"
+  BK=/var/backups/aao-trust-root/$(date -u +%Y%m%dT%H%M%SZ)-$OLD
+  run install -d -o root -g root -m 0700 /var/backups/aao-trust-root "$BK"
+  # Stop the loop first (integrator included): nothing runs against a half-replaced root.
+  run systemctl disable --now aao-integrator-tick.timer aao-auditor-dispatch.path aao-auditor-dispatch.timer \
+    aao-trust-root-verify.timer aao-supervisor-attribution.timer aao-supervisor-heartbeat.timer aao-supervisor-intake.service
+  # A oneshot already in flight would keep running against the old tree: stop the services too, then require all idle.
+  LOOP_UNITS=(aao-integrator-tick.service aao-auditor-dispatch.service 'aao-auditor@*.service' aao-supervisor-attribution.service
+              aao-supervisor-heartbeat.service aao-supervisor-intake.service aao-trust-root-verify.service)
+  active=$(systemctl list-units --state=active,activating,deactivating --no-legend --plain "${LOOP_UNITS[@]}" | awk '{print $1}')
+  echo "loop units running now: ${active:-none}"
+  run systemctl stop "${LOOP_UNITS[@]}"
   if ((APPLY)); then
-    /usr/bin/python3 -I /srv/aao/frozen/aao-supervisor/tree/scripts/verify_trust_root_host.py --expected-revision "$REV" \
-      --status-file /var/lib/aao-trust-verify/status.json | tee "$LOG/trust-root-verify.log" \
-      || die "host verification FAILED: the auditor dispatch is NOT enabled ($LOG/trust-root-verify.log)"
+    active=$(systemctl list-units --state=active,activating,deactivating --no-legend --plain "${LOOP_UNITS[@]}" | awk '{print $1}')
+    [[ -z $active ]] || die "still running, nothing replaced: $active"
+  else
+    echo "DRY: --apply stops them and refuses to continue if any is still running afterwards"
   fi
-  # Audits run; the integrator stays OFF (CEO order: not before P2/P3 PASS).
-  run systemctl enable --now aao-trust-root-verify.timer aao-auditor-dispatch.path aao-auditor-dispatch.timer
+  # Installed unit files are part of the state a rollback must restore.
+  mapfile -t UNIT_FILES < <(cd / && ls -d etc/systemd/system/aao-*.service etc/systemd/system/aao-*.timer etc/systemd/system/aao-*.path 2>/dev/null)
+  run tar -C / -cpf "$BK/config.tar" --numeric-owner etc/aao-audit etc/aao-supervisor etc/aao-integrator \
+    srv/aao/trust/registry.json var/lib/aao-auditor/policy.json etc/tmpfiles.d/aao-trust-root.conf "${UNIT_FILES[@]}"
+  for role in aao-auditor aao-supervisor aao-integrator; do
+    run install -d -o root -g root -m 0700 "$BK/frozen-$role"
+    run mv /srv/aao/frozen/$role/tree /srv/aao/frozen/$role/venv "$BK/frozen-$role/"
+  done
+  freeze_trees
+  generate_install
+  ((APPLY)) && echo "$REV" | install -o root -g root -m 0644 /dev/stdin /etc/aao-audit/expected-revision
+  verify_and_enable "roll back: stop the aao-* units, remove /etc/systemd/system/aao-* added by $REV, restore $BK (tar -C / -xpf config.tar restores config and the previous unit files; move frozen-*/ back), write $OLD to /etc/aao-audit/expected-revision, systemctl daemon-reload"
+  echo "upgraded $OLD -> $REV; backup in $BK. The integrator is OFF: re-enable it only with --enable-integrator."
 fi
 
 # ---------- 6. integrator (opt-in, gated on RA PASS) ----------
