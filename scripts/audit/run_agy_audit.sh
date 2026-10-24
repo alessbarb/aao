@@ -1,17 +1,20 @@
 #!/usr/bin/env bash
 # Independent audit by Antigravity (agy) as the alternate auditor (delegated resolution, #25).
 # Run ONLY as aao-auditor-alt (never as the CEO, never as aao-impl-ag):
-#   sudo -u aao-auditor-alt -H /opt/aao-audit/run_agy_audit.sh <base_sha> <head_sha>
+#   sudo -u aao-auditor-alt -H /opt/aao-audit/run_agy_audit.sh <base_sha> <head_sha> [prompt]
+# prompt: r1-chain (default) or p2p3-trial; each is pinned by its reviewed sha256 below.
 # Read-only: public clone at the frozen SHA, plan mode, sandbox, clean environment, the reviewed prompt only.
 # Writes ~/aao-audits/<head_sha>/{prompt.txt,report.md,attestation.json} and prints their sha256.
 set -euo pipefail
 umask 022   # report/attestation must not be group-writable: the bootstrap refuses them otherwise
-PROMPT=/opt/aao-audit/r1-chain.md
 AGY=/usr/local/bin/agy   # root-owned copy; never a binary another account can write
-PROMPT_SHA256=3ddba5375577292dc75bb0ce04634c7d63f03d20cd74bcf1fca1d232f9246ef9   # reviewed docs/audit-prompts/r1-chain.md
+declare -A PROMPTS=([r1-chain]=3ddba5375577292dc75bb0ce04634c7d63f03d20cd74bcf1fca1d232f9246ef9   # reviewed docs/audit-prompts/r1-chain.md
+                   [p2p3-trial]=6272f2160ba4281f23b4f9aa32a7a9f3819a8559ee74361beddeb132795b4fb5) # reviewed docs/audit-prompts/p2p3-trial.md
 me=$(id -un); [[ $me == aao-auditor-alt ]] || { echo "refusing: must run as aao-auditor-alt, not $me" >&2; exit 1; }
-[[ $# -eq 2 ]] || { echo "usage: $0 <base_sha> <head_sha>" >&2; exit 2; }
-base=$1 head=$2
+[[ $# -eq 2 || $# -eq 3 ]] || { echo "usage: $0 <base_sha> <head_sha> [r1-chain|p2p3-trial]" >&2; exit 2; }
+base=$1 head=$2 pname=${3:-r1-chain}
+[[ -n ${PROMPTS[$pname]:-} ]] || { echo "unknown prompt $pname" >&2; exit 2; }
+PROMPT=/opt/aao-audit/$pname.md PROMPT_SHA256=${PROMPTS[$pname]}
 [[ $base =~ ^[0-9a-f]{40}$ && $head =~ ^[0-9a-f]{40}$ ]] || { echo "full 40-hex SHAs required" >&2; exit 2; }
 home=$(getent passwd "$me" | cut -d: -f6)
 [[ $HOME == "$home" ]] || { echo "refusing: HOME=$HOME is not $me's home ($home)" >&2; exit 1; }
@@ -40,7 +43,7 @@ for d in "$home/.antigravity" "$home/.gemini" "$home/.config" "$home/.config/ant
   foreign=$(find "$d" -printf '%D %p\n' | awk -v dev="$(stat -c %d "$home")" '$1 != dev {print $2; exit}')
   [[ -z $foreign ]] || { echo "refusing: $foreign is on another filesystem" >&2; exit 1; }
 done
-out="$home/aao-audits/$head"; [[ ! -e $out ]] || { echo "refusing: $out exists (one audit per SHA)" >&2; exit 1; }
+out="$home/aao-audits/$head"; [[ $pname == r1-chain ]] || out="$out-$pname"; [[ ! -e $out ]] || { echo "refusing: $out exists (one audit per SHA)" >&2; exit 1; }
 mkdir -p -m 0700 "$out"
 prior=$(find "$home/.antigravity" "$home/.gemini" "$home/.config/antigravity" -type f 2>/dev/null | wc -l || true)
 work=$(mktemp -d); trap 'rm -rf "$work"' EXIT
@@ -57,7 +60,7 @@ sed -e "s/{{BASE}}/$base/g" -e "s/{{HEAD}}/$head/g" "$PROMPT" > "$out/prompt.txt
     "$AGY" --mode plan --sandbox --effort high --print-timeout 0 -p="$(cat "$out/prompt.txt")" < /dev/null ) > "$out/report.md"
 cat > "$out/attestation.json" <<JSON
 {"auditor":"antigravity","os_user":"$me","uid":$(id -u),"base":"$base","head":"$head",
- "checked_out_head":"$(g -C "$work/repo" rev-parse HEAD)","prompt_template_sha256":"$PROMPT_SHA256",
+ "checked_out_head":"$(g -C "$work/repo" rev-parse HEAD)","prompt_name":"$pname","prompt_template_sha256":"$PROMPT_SHA256",
  "agy_sha256":"$(sha256sum "$AGY" | cut -d' ' -f1)","agy_version":"$("$AGY" --version 2>/dev/null | head -1 | tr -d '"')","prior_agy_state_files":$prior,
  "prompt_sha256":"$(sha256sum "$out/prompt.txt" | cut -d' ' -f1)",
  "report_sha256":"$(sha256sum "$out/report.md" | cut -d' ' -f1)","finished_at":"$(date -u +%FT%TZ)"}

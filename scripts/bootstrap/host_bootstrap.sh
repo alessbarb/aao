@@ -164,7 +164,7 @@ else
 fi
 run install -d -o root -g root -m 0755 /opt/aao-audit
 run install -o root -g root -m 0755 "$SRC/scripts/audit/run_agy_audit.sh" /opt/aao-audit/
-run install -o root -g root -m 0644 "$SRC/docs/audit-prompts/r1-chain.md" /opt/aao-audit/
+for pr in "$SRC"/docs/audit-prompts/*.md; do run install -o root -g root -m 0644 "$pr" /opt/aao-audit/; done
 alt_home=$(getent passwd aao-auditor-alt | cut -d: -f6 || true)
 [[ -n $alt_home ]] || { ((APPLY)) && die "no account aao-auditor-alt"; alt_home=/home/aao-auditor-alt; }
 # Only single read-only git commands; agy denies everything else in print mode (see the audit prompt).
