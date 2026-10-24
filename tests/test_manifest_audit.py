@@ -408,6 +408,35 @@ def test_unattributed_candidate_is_provisional_even_with_valid_custody(env):
     assert not gate(env, path)[0]
 
 
+@pytest.mark.nt("NT-02-1")
+@pytest.mark.nt("NT-02-2")
+def test_manifest_and_git_metadata_do_not_authenticate_the_implementer(env):
+    path, data = manifest(env, producer="forged-producer")
+    # Git author and committer metadata are mutable candidate claims too.
+    previous = git(env["repo"], "rev-parse", "--abbrev-ref", "HEAD")
+    git(env["repo"], "checkout", "-q", "candidate")
+    git(env["repo"], "-c", "user.name=forged-committer", "-c", "user.email=forged-committer@example.invalid",
+        "commit", "--allow-empty", "--amend", "--no-edit", "--author=forged-author <forged-author@example.invalid>")
+    git(env["repo"], "checkout", "-q", previous)
+    candidate = git(env["repo"], "rev-parse", "candidate")
+    data["candidate_sha"] = candidate
+    data["candidate_tree"] = git(env["repo"], "rev-parse", f"{candidate}^{{tree}}")
+    data["result_tree"] = subprocess.run(
+        ["git", "-C", str(env["repo"]), "merge-tree", "--write-tree", data["target_sha"], candidate],
+        capture_output=True, text=True, check=False).stdout.split()[0]
+    data["producer"] = "forged-producer"
+    path.write_text(json.dumps(data), encoding="utf-8")
+    env["attribute"](candidate, ["authenticated-push-actor"])
+
+    report = audit(env, path, run="forged-metadata")
+    assert report["implementer_ids"] == ["authenticated-push-actor"]
+    assert set(report["declared_implementers"]) >= {"forged-producer", "forged-author@example.invalid"}
+    assert git(env["repo"], "show", "-s", "--format=%ce", candidate) == "forged-committer@example.invalid"
+    assert "forged-committer@example.invalid" not in report["implementer_ids"]
+    # The declared claims may only tighten recusal; they never become the attribution result.
+    assert "implementer attribution is unresolved" not in report["custody_problems"]
+
+
 @pytest.mark.nt("NT-02-8")
 def test_recusal_uses_attribution_and_declared_identities_only_tighten(env):
     path, data = manifest(env)

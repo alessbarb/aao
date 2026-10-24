@@ -204,6 +204,7 @@ def test_authorized_promotion_uses_update_refs_never_merge_endpoint(monkeypatch,
     assert any(item.get("method") == "staged merge commit" and item.get("sha") == "d" * 40 for item in evidence)
 
 
+@pytest.mark.nt("NT-02-5")
 def test_authorized_promotion_fails_for_wrong_audit_app(monkeypatch):
     monkeypatch.setattr(trial, "CHECK_WAIT_SECONDS", 1)
     client = DummyClient([(200, {"id": 77, "owner": {"login": "autoaiorg"}}),
