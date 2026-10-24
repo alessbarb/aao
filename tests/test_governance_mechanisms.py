@@ -1391,7 +1391,8 @@ def test_integrator_rejects_heartbeat_older_than_one_hour_even_if_registry_allow
         integrator_key_id="integrator")))
     now = __import__("datetime").datetime(2026, 1, 1, 1, 0, 1, tzinfo=__import__("datetime").timezone.utc)
     assert not _heartbeat(heartbeat, {"supervisor_key_id": "supervisor",
-        "supervisor_public_key": str(public), "heartbeat_max_age_seconds": 7200}, now)
+        "supervisor_public_key": str(public), "heartbeat_max_age_seconds": 7200}, now,
+        sequence_path=tmp_path / "integrator" / "heartbeat.sequence")
 
 
 def test_integrator_rejects_heartbeat_issued_in_the_future(tmp_path):
@@ -1406,7 +1407,8 @@ def test_integrator_rejects_heartbeat_issued_in_the_future(tmp_path):
         integrator_key_id="integrator")))
     now = __import__("datetime").datetime(2026, 1, 1, 0, 0, tzinfo=__import__("datetime").timezone.utc)
     assert not _heartbeat(heartbeat, {"supervisor_key_id": "supervisor",
-        "supervisor_public_key": str(public)}, now)
+        "supervisor_public_key": str(public)}, now,
+        sequence_path=tmp_path / "integrator" / "heartbeat.sequence")
 
 
 def test_integrator_rejects_pending_ra01_or_ra07(tmp_path):

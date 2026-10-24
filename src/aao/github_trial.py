@@ -489,6 +489,9 @@ def _run_test(test_id: str, owner: str, repo: str, role: str, client: GitHubAppC
             return "FAIL", "local commit unavailable for staging", evidence
         if not re.fullmatch(r"[0-9a-f]{40}", sha):
             return "FAIL", "local commit SHA is malformed", evidence
+        expected_sha = os.environ.get("AAO_GITHUB_TRIAL_EXPECTED_SHA", "")
+        if expected_sha and (not re.fullmatch(r"[0-9a-f]{40}", expected_sha) or sha != expected_sha):
+            return "FAIL", "local staged commit SHA does not match runner candidate", evidence
         item = _git_push(client, f"{owner}/{repo}", f"{sha}:refs/heads/{branch}")
         evidence.append(item)
         if item.get("status") != 0:
@@ -836,10 +839,14 @@ def write_evidence(test_id: str, status: str, reason: str, repo: str, role: str,
                 collect(item)
 
     collect(evidence)
-    if os.environ.get("GITHUB_SHA"):
-        shas.add(os.environ["GITHUB_SHA"])
+    candidate_sha = os.environ.get("AAO_TRIAL_CANDIDATE_SHA")
+    if candidate_sha and re.fullmatch(r"[0-9a-f]{40,64}", candidate_sha):
+        shas.add(candidate_sha)
     payload = {"test_id": test_id, "status": status, "reason": reason, "repo": repo, "role": role,
                "app_id": app_id, "timestamp": timestamp, "shas": sorted(shas),
+               "run_id": os.environ.get("AAO_TRIAL_RUN_ID", ""),
+               "harness_revision": os.environ.get("AAO_TRIAL_HARNESS_REV", ""),
+               "candidate_sha": candidate_sha or "",
                "evidence": _redact(evidence)}
     fd, name = tempfile.mkstemp(prefix=f".{test_id}-", suffix=".tmp", dir=directory)
     try:

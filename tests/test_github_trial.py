@@ -607,10 +607,19 @@ def test_redirect_handler_never_forwards_credentials():
 
 def test_evidence_mode_and_redaction(tmp_path, monkeypatch):
     monkeypatch.setattr(Path, "home", lambda: tmp_path)
+    monkeypatch.setenv("AAO_TRIAL_RUN_ID", "trial-1")
+    monkeypatch.setenv("AAO_TRIAL_HARNESS_REV", "a" * 40)
+    monkeypatch.setenv("AAO_TRIAL_CANDIDATE_SHA", "b" * 40)
+    monkeypatch.setenv("GITHUB_SHA", "c" * 40)
     dest = trial.write_evidence("A-01", "PASS", "ok", "org/trial", "aao-impl-codex", 17,
                                 [{"request": {"token": "hide"}, "response": {"ok": True}}])
     assert dest.stat().st_mode & 0o777 == 0o600
+    payload = json.loads(dest.read_text())
     assert "hide" not in dest.read_text()
+    assert payload["run_id"] == "trial-1"
+    assert payload["harness_revision"] == "a" * 40
+    assert payload["candidate_sha"] == "b" * 40
+    assert "c" * 40 not in payload["shas"]
 
 
 def test_explicit_audit_publication_is_auditor_only_and_trial_only(monkeypatch):
@@ -649,6 +658,17 @@ def test_explicit_stage_commit_is_integrator_only_and_named_trial_branch(monkeyp
     assert status == "NOT RUN"
 
 
+def test_explicit_stage_commit_rejects_candidate_mismatch_before_push(monkeypatch):
+    monkeypatch.setenv("AAO_GITHUB_TRIAL_BRANCH", "aao-trial/explicit-candidate")
+    monkeypatch.setenv("AAO_GITHUB_TRIAL_EXPECTED_SHA", "d" * 40)
+    monkeypatch.setattr(trial.subprocess, "run", lambda *_a, **_k: type("Result", (), {"stdout": "c" * 40})())
+    pushes = []
+    monkeypatch.setattr(trial, "_git_push", lambda *_a, **_k: pushes.append(True) or {"status": 0})
+    status, reason, _ = trial.run_test("STAGE-COMMIT", "org", "trial", "aao-integrator", DummyClient([]))
+    assert status == "FAIL" and "does not match runner candidate" in reason
+    assert not pushes
+
+
 def test_explicit_stage_commit_rejects_unsafe_branch(monkeypatch):
     monkeypatch.setenv("AAO_GITHUB_TRIAL_BRANCH", "refs/heads/main")
     status, reason, evidence = trial.run_test("STAGE-COMMIT", "org", "trial", "aao-integrator", DummyClient([]))
@@ -680,11 +700,14 @@ def test_equivalence_is_pending_never_pass_and_rejects_wrong_role(monkeypatch):
             return auth.APIResponse(404, {"message": "Not Found"}, {})
         def installation_token(self, *_args):
             return "test"
-    monkeypatch.setenv("AAO_GITHUB_TRIAL_FORKS", "autoaiorg/aao-trial-codex")
+    monkeypatch.setenv("AAO_GITHUB_TRIAL_FORKS", "autoaiorg/aao-codex,autoaiorg/aao-trial-codex")
     monkeypatch.setenv("AAO_GITHUB_TRIAL_FORK", "autoaiorg/aao-trial-codex")
     monkeypatch.setattr(trial.subprocess, "run", lambda *_a, **_k: type("Result", (), {"stdout": "b" * 40})())
     monkeypatch.setattr(trial, "_git_push", lambda *_a, **_k: {"status": 0, "exit_code": 0})
-    client = EquivalenceClient([(200, {"repositories": [{"full_name": "autoaiorg/aao-trial-codex"}]})])
+    client = EquivalenceClient([(200, {"repositories": [
+        {"full_name": "autoaiorg/aao-codex"},
+        {"full_name": "autoaiorg/aao-trial-codex"},
+    ]})])
     status, _, _ = trial.run_test("EQUIVALENCE", "autoaiorg", "aao-governance-trial", "aao-impl-codex", client)
     assert status == "EQUIVALENCE-PENDING" and status != "PASS"
     status, _, _ = trial.run_test("EQUIVALENCE", "autoaiorg", "aao-governance-trial", "aao-integrator", DummyClient([]))

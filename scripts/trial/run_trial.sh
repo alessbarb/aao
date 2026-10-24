@@ -25,8 +25,8 @@ blob_sha=$("${GIT[@]}" -C "$SRC" show "$REV:scripts/trial/run_trial.sh" | sha256
 file_sha=$(sha256sum "$script" | cut -d' ' -f1)
 [[ $blob_sha == "$file_sha" ]] || die "runner bytes do not match scripts/trial/run_trial.sh at $REV"
 # Export only src/ from Git objects; no working-tree content or hooks/config is trusted.
-install -d -o root -g root -m 0755 /opt/aao-trial
 [[ ! -L /opt/aao-trial ]] || die '/opt/aao-trial must not be a symlink'
+install -d -o root -g root -m 0755 /opt/aao-trial
 INSTALL=/opt/aao-trial/$REV
 if [[ -e $INSTALL ]]; then
   [[ ! -L $INSTALL && $(stat -c '%u' "$INSTALL") == 0 ]] || die "$INSTALL is not a safe root-owned directory"
@@ -48,7 +48,7 @@ check_rulesets(){
   python3 -I -c 'import json,sys; rows=json.load(sys.stdin); by={r.get("name"):r for r in rows}; a=by.get("A main: integrator only"); b=by.get("B main+staging: integrity (no bypass)"); c=by.get("C tags"); ok=all(x and x.get("enforcement")=="active" for x in (a,b,c)); rules=(b or {}).get("rules",[]); required=next((r.get("parameters",{}).get("required_status_checks",[]) for r in rules if r.get("type")=="required_status_checks"),[]); arules={r.get("type") for r in (a or {}).get("rules",[])}; brules={r.get("type") for r in rules}; crules={r.get("type") for r in (c or {}).get("rules",[])}; abypass=(a or {}).get("bypass_actors",[]); ok=ok and {x.get("context"):x.get("integration_id") for x in required}.get("aao-audit")==5448107 and "test" in {x.get("context") for x in required} and not b.get("bypass_actors") and "non_fast_forward" in brules and "deletion" in brules and {"update","pull_request"}.issubset(arules) and any(x.get("actor_id")==5447984 and x.get("actor_type")=="Integration" for x in abypass) and (c or {}).get("target")=="tag" and {"creation","update","deletion"}.issubset(crules); sys.exit(0 if ok else 1)' <<<"$data"
 }
 check_rulesets || die 'trial rulesets A/B/C are not active with required auditor/test and no B bypass'
-TS=$(date -u +%Y%m%dT%H%M%SZ); LOG=/var/log/aao-trial/$TS; install -d -o root -g root -m 0750 "$LOG"
+TS=$(date -u +%Y%m%dT%H%M%S.%NZ); export AAO_TRIAL_RUN_ID=$TS AAO_TRIAL_HARNESS_REV=$REV; LOG=/var/log/aao-trial/$TS; install -d -o root -g root -m 0750 "$LOG"
 fixture_num= fixture_head=
 need_pr=0; for id in "${ONLY[@]}"; do [[ $id != A-02 && $id != P3-09 && $id != A-05 && $id != P3-06 ]] || need_pr=1; done
 if ((${#ONLY[@]} == 0)); then need_pr=1; fi
@@ -67,8 +67,8 @@ make_fixture_pr(){
   fixture_head=$(python3 -I -c 'import json,sys;d=json.loads(sys.stdin.read());print(d["headRefOid"])' <<<"$pr")
 }
 if ((need_pr)); then make_fixture_pr; fi
-declare -a IDS=(A-01 A-02 A-03 A-04 A-05 A-06 A-09 A-10 A-12 A-14 P3-01 P3-02 P3-03 P3-05 P3-06 P3-07 P3-09 P3-12)
-declare -A ROLE=([A-01]=aao-impl-codex [A-02]=aao-impl-codex [A-03]=aao-integrator [A-04]=aao-integrator [A-05]=aao-integrator [A-06]=aao-auditor [A-09]=aao-notifier [A-10]=aao-integrator [A-12]=aao-integrator [A-14]=aao-probe-noworkflows [P3-01]=ceo [P3-02]=aao-impl-codex [P3-03]=aao-integrator [P3-05]=aao-integrator [P3-06]=aao-integrator [P3-07]=aao-integrator [P3-09]=ceo [P3-12]=aao-integrator)
+declare -a IDS=(A-01 A-02 A-03 A-04 A-05 A-06 A-09 A-12 A-14 P3-01 P3-02 P3-03 P3-05 P3-06 P3-07 P3-09 P3-12)
+declare -A ROLE=([A-01]=aao-impl-codex [A-02]=aao-impl-codex [A-03]=aao-integrator [A-04]=aao-integrator [A-05]=aao-integrator [A-06]=aao-auditor [A-09]=aao-notifier [A-12]=aao-integrator [A-14]=aao-probe-noworkflows [P3-01]=ceo [P3-02]=aao-impl-codex [P3-03]=aao-integrator [P3-05]=aao-integrator [P3-06]=aao-integrator [P3-07]=aao-integrator [P3-09]=ceo [P3-12]=aao-integrator)
 declare -A APP_UID=(); for row in "${APPS[@]}"; do read -r app uid <<<"$row"; APP_UID[$app]=$uid; done
 APP_UID[aao-probe-noworkflows]=aao-probe-noworkflows
 printf 'test\trole\tstatus\tevidence\n' | tee "$LOG/summary.tsv"
@@ -84,7 +84,7 @@ for id in "${IDS[@]}"; do
   clone=$work/$clone_name
   if [[ ! -d $clone/.git ]]; then runuser -u "$uid" -- env -i HOME="$home" PATH=/usr/bin:/bin git clone --quiet "https://github.com/$target.git" "$clone" || { printf '%s\t%s\tFAIL\tclone failed\n' "$id" "$role" | tee -a "$LOG/summary.tsv"; rc=1; continue; }; fi
   # A disposable child commit is available for tests which need a distinct candidate.
-  runuser -u "$uid" -- env -i HOME="$home" PATH=/usr/bin:/bin git -C "$clone" fetch --quiet origin main || true
+  runuser -u "$uid" -- env -i HOME="$home" PATH=/usr/bin:/bin git -C "$clone" fetch --quiet origin main || { printf '%s\t%s\tFAIL\torigin main fetch failed\n' "$id" "$role" | tee -a "$LOG/summary.tsv"; rc=1; continue; }
   if [[ $id == P3-07 || $id == P3-12 ]]; then
     runuser -u "$uid" -- env -i HOME="$home" PATH=/usr/bin:/bin git -C "$clone" checkout -q -B trial-candidate origin/main^
   else
@@ -103,21 +103,33 @@ for id in "${IDS[@]}"; do
   fi
   args=("$id" --repo "$target" --role "$role")
   allow="$REPO"; [[ $id != A-14 ]] || allow="$REPO,$target"
-  envs=(HOME="$home" PATH=/usr/bin:/bin AAO_GITHUB_TRIAL_REPOS="$allow" AAO_GITHUB_TRIAL_FORK_PARENT="$REPO" GITHUB_SHA=$(runuser -u "$uid" -- git -C "$clone" rev-parse HEAD))
+  envs=(HOME="$home" PATH=/usr/bin:/bin AAO_GITHUB_TRIAL_REPOS="$allow" AAO_GITHUB_TRIAL_FORK_PARENT="$REPO" AAO_TRIAL_RUN_ID="$AAO_TRIAL_RUN_ID" AAO_TRIAL_HARNESS_REV="$REV" AAO_TRIAL_CANDIDATE_SHA=$(runuser -u "$uid" -- git -C "$clone" rev-parse HEAD))
   case $id in A-02|P3-09|A-05|P3-06) envs+=(AAO_GITHUB_TRIAL_PR="$fixture_num" AAO_GITHUB_TRIAL_PR_HEAD="$fixture_head");; esac
   case $id in A-01|A-02|P3-02)
-    impl_fork=autoaiorg/aao-trial-codex; envs+=(AAO_GITHUB_TRIAL_FORK="$impl_fork" AAO_GITHUB_TRIAL_FORKS="$impl_fork")
+    impl_fork=autoaiorg/aao-trial-codex; envs+=(AAO_GITHUB_TRIAL_FORK="$impl_fork" AAO_GITHUB_TRIAL_FORKS="autoaiorg/aao-codex,$impl_fork")
     args+=(--equivalence);;
   esac
   case $id in A-05|P3-06) envs+=(AAO_GITHUB_TRIAL_PHASE=stage);; esac
   # Seed the exact required audit check only after the candidate exists in the trial repo.
   if [[ $id == A-03 || $id == A-04 || $id == P3-05 || $id == P3-07 || $id == P3-12 ]]; then
     candidate=$(runuser -u "$uid" -- git -C "$clone" rev-parse HEAD)
-    runuser -u "$uid" -- env -i HOME="$home" PATH=/usr/bin:/bin AAO_GITHUB_TRIAL_REPOS="$REPO" AAO_GITHUB_TRIAL_BRANCH="aao-trial/required-$id" /usr/bin/python3 -I -c "import sys;sys.path.insert(0,'$INSTALL/src');from aao.github_trial import main;raise SystemExit(main())" STAGE-COMMIT --repo "$REPO" --role aao-integrator --branch "aao-trial/required-$id" >/dev/null 2>&1 || { rc=1; }
+    set +e
+    (cd "$clone" && runuser -u "$uid" -- env -i HOME="$home" PATH=/usr/bin:/bin AAO_GITHUB_TRIAL_REPOS="$REPO" AAO_GITHUB_TRIAL_BRANCH="aao-trial/required-$id" AAO_GITHUB_TRIAL_EXPECTED_SHA="$candidate" AAO_TRIAL_CANDIDATE_SHA="$candidate" AAO_TRIAL_RUN_ID="$AAO_TRIAL_RUN_ID" AAO_TRIAL_HARNESS_REV="$REV" /usr/bin/python3 -I -c "import sys;sys.path.insert(0,'$INSTALL/src');from aao.github_trial import main;raise SystemExit(main())" STAGE-COMMIT --repo "$REPO" --role aao-integrator --branch "aao-trial/required-$id") >"$LOG/$id-STAGE-COMMIT.out" 2>&1
+    helper_rc=$?
+    set -e
+    cat "$LOG/$id-STAGE-COMMIT.out"
+    if ((helper_rc != 0)); then helper_reason=$(head -n 1 "$LOG/$id-STAGE-COMMIT.out"); printf '%s\t%s\tFAIL\t%s\n' "$id" "$role" "$helper_reason" | tee -a "$LOG/summary.tsv"; rc=1; continue; fi
+    staged_sha=$(grep -Eo 'staged local commit [0-9a-f]{40}' "$LOG/$id-STAGE-COMMIT.out" | awk '{print $4}' | tail -1)
+    if [[ $staged_sha != "$candidate" ]]; then printf '%s\t%s\tFAIL\tSTAGE-COMMIT SHA mismatch\n' "$id" "$role" | tee -a "$LOG/summary.tsv"; rc=1; continue; fi
     auditor_home=$(getent passwd "${APP_UID[aao-auditor]}" | cut -d: -f6)
     auditor_clone=/var/tmp/aao-trial/${APP_UID[aao-auditor]}/trial
     if [[ ! -d $auditor_clone/.git ]]; then install -d -o "${APP_UID[aao-auditor]}" -g "$(id -gn "${APP_UID[aao-auditor]}")" -m 0700 "$(dirname "$auditor_clone")"; runuser -u "${APP_UID[aao-auditor]}" -- env -i HOME="$auditor_home" PATH=/usr/bin:/bin git clone --quiet "https://github.com/$REPO.git" "$auditor_clone"; fi
-    runuser -u "${APP_UID[aao-auditor]}" -- env -i HOME="$auditor_home" PATH=/usr/bin:/bin AAO_GITHUB_TRIAL_REPOS="$REPO" AAO_GITHUB_TRIAL_SHA="$candidate" /usr/bin/python3 -I -c "import sys;sys.path.insert(0,'$INSTALL/src');from aao.github_trial import main;raise SystemExit(main())" PUBLISH-AUDIT --repo "$REPO" --role aao-auditor >/dev/null 2>&1 || { rc=1; }
+    set +e
+    (cd "$auditor_clone" && runuser -u "${APP_UID[aao-auditor]}" -- env -i HOME="$auditor_home" PATH=/usr/bin:/bin AAO_GITHUB_TRIAL_REPOS="$REPO" AAO_GITHUB_TRIAL_SHA="$candidate" AAO_TRIAL_CANDIDATE_SHA="$candidate" AAO_TRIAL_RUN_ID="$AAO_TRIAL_RUN_ID" AAO_TRIAL_HARNESS_REV="$REV" /usr/bin/python3 -I -c "import sys;sys.path.insert(0,'$INSTALL/src');from aao.github_trial import main;raise SystemExit(main())" PUBLISH-AUDIT --repo "$REPO" --role aao-auditor) >"$LOG/$id-PUBLISH-AUDIT.out" 2>&1
+    helper_rc=$?
+    set -e
+    cat "$LOG/$id-PUBLISH-AUDIT.out"
+    if ((helper_rc != 0)); then helper_reason=$(head -n 1 "$LOG/$id-PUBLISH-AUDIT.out"); printf '%s\t%s\tFAIL\t%s\n' "$id" "$role" "$helper_reason" | tee -a "$LOG/summary.tsv"; rc=1; continue; fi
   fi
   if [[ $id == A-05 || $id == P3-06 ]]; then runuser -u "$uid" -- env -i HOME="$home" PATH=/usr/bin:/bin git -C "$clone" fetch --quiet origin "refs/pull/$fixture_num/head"; fi
   set +e
@@ -125,20 +137,27 @@ for id in "${IDS[@]}"; do
   status=$?
   set -e
   cat "$LOG/$id-$role.out"
-  evidence=$(find "$home/aao-trial-evidence" -maxdepth 1 -type f -name "$id-*.json" -print 2>/dev/null | sort | tail -1)
-  state=NOT\ RUN; [[ -n $evidence ]] && state=$(python3 -I -c 'import json,sys; print(json.load(open(sys.argv[1])).get("status","FAIL"))' "$evidence")
+  evidence=$(find "$home/aao-trial-evidence" -maxdepth 1 -type f -name "$id-*.json" -print 2>/dev/null | sort | while IFS= read -r f; do [[ $(python3 -I -c 'import json,sys; print(json.load(open(sys.argv[1])).get("run_id", ""))' "$f") == "$AAO_TRIAL_RUN_ID" ]] && { printf "%s\n" "$f"; }; done | tail -1)
+  state='NOT RUN (no evidence from this run)'; [[ -n $evidence ]] && state=$(python3 -I -c 'import json,sys; print(json.load(open(sys.argv[1])).get("status","FAIL"))' "$evidence")
   if [[ ( $id == A-05 || $id == P3-06 ) && $state == STAGED ]]; then
     merge_sha=$(python3 -I -c 'import json,sys; d=json.load(open(sys.argv[1])); print(next(x["sha"] for x in d["evidence"] if x.get("method")=="staged merge commit"))' "$evidence")
     auditor_home=$(getent passwd "${APP_UID[aao-auditor]}" | cut -d: -f6); auditor_clone=/var/tmp/aao-trial/${APP_UID[aao-auditor]}/trial
-    runuser -u "${APP_UID[aao-auditor]}" -- env -i HOME="$auditor_home" PATH=/usr/bin:/bin AAO_GITHUB_TRIAL_REPOS="$REPO" AAO_GITHUB_TRIAL_SHA="$merge_sha" /usr/bin/python3 -I -c "import sys;sys.path.insert(0,'$INSTALL/src');from aao.github_trial import main;raise SystemExit(main())" PUBLISH-AUDIT --repo "$REPO" --role aao-auditor >"$LOG/$id-auditor.out" 2>&1 || rc=1
-    promote_envs=(HOME="$home" PATH=/usr/bin:/bin AAO_GITHUB_TRIAL_REPOS="$REPO" AAO_GITHUB_TRIAL_PR="$fixture_num" AAO_GITHUB_TRIAL_PR_HEAD="$fixture_head" AAO_GITHUB_TRIAL_PHASE=promote AAO_GITHUB_TRIAL_PROMOTE_SHA="$merge_sha")
+    set +e
+    runuser -u "${APP_UID[aao-auditor]}" -- env -i HOME="$auditor_home" PATH=/usr/bin:/bin AAO_GITHUB_TRIAL_REPOS="$REPO" AAO_GITHUB_TRIAL_SHA="$merge_sha" AAO_TRIAL_CANDIDATE_SHA="$merge_sha" AAO_TRIAL_RUN_ID="$AAO_TRIAL_RUN_ID" AAO_TRIAL_HARNESS_REV="$REV" /usr/bin/python3 -I -c "import sys;sys.path.insert(0,'$INSTALL/src');from aao.github_trial import main;raise SystemExit(main())" PUBLISH-AUDIT --repo "$REPO" --role aao-auditor >"$LOG/$id-PUBLISH-AUDIT.out" 2>&1
+    helper_rc=$?
+    set -e
+    cat "$LOG/$id-PUBLISH-AUDIT.out"
+    if ((helper_rc != 0)); then state=FAIL; status=1; rc=1; fi
+    if ((helper_rc == 0)); then
+    promote_envs=(HOME="$home" PATH=/usr/bin:/bin AAO_GITHUB_TRIAL_REPOS="$REPO" AAO_GITHUB_TRIAL_PR="$fixture_num" AAO_GITHUB_TRIAL_PR_HEAD="$fixture_head" AAO_GITHUB_TRIAL_PHASE=promote AAO_GITHUB_TRIAL_PROMOTE_SHA="$merge_sha" AAO_TRIAL_RUN_ID="$AAO_TRIAL_RUN_ID" AAO_TRIAL_HARNESS_REV="$REV" AAO_TRIAL_CANDIDATE_SHA="$merge_sha")
     set +e
     (cd "$clone" && runuser -u "$uid" -- env -i "${promote_envs[@]}" /usr/bin/python3 -I -c "import sys;sys.path.insert(0,'$INSTALL/src');from aao.github_trial import main;raise SystemExit(main())" "$id" --repo "$REPO" --role "$role") >"$LOG/$id-$role-promote.out" 2>&1
     status=$?
     set -e
     cat "$LOG/$id-$role-promote.out"
-    evidence=$(find "$home/aao-trial-evidence" -maxdepth 1 -type f -name "$id-*.json" -print 2>/dev/null | sort | tail -1)
+    evidence=$(find "$home/aao-trial-evidence" -maxdepth 1 -type f -name "$id-*.json" -print 2>/dev/null | sort | while IFS= read -r f; do [[ $(python3 -I -c 'import json,sys; print(json.load(open(sys.argv[1])).get("run_id", ""))' "$f") == "$AAO_TRIAL_RUN_ID" ]] && { printf "%s\n" "$f"; }; done | tail -1)
     [[ -n $evidence ]] && state=$(python3 -I -c 'import json,sys; print(json.load(open(sys.argv[1])).get("status","FAIL"))' "$evidence")
+    fi
   fi
   printf '%s\t%s\t%s\t%s\n' "$id" "$role" "$state" "${evidence:-none}" | tee -a "$LOG/summary.tsv"
   [[ -n $evidence ]] && install -o root -g root -m 0640 "$evidence" "$LOG/$(basename "$evidence")"
@@ -151,18 +170,44 @@ for id in "${IDS[@]}"; do
       impl_clone=$impl_work/trial
       if [[ ! -d $impl_clone/.git ]]; then runuser -u "$impl_uid" -- env -i HOME="$impl_home" PATH=/usr/bin:/bin git clone --quiet "https://github.com/$REPO.git" "$impl_clone"; fi
       runuser -u "$impl_uid" -- env -i HOME="$impl_home" PATH=/usr/bin:/bin git -C "$impl_clone" fetch --quiet origin main
-      impl_fork=autoaiorg/aao-trial-claude; [[ $impl != aao-impl-agy ]] || impl_fork=autoaiorg/aao-trial-agy
+      impl_fork=autoaiorg/aao-trial-claude; production_fork=autoaiorg/aao-claude; [[ $impl != aao-impl-agy ]] || { impl_fork=autoaiorg/aao-trial-agy; production_fork=autoaiorg/aao-agy; }
       set +e
-      (cd "$impl_clone" && runuser -u "$impl_uid" -- env -i HOME="$impl_home" PATH=/usr/bin:/bin AAO_GITHUB_TRIAL_REPOS="$REPO" AAO_GITHUB_TRIAL_FORKS="$impl_fork" AAO_GITHUB_TRIAL_FORK="$impl_fork" GITHUB_SHA=$(runuser -u "$impl_uid" -- git -C "$impl_clone" rev-parse origin/main) /usr/bin/python3 -I -c "import sys;sys.path.insert(0,'$INSTALL/src');from aao.github_trial import main;raise SystemExit(main())" "$id" --repo "$REPO" --role "$impl" --equivalence) >"$LOG/$id-$impl.out" 2>&1
+      (cd "$impl_clone" && runuser -u "$impl_uid" -- env -i HOME="$impl_home" PATH=/usr/bin:/bin AAO_GITHUB_TRIAL_REPOS="$REPO" AAO_GITHUB_TRIAL_FORKS="$production_fork,$impl_fork" AAO_GITHUB_TRIAL_FORK="$impl_fork" AAO_TRIAL_RUN_ID="$AAO_TRIAL_RUN_ID" AAO_TRIAL_HARNESS_REV="$REV" AAO_TRIAL_CANDIDATE_SHA=$(runuser -u "$impl_uid" -- git -C "$impl_clone" rev-parse origin/main) /usr/bin/python3 -I -c "import sys;sys.path.insert(0,'$INSTALL/src');from aao.github_trial import main;raise SystemExit(main())" "$id" --repo "$REPO" --role "$impl" --equivalence) >"$LOG/$id-$impl.out" 2>&1
       extra_rc=$?
       set -e
       cat "$LOG/$id-$impl.out"
-      extra_ev=$(find "$impl_home/aao-trial-evidence" -maxdepth 1 -type f -name "$id-*.json" -print 2>/dev/null | sort | tail -1)
+      extra_ev=$(find "$impl_home/aao-trial-evidence" -maxdepth 1 -type f -name "$id-*.json" -print 2>/dev/null | sort | while IFS= read -r f; do [[ $(python3 -I -c 'import json,sys; print(json.load(open(sys.argv[1])).get("run_id", ""))' "$f") == "$AAO_TRIAL_RUN_ID" ]] && { printf "%s\n" "$f"; }; done | tail -1)
       extra_state=NOT\ RUN; [[ -n $extra_ev ]] && extra_state=$(python3 -I -c 'import json,sys;print(json.load(open(sys.argv[1])).get("status","FAIL"))' "$extra_ev")
       printf '%s\t%s\t%s\t%s\n' "$id" "$impl" "$extra_state" "${extra_ev:-none}" | tee -a "$LOG/summary.tsv"
       [[ $extra_state != FAIL ]] || rc=1
     done
   fi
+done
+# A-10 covers every configured App. Implementers are inspected on their trial forks;
+# other Apps are inspected on the trial repository. The probe has no A-10 column.
+declare -a A10_ROLES=(aao-integrator aao-auditor aao-auditor-alt aao-supervisor aao-notifier aao-pm aao-impl-claude aao-impl-codex aao-impl-agy aao-probe-noworkflows)
+for role in "${A10_ROLES[@]}"; do
+  if ((${#ONLY[@]})) && [[ ! " ${ONLY[*]} " =~ " A-10 " ]]; then break; fi
+  uid=${APP_UID[$role]:-aao-probe-noworkflows}; [[ $role != aao-probe-noworkflows ]] || uid=aao-probe-noworkflows
+  home=$(getent passwd "$uid" | cut -d: -f6)
+  if [[ -z $home ]]; then printf 'A-10\t%s\tFAIL\tmissing uid\n' "$role" | tee -a "$LOG/summary.tsv"; rc=1; continue; fi
+  target=$REPO; parent=$REPO
+  case $role in
+    aao-impl-claude) target=autoaiorg/aao-trial-claude;;
+    aao-impl-codex) target=autoaiorg/aao-trial-codex;;
+    aao-impl-agy) target=autoaiorg/aao-trial-agy;;
+    aao-probe-noworkflows) target=autoaiorg/aao-trial-probe;;
+  esac
+  set +e
+  runuser -u "$uid" -- env -i HOME="$home" PATH=/usr/bin:/bin AAO_GITHUB_TRIAL_REPOS="$target" AAO_GITHUB_TRIAL_FORK_PARENT="$parent" AAO_TRIAL_RUN_ID="$AAO_TRIAL_RUN_ID" AAO_TRIAL_HARNESS_REV="$REV" /usr/bin/python3 -I -c "import sys;sys.path.insert(0,'$INSTALL/src');from aao.github_trial import main;raise SystemExit(main())" A-10 --repo "$target" --role "$role" >"$LOG/A-10-$role.out" 2>&1
+  a10_rc=$?
+  set -e
+  cat "$LOG/A-10-$role.out"
+  ev=$(find "$home/aao-trial-evidence" -maxdepth 1 -type f -name 'A-10-*.json' -print 2>/dev/null | sort | while IFS= read -r f; do [[ $(python3 -I -c 'import json,sys; print(json.load(open(sys.argv[1])).get("run_id", ""))' "$f") == "$AAO_TRIAL_RUN_ID" && $(python3 -I -c 'import json,sys; print(json.load(open(sys.argv[1])).get("role", ""))' "$f") == "$role" ]] && printf '%s\n' "$f"; done | tail -1)
+  state='NOT RUN (no evidence from this run)'; [[ -n $ev ]] && state=$(python3 -I -c 'import json,sys; print(json.load(open(sys.argv[1])).get("status", "FAIL"))' "$ev")
+  printf 'A-10\t%s\t%s\t%s\n' "$role" "$state" "${ev:-none}" | tee -a "$LOG/summary.tsv"
+  [[ $state != FAIL && $a10_rc -ne 1 ]] || rc=1
+  [[ -z $ev ]] || install -o root -g root -m 0640 "$ev" "$LOG/$(basename "$ev")"
 done
 # Manual tests remain explicit, never silently omitted.
 for id in A-07 A-08 A-11 A-13 P3-04 P3-08 P3-10 P3-11; do
