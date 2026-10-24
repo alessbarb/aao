@@ -13,6 +13,7 @@ from aao import manifest_audit
 from aao.independent_audit import AuditError
 from aao.manifest_audit import audit_manifest, verify_promotion
 from aao.pr_conformity import _canonical
+from aao.protected_routes import load_document, route_map, routes_digest
 
 UID = os.geteuid()
 USER = pwd.getpwuid(UID).pw_name
@@ -68,6 +69,7 @@ def env(tmp_path, monkeypatch, request):
     public = subprocess.run(["openssl", "pkey", "-in", str(key), "-pubout"], check=True, capture_output=True,
                             text=True).stdout
     policy_path = trust / "policy.json"
+    registry_path = state / "registry.json"
     anchor_path = trust / "anchor.json"
     attribution_path = trust / "attribution.json"
     ledger_anchor_path = trust / "ledger.anchor"
@@ -79,7 +81,7 @@ def env(tmp_path, monkeypatch, request):
         path.write_text(text, encoding="utf-8")
         path.chmod(0o600)
 
-    def attribute(sha, identities=("codex-impl",)):
+    def attribute(sha, identities=("aao-impl-codex[bot]",)):
         attributed[sha] = list(identities)
         write_private(attribution_path, json.dumps({"schema": "aao.implementer-attribution.v1",
                                                     "candidates": attributed}))
@@ -101,7 +103,11 @@ def env(tmp_path, monkeypatch, request):
             "version": "GOV-REV-001/v1.1", "auditor_id": "aao-auditor", "auditor_os_user": USER,
             "developer_os_users": ["implementer-account"], "required_checks": [],
             "auditors": {"aao-auditor": "anchored"}, "audit_checks": {"unit": ["-m", "pytest"]},
-            "protected_paths": ["src/aao/pr_conformity.py"], "dispositions": {},
+            "protected_paths": ["src/aao/pr_conformity.py"], "push_principals": {
+                "aao-impl-claude[bot]": "claude", "aao-impl-codex[bot]": "codex",
+                "aao-impl-agy[bot]": "antigravity"}, "dispositions": {},
+            "protected_routes": route_map(load_document()),
+            "protected_routes_sha256": routes_digest(load_document()["routes"]),
             "trusted_auditor_revisions": [REVIEWED], **(policy_overrides or {}),
         }
         for path in (policy_path, anchor_path):
@@ -109,6 +115,13 @@ def env(tmp_path, monkeypatch, request):
                 path.chmod(0o600)
         policy_path.write_text(json.dumps(policy), encoding="utf-8")
         policy_path.chmod(0o600)
+        registry_path.write_text(json.dumps({
+            "protected_routes": policy["protected_routes"],
+            "protected_routes_sha256": policy["protected_routes_sha256"],
+            "required_check_publishers": {"aao-audit": [5448107], "test": [15368]},
+            "push_principals": policy["push_principals"],
+        }), encoding="utf-8")
+        registry_path.chmod(0o600)
         anchor = {"schema": "aao.audit-trust-anchor.v1", "policy_path": str(policy_path),
                   "policy_sha256": hashlib.sha256(_canonical(policy)).hexdigest(), "auditor_uid": UID,
                   "auditor_public_key": public, "ledger_path": str(state / "ledger.jsonl"),
@@ -122,7 +135,7 @@ def env(tmp_path, monkeypatch, request):
 
     configure()
     return {"tmp": tmp_path, "repo": repo, "key": key, "state": state, "anchor": anchor_path,
-            "policy": policy_path, "configure": configure, "attribute": attribute,
+            "policy": policy_path, "registry": registry_path, "configure": configure, "attribute": attribute,
             "ledger_anchor": ledger_anchor_path, "write_private": write_private,
             "heartbeat": lambda: _supervisor_heartbeat(state, supervisor_key, heartbeat_path, public),
             "heartbeat_path": heartbeat_path}
@@ -426,10 +439,10 @@ def test_manifest_and_git_metadata_do_not_authenticate_the_implementer(env):
         capture_output=True, text=True, check=False).stdout.split()[0]
     data["producer"] = "forged-producer"
     path.write_text(json.dumps(data), encoding="utf-8")
-    env["attribute"](candidate, ["authenticated-push-actor"])
+    env["attribute"](candidate, ["aao-impl-codex[bot]"])
 
     report = audit(env, path, run="forged-metadata")
-    assert report["implementer_ids"] == ["authenticated-push-actor"]
+    assert report["implementer_ids"] == ["codex"]
     assert set(report["declared_implementers"]) >= {"forged-producer", "forged-author@example.invalid"}
     assert git(env["repo"], "show", "-s", "--format=%ce", candidate) == "forged-committer@example.invalid"
     assert "forged-committer@example.invalid" not in report["implementer_ids"]
@@ -443,7 +456,7 @@ def test_recusal_uses_attribution_and_declared_identities_only_tighten(env):
     env["attribute"](data["candidate_sha"], ["aao-auditor"])  # authenticated pusher is the auditor itself
     assert "auditor-is-implementer" in audit(env, path)["blocking_findings"]
     path, data = manifest(env, name="declared.json", producer="aao-auditor")
-    env["attribute"](data["candidate_sha"], ["codex-impl"])  # a declared match still blocks (stricter only)
+    env["attribute"](data["candidate_sha"], ["aao-impl-codex[bot]"])  # a declared match still blocks (stricter only)
     assert "auditor-is-implementer" in audit(env, path, run="declared")["blocking_findings"]
 
 

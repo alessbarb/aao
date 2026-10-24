@@ -11,6 +11,7 @@ from test_manifest_audit import audit as run_audit
 from test_manifest_audit import env as _base_audit_env  # noqa: F401
 from test_manifest_audit import manifest as make_manifest
 
+from aao import authorization_issuer
 from aao.authorization_issuer import issue_authorization
 from aao.independent_audit import AuditError
 from aao.integration_authorization import FIELDS, canonical
@@ -70,7 +71,7 @@ def _bare_chain(env, data, output, tmp_path):
     auditor_public.write_text(anchor["auditor_public_key"])
     required = policy.get("required_checks", [])
     enabled = policy.get("enabled_risk_classes", ["R1"])
-    protected = {path: "R2" for path in policy.get("protected_paths", [])}
+    protected = policy["protected_routes"]
     reg = {
         "ledger_keys": {policy["auditor_id"]: {"public_key": str(env["state"] / "auditor-for-supervisor.pub"),
                                     "can_resolve_pending": True},
@@ -86,7 +87,10 @@ def _bare_chain(env, data, output, tmp_path):
         "policy_id": policy.get("policy_id", policy["version"]),
         "policy_sha256": anchor["policy_sha256"],
         "trusted_auditor_revisions": policy["trusted_auditor_revisions"],
-        "auditor_models": {}, "author_models": {}, "protected_paths": protected,
+        "auditor_models": {}, "author_models": {}, "protected_routes": protected,
+        "protected_routes_sha256": policy["protected_routes_sha256"],
+        "required_check_publishers": {"aao-audit": [5448107], "test": [15368]},
+        "push_principals": policy["push_principals"],
     }
     registry = env["state"] / "integrator-trust.json"
     registry.write_text(json.dumps(reg))
@@ -127,6 +131,7 @@ def _assert_bare(bare, commit, base, candidate, tree):
 
 @pytest.fixture
 def audit_setup(_base_audit_env, monkeypatch):  # noqa: F811
+    monkeypatch.setattr(authorization_issuer, "TRUST_REGISTRY_PATH", _base_audit_env["registry"])
     return _base_audit_env
 
 

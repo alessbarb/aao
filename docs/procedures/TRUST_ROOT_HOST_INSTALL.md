@@ -1,5 +1,7 @@
 # Instalación de la raíz de confianza en el host (op. 1 del §12.3)
 
+> **REGENERATION REQUIRED — CEO sudo operation.** The existing installed trust root predates the RA-01/RA-02 trust inputs. It must be regenerated from the audited frozen revision and reinstalled by the CEO before any RA-01/RA-02 evidence can exist. This change adds the approved protected-route map and digest, per-check publisher App allowlists, and the exact GitHub push-principal-to-implementer map to `registry.json`; it also adds the operational route map and digest to `policy.json`. This is regeneration, not rotation. Do not set any RA to PASS as part of this operation.
+
 > **Host nuevo o traslado:** usa `docs/procedures/HOST_BOOTSTRAP.md`. El script `scripts/bootstrap/host_bootstrap.sh` automatiza esta página y además deja el integrador apagado hasta que los RA estén en PASS. Esta página queda como referencia de lo que hace.
 
 **Estado:** BORRADOR. No ejecutar hasta que:

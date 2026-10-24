@@ -17,6 +17,7 @@ INTAKE_SOCKET = "/run/aao-veto-intake/veto.sock"
 HEARTBEAT = "/var/lib/aao-heartbeat/heartbeat.json"
 POLICY_PATH = "/var/lib/aao-auditor/policy.json"
 LEDGER = "/var/lib/aao-auditor/ledger/governance.jsonl"
+ROUTES_PATH = Path(__file__).resolve().parents[1] / "docs/protected-routes.json"
 
 
 def canonical(value: object) -> bytes:
@@ -28,7 +29,43 @@ def build(revision: str, template: dict, auditor_pub: str, supervisor_pub: str, 
           attribution_writer_uid: int | None = None, repo: str | None = None) -> dict[str, dict]:
     if not re.fullmatch(r"[0-9a-f]{40}", revision):
         raise ValueError("revision must be a full lowercase SHA")
-    policy = {**template, "auditor_id": "aao-auditor", "auditor_os_user": "aao-auditor",
+    normative = json.loads(ROUTES_PATH.read_text(encoding="utf-8"))
+    routes = normative.get("routes") if isinstance(normative, dict) else None
+    if (not isinstance(normative, dict) or normative.get("schema") != "aao.protected-routes.v1"
+            or not isinstance(routes, list) or not routes
+            or normative.get("semantics") != {
+                "directory": "entry ending in '/' covers everything below it",
+                "exact": "any other entry is an exact path unless it contains '*'",
+                "glob": "'*' matches any sequence without '/'; a pattern without '/' matches the basename in any directory",
+                "paths_considered": "added, modified, deleted and both sides of renamed files",
+                "overlap": "highest class wins; overlaps never lower a class",
+            }):
+        raise ValueError("normative protected routes are invalid")
+    if any(not isinstance(item, dict) or set(item) != {"path", "minimum_risk_class"}
+           or not isinstance(item.get("path"), str) or not item["path"]
+           or item.get("minimum_risk_class") not in {"R1", "R2", "R3"} for item in routes):
+        raise ValueError("normative protected routes are invalid")
+    protected_routes = {item["path"]: item["minimum_risk_class"] for item in routes}
+    if len(protected_routes) != len(routes):
+        raise ValueError("normative protected routes contain duplicates")
+    required_check_publishers = normative.get("required_check_publishers")
+    if (not isinstance(required_check_publishers, dict) or not required_check_publishers
+            or any(not isinstance(name, str) or not name or not isinstance(ids, list) or not ids
+                   or any(type(app_id) is not int for app_id in ids)
+                   for name, ids in required_check_publishers.items())):
+        raise ValueError("normative required check publishers are invalid")
+    push_principals = normative.get("push_principals")
+    if (not isinstance(push_principals, dict) or not push_principals
+            or any(not isinstance(principal, str) or not principal or not isinstance(identity, str) or not identity
+                   for principal, identity in push_principals.items())
+            or len(set(push_principals.values())) != len(push_principals)):
+        raise ValueError("normative push principals are invalid")
+    routes_digest = hashlib.sha256(canonical(sorted(normative["routes"], key=lambda item: item["path"]))).hexdigest()
+    policy = {**template, "protected_paths": sorted(protected_routes),
+              "protected_routes": protected_routes, "protected_routes_sha256": routes_digest,
+              "required_check_publishers": required_check_publishers,
+              "push_principals": push_principals,
+              "auditor_id": "aao-auditor", "auditor_os_user": "aao-auditor",
               "developer_os_users": sorted(set(developer_users)), "trusted_auditor_revisions": [revision]}
     if "aao-auditor" in policy["developer_os_users"]:
         raise ValueError("the auditor account cannot be a developer account")
@@ -83,7 +120,10 @@ def build_registry(policy: dict, anchor: dict, *, auditor_models: dict[str, str]
         "policy_id": policy.get("policy_id", policy["version"]), "policy_sha256": anchor["policy_sha256"],
         "trusted_auditor_revisions": list(policy["trusted_auditor_revisions"]),
         "auditor_models": auditor_models, "author_models": author_models,
-        "protected_paths": {path: "R2" for path in policy["protected_paths"]},
+        "protected_routes": dict(policy["protected_routes"]),
+        "protected_routes_sha256": policy["protected_routes_sha256"],
+        "required_check_publishers": policy["required_check_publishers"],
+        "push_principals": dict(policy["push_principals"]),
     }
     assert not PER_PR_FIELDS & set(registry)
     return registry

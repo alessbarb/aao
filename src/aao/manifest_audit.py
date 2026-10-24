@@ -206,9 +206,13 @@ def attributed_implementers(anchor: dict[str, Any], candidate_sha: str) -> list[
         identities = data["candidates"][candidate_sha] if data.get("schema") == ATTRIBUTION_SCHEMA else None
     except (AuditError, OSError, ValueError, KeyError, TypeError, AttributeError):
         return []
-    if not isinstance(identities, list) or not all(isinstance(i, str) and i for i in identities):
+    principal_map = anchor.get("policy", {}).get("push_principals")
+    if (not isinstance(principal_map, dict) or not principal_map
+            or len(set(principal_map.values())) != len(principal_map)
+            or not isinstance(identities, list) or not identities
+            or not all(isinstance(i, str) and i in principal_map for i in identities)):
         return []
-    return sorted(set(identities))
+    return sorted({principal_map[principal] for principal in identities})
 
 
 def _ledger_keys(anchor: dict[str, Any], directory: Path) -> dict[str, Any]:

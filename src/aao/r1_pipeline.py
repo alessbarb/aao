@@ -161,18 +161,29 @@ def _pulls(client: Any, repository: str) -> list[dict[str, Any]]:
             and (p.get("base", {}).get("ref", "main") == "main")]
 
 
-def _check_passed(client: Any, repository: str, sha: str, name: str) -> bool:
+def _check_passed(client: Any, repository: str, sha: str, name: str,
+                  required_publishers: dict[str, list[int]]) -> tuple[bool, str]:
+    allowed = required_publishers.get(name)
+    if not isinstance(allowed, list) or not allowed or any(type(item) is not int for item in allowed):
+        return False, f"required check publisher registration missing: {name}"
     if hasattr(client, "check_conclusion"):
-        return client.check_conclusion(repository, sha, name) == "success"
+        # The legacy protocol exposes no publishing App identity, so cannot establish trust.
+        return False, f"required check publisher identity unavailable: {name}"
     owner, repo = repository.split("/", 1)
     checks = _request(client, "GET", f"/repos/{quote(owner, safe='')}/{quote(repo, safe='')}/commits/{sha}/check-runs")
     runs = [run for run in checks.get("check_runs", []) if isinstance(run, dict) and run.get("name") == name] \
         if isinstance(checks, dict) else []
     if not runs:
-        return False
+        return False, f"required check is absent: {name}"
     latest = max(runs, key=lambda run: (run.get("id", 0) if isinstance(run.get("id", 0), int) else 0,
                                         run.get("run_attempt", 0) if isinstance(run.get("run_attempt", 0), int) else 0))
-    return latest.get("status") == "completed" and latest.get("conclusion") == "success"
+    app = latest.get("app")
+    app_id = app.get("id") if isinstance(app, dict) else None
+    if type(app_id) is not int or app_id not in allowed:
+        return False, f"required check publisher is unauthorized: {name}"
+    if latest.get("status") != "completed" or latest.get("conclusion") != "success":
+        return False, f"required check is not successful: {name}"
+    return True, "passed"
 
 
 def _sha(value: Any) -> bool:
@@ -200,6 +211,13 @@ def integrator_tick(github: Any, git_remote: str, mirror: str | Path, inbox: str
         return [{"status": "failed", "reason": str(error)}]
 
     results: list[dict[str, Any]] = []
+    try:
+        trust_registry = json.loads(trust_sources.trust_registry.read_text())
+        required_publishers = trust_registry.get("required_check_publishers")
+        if not isinstance(required_publishers, dict):
+            raise TypeError("required check publisher registration missing")
+    except (OSError, ValueError, TypeError) as error:
+        return [{"status": "failed", "reason": f"required check publisher registration missing: {error}"}]
     for pr in pulls:
         number = pr.get("number")
         head = pr.get("head", {}).get("sha") if isinstance(pr.get("head"), dict) else None
@@ -273,8 +291,11 @@ def integrator_tick(github: Any, git_remote: str, mirror: str | Path, inbox: str
                 raise ValueError("auditor gate is non-conformant")
             state.update(status="gated", gate_id=gate_id)
             _atomic_json(state_path, state)
-            if not _check_passed(github, owner_repo, staged, "test") or not _check_passed(github, owner_repo, staged, "aao-audit"):
-                state.update(status="gated", reason="required checks are not successful on staged commit")
+            check_results = [_check_passed(github, owner_repo, staged, name, required_publishers)
+                             for name in ("test", "aao-audit")]
+            failed_check = next((reason for passed, reason in check_results if not passed), None)
+            if failed_check:
+                state.update(status="gated", reason=failed_check)
                 _atomic_json(state_path, state); results.append(state); continue
             signature = sig_path.read_text(encoding="ascii").strip()
             clock = now if callable(now) else lambda: now

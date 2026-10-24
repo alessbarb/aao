@@ -12,10 +12,13 @@ from pathlib import Path
 from typing import Any
 
 from aao import integration_authorization as authorization
-from aao.git_paths import changed_paths, path_matches_prefix
+from aao.git_paths import changed_paths
 from aao.independent_audit import AuditError
 from aao.manifest_audit import ANCHOR_PATH, load_anchor, read_protected, verify_promotion
 from aao.pr_conformity import _canonical
+from aao.protected_routes import classify, compare_copies, load_document, route_map
+
+TRUST_REGISTRY_PATH = Path("/srv/aao/trust/registry.json")
 
 
 def _git(repository: str, *args: str) -> str:
@@ -49,7 +52,7 @@ def _checks(report: dict[str, Any], report_dir: Path, auditor_uid: int) -> list[
 def issue_authorization(
     report_dir: Path, repo: str, pr_number: int, key: Path, output: Path, *,
     anchor_path: Path = ANCHOR_PATH, anchor_owner_uids: tuple[int, ...] = (0,),
-    now: datetime | None = None,
+    now: datetime | None = None, registry_path: Path | None = None,
 ) -> dict[str, Any]:
     """Verify the signed audit and emit an exact §6.1 authorization document."""
     anchor = load_anchor(anchor_path, anchor_owner_uids)
@@ -83,9 +86,17 @@ def issue_authorization(
     if auditor_id in implementers:
         raise AuditError("auditor is recused because they are an implementer")
     paths = changed_paths(manifest["repository"], base, candidate)
-    protected_prefixes = policy["protected_paths"]
-    risk_class = "R2" if any(path_matches_prefix(path, prefix)
-                              for path in paths for prefix in protected_prefixes) else "R1"
+    operational = {"protected_routes": policy.get("protected_routes"),
+                   "protected_routes_sha256": policy.get("protected_routes_sha256")}
+    try:
+        normative = load_document()
+        registry = json.loads(read_protected(registry_path or TRUST_REGISTRY_PATH, (0, *anchor_owner_uids)))
+        compare_copies(normative, registry, operational)
+    except (OSError, ValueError, TypeError) as error:
+        raise AuditError(str(error)) from error
+    risk_class = classify(paths, route_map(normative))
+    if risk_class != "R1":
+        raise AuditError(f"R1 autonomy refused: protected route classification is {risk_class}")
     enabled = policy.get("enabled_risk_classes", ["R1"])
     if not isinstance(enabled, list) or any(not isinstance(item, str) for item in enabled):
         raise AuditError("enabled risk classes are not pinned by policy")
@@ -94,10 +105,7 @@ def issue_authorization(
     if risk_class == "R3":  # Defensive invariant; this issuer never classifies R3.
         raise AuditError("R3 authorizations are never issued")
 
-    protected = {path: "R2" for path in sorted(protected_prefixes)}
-    protected_digest = hashlib.sha256(authorization.canonical([
-        {"path": path, "minimum_risk_class": protected[path]} for path in sorted(protected)
-    ])).hexdigest()
+    protected_digest = operational["protected_routes_sha256"]
     issued = now or datetime.now(UTC)
     if issued.tzinfo is None:
         raise ValueError("issuer clock must be timezone-aware")

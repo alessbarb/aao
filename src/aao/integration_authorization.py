@@ -2,13 +2,12 @@
 
 from __future__ import annotations
 
-import hashlib
 import json
 import subprocess
 from datetime import datetime, timedelta
 from typing import Any
 
-from aao.git_paths import path_matches_prefix
+from aao.protected_routes import ORDER, classify, load_document, route_map, routes_digest
 
 FIELDS = (
     "repo",
@@ -152,6 +151,13 @@ def validate(document: dict[str, Any], signature: str, state: dict[str, Any]) ->
             for entry in attribution_entries
         )
     )
+    push_principals = state.get("push_principals")
+    valid_push_map = (isinstance(push_principals, dict) and bool(push_principals)
+                      and all(isinstance(k, str) and k and isinstance(v, str) and v
+                              for k, v in push_principals.items()))
+    if (not valid_push_map or len(set(push_principals.values())) != len(push_principals)
+            or not authors.issubset(set(push_principals.values()))):
+        attribution_resolved = False
     if document.get("risk_class") == "R2":
         author_models = state.get("author_models", {})
         auditor_models = state.get("auditor_models", {})
@@ -224,22 +230,31 @@ def validate(document: dict[str, Any], signature: str, state: dict[str, Any]) ->
         reasons.append("actor attribution inconclusive")
     if state.get("ci_candidate_sha") != document.get("candidate_sha"):
         reasons.append("CI evidence is for another candidate")
-    protected = state.get("protected_paths")
-    canonical_paths = canonical([{"path": p, "minimum_risk_class": protected[p]} for p in sorted(protected)]) if isinstance(protected, dict) else None
-    if canonical_paths is None or hashlib.sha256(canonical_paths).hexdigest() != document.get("protected_paths_sha256"):
-        reasons.append("protected paths digest mismatch")
-    order = {"R1": 1, "R2": 2, "R3": 3}
+    protected = state.get("protected_routes")
+    try:
+        normative = load_document()
+        normative_routes = route_map(normative)
+        expected_digest = routes_digest(normative["routes"])
+        if (not isinstance(protected, dict) or protected != normative_routes
+                or routes_digest(protected) != expected_digest
+                or state.get("protected_routes_sha256") != expected_digest):
+            reasons.append("protected routes digest mismatch: registry")
+        if document.get("protected_paths_sha256") != expected_digest:
+            reasons.append("protected routes digest mismatch: operational")
+    except (OSError, ValueError, TypeError):
+        reasons.append("protected routes digest mismatch: normative")
     changed_paths = state.get("changed_paths")
     if not isinstance(changed_paths, list) or any(not isinstance(path, str) for path in changed_paths):
         reasons.append("changed paths unavailable")
         changed_paths = []
-    for path in changed_paths:
-        for rule, minimum in (protected or {}).items():
-            if path_matches_prefix(path, rule) and order.get(
-                document.get("risk_class"), 0
-            ) < order.get(minimum, 4):
+    if isinstance(protected, dict) and all(value in {"R1", "R2", "R3"} for value in protected.values()):
+        required_class = classify(changed_paths, protected)
+        actual_class = document.get("risk_class")
+        if ORDER.get(actual_class, 0) < ORDER[required_class]:
+            if actual_class == "R1":
+                reasons.append(f"R1 autonomy refused: protected route classification is {required_class}")
+            else:
                 reasons.append("protected path risk class insufficient")
-                break
     try:
         if now < issued:
             reasons.append("authorization issued in the future")

@@ -9,6 +9,7 @@ from pathlib import Path
 import pytest
 
 from aao import auditor_dispatch, authorization_issuer, integrator, supervisor_service
+from aao.protected_routes import load_document, route_map, routes_digest
 
 
 def test_integrator_heartbeat_sequence_is_written_under_integrator_state(tmp_path, monkeypatch):
@@ -82,11 +83,21 @@ def test_issued_authorization_files_are_group_readable_not_writable(tmp_path, mo
               "blocking_findings": [], "custody_problems": [], "audit_checks": {},
               "limitations": [], "findings": [], "assurance_level": "A"}
     raw = json.dumps(report).encode()
+    route_doc = load_document()
+    route_copy = route_map(route_doc)
     anchor = {"auditor_uid": os.getuid(), "policy": {"protected_paths": [],
+              "protected_routes": route_copy,
+              "protected_routes_sha256": routes_digest(route_doc["routes"]),
               "enabled_risk_classes": ["R1"], "auditors": {"auditor": "auditor-key"},
               "version": "v1", "policy_id": "v1"}, "policy_sha256": "e" * 64}
     monkeypatch.setattr(authorization_issuer, "load_anchor", lambda *args: anchor)
-    monkeypatch.setattr(authorization_issuer, "read_protected", lambda *args: raw)
+    registry = {"protected_routes": route_copy,
+                "protected_routes_sha256": routes_digest(route_doc["routes"])}
+    registry_path = tmp_path / "registry.json"
+    registry_path.write_text(json.dumps(registry))
+    monkeypatch.setattr(authorization_issuer, "TRUST_REGISTRY_PATH", registry_path)
+    monkeypatch.setattr(authorization_issuer, "read_protected",
+                        lambda path, *_args: registry_path.read_bytes() if path == registry_path else raw)
     monkeypatch.setattr(authorization_issuer, "verify_promotion", lambda *args, **kwargs: (True, ()))
     monkeypatch.setattr(authorization_issuer, "changed_paths", lambda *args: [])
     monkeypatch.setattr(authorization_issuer.authorization, "sign", lambda *args: "test-signature")
@@ -100,8 +111,8 @@ def test_issued_authorization_files_are_group_readable_not_writable(tmp_path, mo
         assert mode == 0o640 and mode & 0o022 == 0
 
 
-def test_attribution_records_github_push_and_pr_author_only_after_api_success(tmp_path):
-    sha_push, sha_pr = "a" * 40, "b" * 40
+def test_attribution_records_only_registry_mapped_github_push_after_api_success(tmp_path):
+    sha_push = "a" * 40
 
     class Client:
         def installation_token(self, owner, repo):
@@ -109,18 +120,17 @@ def test_attribution_records_github_push_and_pr_author_only_after_api_success(tm
 
         def request(self, method, path):
             assert method == "GET"
-            if "/events?" in path:
-                body = [{"type": "PushEvent", "actor": {"login": "pusher"},
-                         "payload": {"commits": [{"sha": sha_push}]}}]
-            else:
-                body = [{"user": {"login": "author"}, "head": {"sha": sha_pr}}]
+            assert "/events?" in path
+            body = [{"type": "PushEvent", "actor": {"login": "aao-impl-codex[bot]"},
+                     "payload": {"commits": [{"sha": sha_push}]}}]
             return type("Response", (), {"status": 200, "body": body})()
 
     path = tmp_path / "attribution.json"
-    config = {"repository": "owner/repo", "attribution_path": str(path)}
-    assert supervisor_service.attribution(config, Client()) == 2
+    config = {"repository": "owner/repo", "attribution_path": str(path),
+              "push_principals": {"aao-impl-codex[bot]": "codex"}}
+    assert supervisor_service.attribution(config, Client()) == 1
     data = json.loads(path.read_text())
-    assert data["candidates"] == {sha_push: ["pusher"], sha_pr: ["author"]}
+    assert data["candidates"] == {sha_push: ["aao-impl-codex[bot]"]}
 
     class Failed(Client):
         def request(self, method, path):

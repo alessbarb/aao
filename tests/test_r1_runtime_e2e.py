@@ -13,6 +13,7 @@ from test_manifest_audit import ok_runner
 from aao import auditor_dispatch, r1_pipeline
 from aao.git_paths import changed_paths, path_matches_prefix
 from aao.integrator import TrustSources
+from aao.protected_routes import load_document, route_map, routes_digest
 
 
 @pytest.fixture
@@ -50,6 +51,13 @@ def _fixture(tmp_path):
     gh = FakeGitHub(base, head)
     inbox, reports, state = (tmp_path / name for name in ("inbox", "reports", "state"))
     trust = TrustSources(*(tmp_path / f"trust-{i}" for i in range(7)))
+    routes = load_document()
+    trust.trust_registry.write_text(json.dumps({
+        "protected_routes": route_map(routes),
+        "protected_routes_sha256": routes_digest(routes["routes"]),
+        "required_check_publishers": {"aao-audit": [5448107], "test": [15368]},
+        "push_principals": routes["push_principals"],
+    }))
     return remote, mirror, gh, inbox, reports, state, trust, base, head
 
 
@@ -65,8 +73,13 @@ class FakeGitHub:
         return [{"number": 1, "state": "open", "base": {"ref": "main", "sha": self.base},
                  "head": {"sha": self.head}}]
 
-    def check_conclusion(self, repository, sha, name):
-        return self.checks.get((sha, name))
+    def request(self, method, path, body=None):
+        sha = path.split("/commits/", 1)[1].split("/check-runs", 1)[0]
+        runs = [{"id": index, "name": name, "status": "completed", "conclusion": conclusion,
+                 "app": {"id": 5448107 if name == "aao-audit" else 15368}}
+                for index, ((candidate, name), conclusion) in enumerate(self.checks.items(), 1)
+                if candidate == sha]
+        return {"check_runs": runs}
 
     def create_check_run(self, repository, name, sha, conclusion, detail):
         self.published.append((name, sha, conclusion))
@@ -225,6 +238,13 @@ def test_real_r1_authorizes_and_promotes_over_alternating_ticks(tmp_path, audit_
     _run("git", "clone", "--mirror", str(bare), str(mirror))
     output = tmp_path / "authorization"
     trust = TrustSources(*(tmp_path / f"placeholder-{index}" for index in range(7)))
+    routes = load_document()
+    trust.trust_registry.write_text(json.dumps({
+        "protected_routes": route_map(routes),
+        "protected_routes_sha256": routes_digest(routes["routes"]),
+        "required_check_publishers": {"aao-audit": [5448107], "test": [15368]},
+        "push_principals": routes["push_principals"],
+    }))
     inbox, reports, state = (tmp_path / name for name in ("pipeline-inbox", "pipeline-reports", "pipeline-state"))
 
     class PipelineGitHub:
@@ -239,8 +259,13 @@ def test_real_r1_authorizes_and_promotes_over_alternating_ticks(tmp_path, audit_
         def list_open_pull_requests(self, repository, *, base):
             return self.pull_requests
 
-        def check_conclusion(self, repository, sha, name):
-            return self.checks.get((sha, name))
+        def request(self, method, path, body=None):
+            sha = path.split("/commits/", 1)[1].split("/check-runs", 1)[0]
+            runs = [{"id": index, "name": name, "status": "completed", "conclusion": conclusion,
+                     "app": {"id": 5448107 if name == "aao-audit" else 15368}}
+                    for index, ((candidate, name), conclusion) in enumerate(self.checks.items(), 1)
+                    if candidate == sha]
+            return {"check_runs": runs}
 
         def create_check_run(self, repository, name, sha, conclusion, detail):
             self.published.append((name, sha, conclusion))
