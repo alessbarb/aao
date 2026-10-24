@@ -140,7 +140,7 @@ class GitHubAppClient:
             parsed = raw.decode("utf-8", errors="replace")[:2000]
         return APIResponse(status, parsed, headers)
 
-    def installation_token(self, owner: str, repo: str) -> str:
+    def installation_token(self, owner: str, repo: str, *, repository_names: bool = True) -> str:
         jwt = create_jwt(self.app_id, self._key_path)
         repo_path = "/repos/" + urllib.parse.quote(owner, safe="") + "/" + urllib.parse.quote(repo, safe="") + "/installation"
         installation = self._request("GET", repo_path, token=jwt)
@@ -149,8 +149,9 @@ class GitHubAppClient:
         installation_id = installation.body.get("id")
         if not isinstance(installation_id, int):
             raise GitHubAuthError("installation lookup returned no installation id")
+        body = {"repository_names": [repo]} if repository_names else {}
         response = self._request("POST", f"/app/installations/{installation_id}/access_tokens", token=jwt,
-                                 body={"repository_names": [repo]})
+                                 body=body)
         if response.status != 201 or not isinstance(response.body, dict) or not response.body.get("token"):
             raise GitHubAuthError(f"installation token request failed with HTTP {response.status}")
         self._installation_token = str(response.body["token"])

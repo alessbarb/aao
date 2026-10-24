@@ -140,6 +140,17 @@ def test_token_is_memory_only_and_not_printed(tmp_path, monkeypatch, api_server,
     assert FakeGitHub.calls[-1][1] == "/installation/token"
 
 
+def test_installation_token_can_be_unrestricted_for_scope_audit(tmp_path, monkeypatch, api_server):
+    key = tmp_path / "app.pem"
+    key.write_text("not used for this API token test")
+    client = object.__new__(auth.GitHubAppClient)
+    client.app_id, client._key_path, client.api_base, client.timeout = 77, key, api_server, 5
+    client._installation_token = None
+    monkeypatch.setattr(auth, "create_jwt", lambda *_: "jwt-for-test")
+    assert client.installation_token("org", "trial", repository_names=False) == "never-store-this-token"
+    assert json.loads(FakeGitHub.calls[1][3]) == {}
+
+
 def test_rejects_wrong_uid(monkeypatch):
     monkeypatch.setattr(trial, "ROLE_NAMES", {"aao-impl-codex"})
     monkeypatch.setattr(trial.pwd, "getpwnam", lambda _role: type("Entry", (), {"pw_uid": os.getuid() + 1000})())
@@ -360,25 +371,28 @@ def test_a01_implementer_passes_only_server_push_denial_and_unchanged_main(monke
     assert evidence[1]["server_rejected"] is True
 
 
-def test_a04_stale_lease_passes_only_server_rejection_and_moved_main_intact(monkeypatch):
+def test_a04_never_claims_server_rejection_from_stale_lease_client_result(monkeypatch):
     old, moved = "a" * 40, "b" * 40
     client = RefClient({"/repos/org/trial/git/ref/heads/main": [
         _ref_reply(old), _ref_reply(moved), _ref_reply(moved),
     ]})
     pushes = iter([
         _push_record("local:refs/heads/aao-trial/stale-lease", "To github\n * [new branch]", code=0, server=False),
-        _push_record("old:refs/heads/main", "! [remote rejected] old -> main (stale lease rejected)")])
+        _push_record("old:refs/heads/main", "! [remote rejected] old -> main (non-fast-forward)")])
     monkeypatch.setattr(trial.subprocess, "run", lambda args, **_kw: type(
         "Result", (), {"stdout": moved + "\n" if args[1:3] == ["rev-parse", "HEAD"] else ""})())
     monkeypatch.setattr(trial, "_git_push", lambda *_a, **_k: next(pushes))
     monkeypatch.setattr(trial, "_wait_required_checks", lambda *_a: (True, "green"))
     original_api = trial._api
-    monkeypatch.setattr(trial, "_api", lambda c, m, p, b=None: (
-        original_api(c, m, p, b) if m == "GET" else {"method": m, "path": p, "status": 200,
-        "response": {"data": {"updateRefs": {"refs": [{"name": "main"}]}}}}))
+    def fake_api(c, method, path, body=None):
+        if method == "GET" and path == "/repos/org/trial":
+            return {"method": method, "path": path, "status": 200, "response": {"node_id": "R_kgDOtrial"}}
+        return original_api(c, method, path, body) if method == "GET" else {"method": method, "path": path, "status": 200,
+            "response": {"data": {"updateRefs": {"refs": [{"name": "main"}]}}}}
+    monkeypatch.setattr(trial, "_api", fake_api)
     status, _, evidence = trial.run_test("A-04", "org", "trial", "aao-integrator", client)
-    assert status == "PASS"
-    assert evidence[-2]["server_rejected"] is True
+    assert status == "NOT RUN"
+    assert evidence[-1]["server_side_demonstrated"] is False
 
 
 def test_p3_01_ceo_pass_requires_restrict_updates_attribution(monkeypatch):
@@ -696,21 +710,34 @@ def test_main_moving_test_fails_without_green_candidate_checks(monkeypatch):
 def test_equivalence_is_pending_never_pass_and_rejects_wrong_role(monkeypatch):
     class EquivalenceClient(DummyClient):
         app_id = 77
+        _installation_id = 901
+        selection = "selected"
         def app_request(self, method, path):
-            assert method == "GET" and path == "/repos/autoaiorg/aao-governance-trial/installation"
-            return auth.APIResponse(404, {"message": "Not Found"}, {})
-        def installation_token(self, *_args):
+            if path == "/repos/autoaiorg/aao-governance-trial/installation":
+                return auth.APIResponse(404, {"message": "Not Found"}, {})
+            assert method == "GET" and path == "/app/installations/901"
+            return auth.APIResponse(200, {"repository_selection": self.selection}, {})
+        def installation_token(self, *args, **kwargs):
+            self.token_options = getattr(self, "token_options", []) + [kwargs]
             return "test"
+        def revoke(self):
+            return auth.APIResponse(204, {}, {})
     monkeypatch.setenv("AAO_GITHUB_TRIAL_FORKS", "autoaiorg/aao-codex,autoaiorg/aao-trial-codex")
     monkeypatch.setenv("AAO_GITHUB_TRIAL_FORK", "autoaiorg/aao-trial-codex")
     monkeypatch.setattr(trial.subprocess, "run", lambda *_a, **_k: type("Result", (), {"stdout": "b" * 40})())
     monkeypatch.setattr(trial, "_git_push", lambda *_a, **_k: {"status": 0, "exit_code": 0})
-    client = EquivalenceClient([(200, {"repositories": [
-        {"full_name": "autoaiorg/aao-codex"},
-        {"full_name": "autoaiorg/aao-trial-codex"},
-    ]})])
+    client = EquivalenceClient([
+        (200, {"total_count": 2, "repositories": [{"full_name": "autoaiorg/aao-codex"}]}),
+        (200, {"total_count": 2, "repositories": [{"full_name": "autoaiorg/aao-trial-codex"}]}),
+    ])
     status, _, _ = trial.run_test("EQUIVALENCE", "autoaiorg", "aao-governance-trial", "aao-impl-codex", client)
     assert status == "EQUIVALENCE-PENDING" and status != "PASS"
+    assert client.token_options == [{"repository_names": False}, {}]
+    assert [call[1] for call in client.calls] == ["/installation/repositories?per_page=100&page=1", "/installation/repositories?per_page=100&page=2"]
+    unselected = EquivalenceClient([])
+    unselected.selection = "all"
+    status, _, _ = trial.run_test("EQUIVALENCE", "autoaiorg", "aao-governance-trial", "aao-impl-codex", unselected)
+    assert status == "FAIL" and not unselected.calls
     status, _, _ = trial.run_test("EQUIVALENCE", "autoaiorg", "aao-governance-trial", "aao-integrator", DummyClient([]))
     assert status == "NOT RUN"
 
@@ -730,6 +757,7 @@ def test_promotion_phase_requires_staged_sha_green_checks_and_cas(monkeypatch):
         (200, {"object": {"sha": "d" * 40}}),
         (200, {"check_runs": [{"name": "aao-audit", "status": "completed", "conclusion": "success", "app": {"id": 77}}, {"name": "test", "status": "completed", "conclusion": "success", "app": {"id": 1}}]}),
         (200, {"object": {"sha": "d" * 40}}),
+        (200, {"node_id": "R_kgDOtrial"}),
         (200, {"data": {"updateRefs": {"refs": [{"name": "refs/heads/main"}]}}}),
         (200, {"object": {"sha": "d" * 40}}),
         (200, {"sha": "d" * 40, "tree": {"sha": "c" * 40}, "parents": [{"sha": "a" * 40}, {"sha": "b" * 40}]}),
@@ -738,4 +766,11 @@ def test_promotion_phase_requires_staged_sha_green_checks_and_cas(monkeypatch):
     status, _, evidence = trial.run_test("A-05", "org", "trial", "aao-integrator", client)
     assert status == "PASS"
     assert any(method == "POST" and path == "/graphql" for method, path, _ in client.calls)
+    mutation = next(body for method, path, body in client.calls if method == "POST" and path == "/graphql")
+    assert mutation["variables"]["input"]["repositoryId"] == "R_kgDOtrial"
     assert any(item.get("sha") == "d" * 40 and item.get("status") == "green" for item in evidence)
+
+
+def test_all_update_refs_inputs_include_repository_id():
+    source = (Path(__file__).parents[1] / "src/aao/github_trial.py").read_text()
+    assert source.count('"refUpdates": [{"name": "refs/heads/main"') == source.count('"repositoryId": repository_id, "refUpdates": [{"name": "refs/heads/main"')
