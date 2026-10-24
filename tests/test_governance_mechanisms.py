@@ -410,6 +410,7 @@ def test_authorization_rejects_other_policy_hash(tmp_path):
 
 
 @pytest.mark.parametrize("field,value", [("merge_method", "squash"), ("expected_parents", ["other", "candidate"])])
+@pytest.mark.nt("NT-03-4")
 def test_authorization_rejects_unauthorized_merge_method_or_parents(tmp_path, field, value):
     _, _, d, s, _ = _auth_fixture(tmp_path)
     d[field] = value
@@ -452,6 +453,7 @@ def test_authorization_rejects_missing_class_check_registration(tmp_path):
      ([{"sha": "candidate", "principal": "unregistered", "source": "ledger", "evidence_sha256": "x"}], {}),
      ([{"sha": "candidate", "principal": "author", "source": "ledger", "evidence_sha256": "x"}], {})],
 )
+@pytest.mark.nt("NT-02-9")
 def test_authorization_rejects_empty_or_unresolved_attribution(tmp_path, attribution, author_models):
     _, _, d, s, _ = _auth_fixture(tmp_path)
     d["attribution"] = attribution
@@ -460,6 +462,7 @@ def test_authorization_rejects_empty_or_unresolved_attribution(tmp_path, attribu
     assert "actor attribution inconclusive" in validate(d, sig, s)
 
 
+@pytest.mark.nt("NT-02-8")
 def test_authorization_rejects_recused_auditor_by_attributed_identity_not_git_metadata(tmp_path):
     _, _, d, s, sig = _auth_fixture(tmp_path)
     # Git author/committer metadata is not consulted; signed attributed auditor is.
@@ -494,6 +497,8 @@ def test_authorization_rejects_other_repo_or_pr(tmp_path):
     assert "repository or PR mismatch" in validate(d, sig, {**s, "pr_number": 8})
 
 
+@pytest.mark.nt("NT-02-6")
+@pytest.mark.nt("NT-02-7")
 def test_ledger_detects_edit_reorder_and_truncation_with_external_anchor(tmp_path):
     private, public = keypair(tmp_path)
     f = tmp_path / "ledger"
@@ -1361,6 +1366,7 @@ def test_ledger_new_veto_with_reused_id_stays_active_after_old_revocation(tmp_pa
     assert new["hash"] in {row["hash"] for row in active_vetoes(verify(ledger, keys), keys)}
 
 
+@pytest.mark.nt("NT-07-1")
 def test_integrator_rejects_replayed_heartbeat_sequence(tmp_path):
     from aao.integrator import _heartbeat
     from aao.supervisor import signed_heartbeat
@@ -1379,6 +1385,7 @@ def test_integrator_rejects_replayed_heartbeat_sequence(tmp_path):
         "supervisor_public_key": str(public)}, now, sequence)
 
 
+@pytest.mark.nt("NT-07-1")
 def test_integrator_rejects_heartbeat_older_than_one_hour_even_if_registry_allows_more(tmp_path):
     from aao.integrator import _heartbeat
     from aao.supervisor import signed_heartbeat
@@ -1395,6 +1402,7 @@ def test_integrator_rejects_heartbeat_older_than_one_hour_even_if_registry_allow
         sequence_path=tmp_path / "integrator" / "heartbeat.sequence")
 
 
+@pytest.mark.nt("NT-07-1")
 def test_integrator_rejects_heartbeat_issued_in_the_future(tmp_path):
     from aao.integrator import _heartbeat
     from aao.supervisor import signed_heartbeat
@@ -1421,6 +1429,22 @@ def test_integrator_rejects_pending_ra01_or_ra07(tmp_path):
         sources.trust_registry.write_text(json.dumps(registry))
         _assert_integrator_rejects_without_main_change(
             promote, repo, bare, auth, signature, sources, "required RA status pending")
+
+
+@pytest.mark.nt("NT-07-1")
+def test_integrator_rejects_when_heartbeat_file_is_missing(tmp_path):
+    promote, repo, bare, _base, _head, _tree, auth, sources, signature = _git_fixture(tmp_path)
+    sources.heartbeat.unlink()
+    main_before = _remote_main(bare)
+    with pytest.raises(FileNotFoundError, match="heartbeat"):
+        promote(
+            repo, "origin", auth, signature, sources,
+            identity_provider=_integrator_identity(),
+            now=lambda: __import__("datetime").datetime(
+                2026, 1, 1, 1, tzinfo=__import__("datetime").timezone.utc
+            ),
+        )
+    assert _remote_main(bare) == main_before
 
 
 def test_authorization_rejects_protected_path_change_below_minimum_class(tmp_path):
@@ -1597,6 +1621,7 @@ def test_integrator_freezes_when_published_parents_differ(tmp_path):
     assert _remote_main(bare) == auth["candidate_sha"]
 
 
+@pytest.mark.nt("NT-02-6")
 def test_ledger_verify_fails_on_edited_intermediate_entry(tmp_path):
     private, public = keypair(tmp_path)
     ledger = tmp_path / "edited-intermediate.jsonl"
@@ -1628,6 +1653,7 @@ def test_supervisor_flags_merge_pushed_by_non_integrator_identity(tmp_path):
     assert any(event["commit"] == sha and event["identity_mismatch"] for event in events)
 
 
+@pytest.mark.nt("NT-07-1")
 def test_integrator_blocks_on_heartbeat_with_invalid_signature(tmp_path):
     promote, repo, bare, _base, _head, _tree, auth, sources, signature = _git_fixture(tmp_path)
     event = json.loads(sources.heartbeat.read_text())
@@ -1708,6 +1734,7 @@ def test_integrator_blocks_when_remote_main_moves_without_local_ref_change(tmp_p
     )
 
 
+@pytest.mark.nt("NT-03-4")
 def test_integrator_blocks_on_wrong_integrator_identity(tmp_path):
     promote, repo, bare, _base, _head, _tree, auth, sources, signature = _git_fixture(tmp_path)
 
@@ -1721,6 +1748,18 @@ def test_integrator_blocks_on_pending_ra_status(tmp_path):
     promote, repo, bare, _base, _head, _tree, auth, sources, signature = _git_fixture(tmp_path)
     registry = json.loads(sources.trust_registry.read_text())
     registry["ra_status"]["RA-03"] = "PENDING"
+    sources.trust_registry.write_text(json.dumps(registry))
+
+    _assert_integrator_rejects_without_main_change(
+        promote, repo, bare, auth, signature, sources, "required RA status pending"
+    )
+
+
+@pytest.mark.nt("NT-09-3")
+def test_integrator_rejects_when_ra09_evidence_is_not_pass(tmp_path):
+    promote, repo, bare, _base, _head, _tree, auth, sources, signature = _git_fixture(tmp_path)
+    registry = json.loads(sources.trust_registry.read_text())
+    registry["ra_status"]["RA-09"] = "PENDING"
     sources.trust_registry.write_text(json.dumps(registry))
 
     _assert_integrator_rejects_without_main_change(
@@ -1747,6 +1786,7 @@ def test_integrator_revalidates_remote_and_authority_inputs(tmp_path):
     with pytest.raises(ValueError): promote(r,"origin",d,sig,sources,identity_provider=type("I",(),{"__call__":lambda self:"integrator","push_identity":lambda self,*a:True})())
 
 
+@pytest.mark.nt("NT-03-1")
 def test_integrator_aborts_when_main_moves_between_validation_and_push(tmp_path):
     promote, repo, bare, _base, _head, _tree, auth, sources, signature = _git_fixture(tmp_path)
     other = tmp_path / "other"
@@ -1838,6 +1878,7 @@ def test_integrator_rejects_stale_base(tmp_path):
         )
 
 
+@pytest.mark.nt("NT-03-5")
 def test_integrator_rejects_tree_mismatch(tmp_path):
     promote, repo, _bare, _base, _head, _tree, auth, sources, _signature = _git_fixture(tmp_path)
     auth["merge_result_tree_sha"] = "wrong-tree"
@@ -1865,6 +1906,7 @@ def test_integrator_refuses_when_frozen(tmp_path):
     with pytest.raises(RuntimeError,match="frozen"): promote(r,"origin",d,sig,sources,identity_provider=type("I",(),{"__call__":lambda self:"integrator","push_identity":lambda self,*a:True})())
 
 
+@pytest.mark.nt("NT-03-2")
 def test_integrator_post_publish_divergence_freezes(tmp_path):
     promote,r,bare,_,_,_,d,sources,sig=_git_fixture(tmp_path)
     def rewrite():
@@ -1873,6 +1915,43 @@ def test_integrator_post_publish_divergence_freezes(tmp_path):
     with pytest.raises(RuntimeError,match="post-publication incident"):
         promote(r,"origin",d,sig,sources,identity_provider=type("I",(),{"__call__":lambda self:"integrator","push_identity":lambda self,*a:True})(),now=lambda: __import__("datetime").datetime(2026,1,1,1,tzinfo=__import__("datetime").timezone.utc),after_push=rewrite)
     assert sources.freeze.exists()
+
+
+@pytest.mark.nt("NT-09-4")
+def test_integrator_records_incident_on_ambiguous_push_with_divergent_remote(
+    tmp_path, monkeypatch
+):
+    from types import SimpleNamespace
+
+    from aao.governance_ledger import verify
+
+    promote, repo, bare, _base, _head, _tree, auth, sources, signature = _git_fixture(tmp_path)
+    push_calls = []
+
+    def ambiguous_push(*_args, **_kwargs):
+        # Model a lost response after an unrelated ref update. The integrator
+        # must observe the discrepancy, freeze, and record it without retrying.
+        push_calls.append(1)
+        subprocess.run(["git", "--git-dir", str(bare), "update-ref", "refs/heads/main",
+                        auth["candidate_sha"]], check=True)
+        return SimpleNamespace(returncode=1, stderr="connection reset after send")
+
+    monkeypatch.setattr("aao.integrator._conditional_push", ambiguous_push)
+    with pytest.raises(RuntimeError, match="post-publication incident; integrator frozen"):
+        promote(
+            repo, "origin", auth, signature, sources,
+            identity_provider=_integrator_identity(),
+            now=lambda: __import__("datetime").datetime(
+                2026, 1, 1, 1, tzinfo=__import__("datetime").timezone.utc
+            ),
+        )
+
+    assert _remote_main(bare) == auth["candidate_sha"]
+    assert len(push_calls) == 1
+    assert sources.freeze.exists()
+    rows = verify(sources.ledger, json.loads(sources.trust_registry.read_text())["ledger_keys"])
+    assert rows[-1]["type"] == "incident"
+    assert "differs from base" in rows[-1]["detail"]
 
 
 def test_integrator_freezes_and_records_incident_when_remote_ref_deleted_after_push(tmp_path):

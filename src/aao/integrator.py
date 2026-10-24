@@ -369,7 +369,46 @@ def promote(repo: Path, remote: str, auth: dict[str, Any], signature: str,
         git_token = git_token()
     result = _conditional_push(repo, remote_url, ref, base, commit, git_token)
     if result.returncode:
-        raise RuntimeError("conditional push rejected; no fallback: " + result.stderr)
+        # A client/network error does not prove that the server rejected the
+        # update. Read the ref before reporting failure; never try another
+        # publication route after an ambiguous response.
+        try:
+            listing = subprocess.run(["git", "ls-remote", remote_url, ref], check=True,
+                                     capture_output=True, text=True).stdout.splitlines()
+            observed_sha = next((parts[0] for line in listing
+                                 if len(parts := line.split()) == 2 and parts[1] == ref), None)
+        except (OSError, subprocess.CalledProcessError) as error:
+            observed_sha = None
+            verify_error = f"state verification failed: {type(error).__name__}: {error}"
+        else:
+            verify_error = ""
+        # A force-with-lease rejection explicitly identifies a stale expected
+        # value; that is a known CAS failure, not an ambiguous transport result.
+        if observed_sha != base and "stale info" in result.stderr.lower():
+            raise RuntimeError("conditional push rejected; no fallback: " + result.stderr)
+        if observed_sha == base:
+            raise RuntimeError("conditional push rejected; no fallback: " + result.stderr)
+        if observed_sha != commit:
+            detail = ("ambiguous push response; " + verify_error if verify_error else
+                      f"ambiguous push response; observed ref {observed_sha!r} differs from "
+                      f"base {base} and intended {commit}")
+            trust_sources.freeze.write_text(
+                f"{detail}; intended_sha={commit}; observed_sha={observed_sha}\n"
+            )
+            try:
+                incident = append(trust_sources.ledger, {
+                    "type": "incident", "id": f"ambiguous-push-{commit}",
+                    "target_ref": ref, "detail": detail, "intended_sha": commit,
+                    "observed_sha": observed_sha,
+                    "intended_tree_sha": auth["merge_result_tree_sha"],
+                    "observed_tree_sha": None, "intended_parents": auth["expected_parents"],
+                    "observed_parents": None,
+                }, registry["integrator_key_id"], str(trust_sources.integrator_private_key),
+                    ledger_keys, rows[-1]["hash"] if rows else "0" * 64)
+                trust_sources.ledger_anchor.write_text(incident["hash"])
+            except Exception as ledger_error:
+                raise RuntimeError(f"post-publication incident; frozen; ledger recording failed: {ledger_error}") from ledger_error
+            raise RuntimeError("post-publication incident; integrator frozen")
     expected_tree = auth["merge_result_tree_sha"]
     observed: dict[str, Any] = {"sha": None, "tree_sha": None, "parents": None}
     try:
