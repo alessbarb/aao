@@ -1,4 +1,4 @@
-#!/bin/bash
+#!/bin/bash -p
 # Bootstrap an AAO host from zero, by chaining the reviewed pieces in this repository.
 #
 # Run ONLY as root, from a root-owned clone checked out at the exact REV (see
@@ -19,9 +19,9 @@
 # Default is a dry run that prints what it would do. Fail closed. Phases 1-4 are re-runnable and never
 # regenerate an existing key; the trust-root phase runs only on a host with no trust-root artifact at all.
 set -euo pipefail
-# Root never resolves commands through the caller's environment: fixed PATH, no inherited functions,
-# default IFS. Unconditional (no flag or variable can skip it).
-unset -f $(compgen -A function) 2>/dev/null || true
+# Privileged mode (-p, in the shebang) makes bash ignore BASH_ENV/ENV, SHELLOPTS and every function
+# in the environment before this line runs. Then a fixed PATH and IFS; nothing can skip this.
+[[ $- == *p* ]] || { echo "FAIL: run as $0 (privileged mode), not through another shell" >&2; exit 1; }
 export PATH=/usr/sbin:/usr/bin:/sbin:/bin HOME=/root LANG=C.UTF-8; IFS=$' \t\n'; hash -r
 unset BASH_ENV ENV CDPATH GLOBIGNORE PYTHONPATH PYTHONHOME PYTHONSTARTUP LD_PRELOAD LD_LIBRARY_PATH
 umask 022
@@ -196,10 +196,14 @@ PY
            /srv/aao/frozen/aao-integrator/tree /etc/aao-audit/ledger.anchor /etc/tmpfiles.d/aao-trust-root.conf \
            /var/lib/aao-supervisor/keys/supervisor-ed25519.pem /var/lib/aao-integrator/integrator-ed25519.pem \
            /srv/aao/trust/keys/aao-supervisor-ed25519.pub /srv/aao/trust/keys/aao-integrator-ed25519.pub \
-           /var/lib/aao-trust-verify/status.json "$SRC"/deploy/systemd/*; do
+           /var/lib/aao-trust-verify/status.json /var/lib/aao-auditor/ledger/governance.jsonl "$SRC"/deploy/systemd/*; do
     [[ $f == "$SRC"/* ]] && f=/etc/systemd/system/${f##*/}
     [[ ! -e $f ]] || die "$f already exists: the trust-root phase only runs on a host without one (rotation is a separate procedure)"
   done
+  # Every directory the trust-root tmpfiles manage must be absent or empty (no leftover data).
+  while read -r d; do
+    [[ ! -e $d ]] || [[ -d $d && ! -L $d && -z $(ls -A "$d") ]] || die "$d is not empty: not a fresh host"
+  done < <(awk '$1 == "d" {print $2}' "$SRC/deploy/tmpfiles.d/aao-trust-root.conf")
   for role in aao-auditor aao-supervisor aao-integrator; do
     f=/srv/aao/frozen/$role
     run g clone -q --no-hardlinks "$SRC" "$f/tree"
