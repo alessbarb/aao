@@ -413,8 +413,11 @@ def test_unattributed_candidate_is_provisional_even_with_valid_custody(env):
 def test_manifest_and_git_metadata_do_not_authenticate_the_implementer(env):
     path, data = manifest(env, producer="forged-producer")
     # Git author and committer metadata are mutable candidate claims too.
+    previous = git(env["repo"], "rev-parse", "--abbrev-ref", "HEAD")
+    git(env["repo"], "checkout", "-q", "candidate")
     git(env["repo"], "-c", "user.name=forged-committer", "-c", "user.email=forged-committer@example.invalid",
         "commit", "--allow-empty", "--amend", "--no-edit", "--author=forged-author <forged-author@example.invalid>")
+    git(env["repo"], "checkout", "-q", previous)
     candidate = git(env["repo"], "rev-parse", "candidate")
     data["candidate_sha"] = candidate
     data["candidate_tree"] = git(env["repo"], "rev-parse", f"{candidate}^{{tree}}")
